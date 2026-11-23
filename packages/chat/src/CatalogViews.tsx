@@ -1,13 +1,15 @@
 import { Button, Tooltip } from '@streaik/themes';
+import type { IconName } from '@streaik/themes';
 import type { CatalogModel } from '@streaik/gateway';
 import { useId, useState } from 'react';
 import type { ReactNode } from 'react';
 import { CatalogMark } from './CatalogMark';
 import { ChatIcon } from './ChatIcon';
 import directory from './provider-directory.json';
-import { useAppTranslation } from './i18n';
+import { browserNumberFormat, useAppTranslation } from './i18n';
 
 const pageSize = 48;
+const number = browserNumberFormat();
 const providerLinks = [
   ['homepage', 'website', 'Website'], ['docs', 'docs', 'Docs'], ['pricing', 'pricing', 'Pricing'],
   ['termsOfService', 'terms', 'Terms'], ['privacyPolicy', 'privacy', 'Privacy'], ['console', 'console', 'Console'],
@@ -23,10 +25,12 @@ const categories = new Map([
   ['model_provider', 'Model builder'], ['gateway_router', 'Gateway'], ['inference_compute', 'Inference & compute'],
   ['media_voice', 'Media & voice'], ['search_data', 'Search & data'], ['app_tools', 'Apps & tools'],
 ]);
-const types = new Map([
-  ['language', 'Language'], ['image', 'Image'], ['decision', 'Decision'], ['reranking', 'Reranking'], ['realtime', 'Realtime'],
-  ['speech', 'Speech'], ['transcription', 'Transcription'], ['video', 'Video'], ['embedding', 'Embedding'],
-  ['audio', 'Audio'], ['moderation', 'Moderation'], ['other', 'Other'],
+const otherType = ['Other', 'shapes'] as const;
+const types = new Map<string, readonly [label: string, icon: IconName]>([
+  ['language', ['Language', 'language']], ['image', ['Image', 'images']], ['decision', ['Decision', 'decision']],
+  ['reranking', ['Reranking', 'ranking']], ['realtime', ['Realtime', 'realtime']], ['speech', ['Speech', 'mic']],
+  ['transcription', ['Transcription', 'transcription']], ['video', ['Video', 'videos']], ['embedding', ['Embedding', 'embedding']],
+  ['audio', ['Audio', 'audio']], ['moderation', ['Moderation', 'moderation']], ['other', otherType],
 ]);
 const modelType = (model: CatalogModel) => model.type && types.has(model.type) ? model.type : 'other';
 const sortedValues = (values: string[], label = (value: string) => value, language?: string) =>
@@ -67,9 +71,16 @@ function CardGrid<T>({ items, render, empty }: { items: T[]; render: (item: T) =
   </> : <p className="catalog-empty" role="status">{empty}</p>;
 }
 
+function TokenBadge({ icon, count, label }: { icon: IconName; count: number; label: string }) {
+  return <Tooltip content={label} visualOnly><span className="catalog-token-badge" role="img" aria-label={label} tabIndex={0}>
+    <ChatIcon name={icon} />{number.format(count)}
+  </span></Tooltip>;
+}
+
 function ModelCard({ model }: { model: CatalogModel }) {
   const { t } = useAppTranslation();
   const provider = providerName(model.provider);
+  const [label, icon] = types.get(modelType(model)) ?? otherType;
   return <article className="catalog-card">
     <div className="catalog-card-title"><CatalogMark provider={model.provider} name={provider} /><div>
       <h2>{model.name}</h2><p>{provider}</p>
@@ -77,17 +88,18 @@ function ModelCard({ model }: { model: CatalogModel }) {
     <div className="catalog-id">{model.id}</div>
     {model.description && <p className="catalog-description">{model.description}</p>}
     <div className="catalog-badges">
-      <span>{t(types.get(modelType(model)) ?? 'Other')}</span>
+      <span className="catalog-type-badge"><ChatIcon name={icon} />{t(label)}</span>
       {model.tags.map(tag => <span key={tag} data-realtime={tag === 'realtime' || undefined}>{tag === 'realtime' ? t('Realtime') : tag}</span>)}
-      {model.contextWindow && <span>{t('{{count, number}} context tokens', { count: model.contextWindow })}</span>}
-      {model.maxTokens && <span>{t('{{count, number}} max tokens', { count: model.maxTokens })}</span>}
+      {model.contextWindow ? <TokenBadge icon="contextWindow" count={model.contextWindow}
+        label={t('Context window: {{count, number}} tokens', { count: model.contextWindow })} /> : null}
+      {model.maxTokens ? <TokenBadge icon="outputLimit" count={model.maxTokens}
+        label={t('Maximum output: {{count, number}} tokens', { count: model.maxTokens })} /> : null}
     </div>
   </article>;
 }
 
 export function ModelsView({ models, status, refresh }: { models?: CatalogModel[]; status?: string; refresh?: () => void }) {
-  const { t, i18n } = useAppTranslation();
-  const number = new Intl.NumberFormat(i18n.resolvedLanguage);
+  const { t } = useAppTranslation();
   const [search, setSearch] = useState('');
   const [provider, setProvider] = useState('');
   const [tab, setTab] = useState('all');
@@ -99,7 +111,8 @@ export function ModelsView({ models, status, refresh }: { models?: CatalogModel[
     (!query || [model.name, model.id, providerName(model.provider), model.description, ...model.tags].some(text => text?.toLowerCase().includes(query))));
   const groups = new Map<string, CatalogModel[]>([['all', matching]]);
   for (const model of matching) {
-    const keys = [modelType(model), ...(model.tags.includes('realtime') ? ['realtime'] : [])];
+    const type = modelType(model);
+    const keys = type !== 'realtime' && model.tags.includes('realtime') ? [type, 'realtime'] : [type];
     for (const key of keys) {
       const group = groups.get(key);
       if (group) group.push(model);
@@ -109,7 +122,7 @@ export function ModelsView({ models, status, refresh }: { models?: CatalogModel[
   const available = new Set((models ?? []).map(modelType));
   // Keep the realtime tab discoverable even if the current provider has none.
   available.add('realtime');
-  const tabs = [['all', 'All'] as const, ...[...types].filter(([key]) => available.has(key))];
+  const tabs = [['all', ['All', 'grid']] as const, ...[...types].filter(([key]) => available.has(key))];
   const selected = tabs.some(([key]) => key === tab) ? tab : 'all';
   return <div className="catalog-content">
     <CatalogHeader title={t('Models')}>{models ? t('Explore {{count, number}} models available from your gateway, grouped by capability.', { count: models.length })
@@ -121,8 +134,8 @@ export function ModelsView({ models, status, refresh }: { models?: CatalogModel[
       {refresh && <Button onClick={refresh}>{t('Refresh models')}</Button>}
     </div>
     {models && <>
-      <div className="catalog-tabs" role="tablist" aria-label={t('Model capabilities')}>
-        {tabs.map(([key, label], index) => <button key={key} id={`${id}-${key}`} type="button" role="tab"
+      <div className="catalog-tabs catalog-model-tabs" role="tablist" aria-label={t('Model capabilities')}>
+        {tabs.map(([key, [label, icon]], index) => <button key={key} id={`${id}-${key}`} type="button" role="tab"
           aria-selected={selected === key} aria-controls={`${id}-results`} tabIndex={selected === key ? 0 : -1}
           onClick={() => setTab(key)} onKeyDown={event => {
             const next = ({ ArrowRight: (index + 1) % tabs.length, ArrowLeft: (index - 1 + tabs.length) % tabs.length,
@@ -132,7 +145,7 @@ export function ModelsView({ models, status, refresh }: { models?: CatalogModel[
             const nextKey = tabs[next][0];
             setTab(nextKey);
             document.getElementById(`${id}-${nextKey}`)?.focus();
-           }}>{t(label)} ({number.format(groups.get(key)?.length ?? 0)})</button>)}
+           }}><ChatIcon name={icon} />{t(label)} ({number.format(groups.get(key)?.length ?? 0)})</button>)}
       </div>
       <section id={`${id}-results`} role="tabpanel" aria-labelledby={`${id}-${selected}`} tabIndex={0}>
         <CardGrid key={JSON.stringify([selected, query, selectedProvider])} items={groups.get(selected) ?? []}
