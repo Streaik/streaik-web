@@ -124,6 +124,26 @@ test('all file routes, drag and drop, interrupted SSE, and scoped finished cards
   await expect(cards).toHaveCount(2);
 });
 
+test.describe('Dutch regional settings with English interface', () => {
+  test.use({ locale: 'nl-NL' });
+
+  test('transcription durations and segment timestamps use regional formatting', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('streaik.language', 'en'));
+    await page.route('**/gateway/api/transcriptions', route => route.fulfill({ json: {
+      text: 'Timed transcript', durationInSeconds: 1234.2,
+      segments: [{ text: 'Timed transcript', startSecond: 1233.5, endSecond: 1234 }],
+    } }));
+    await openTranscriptions(page);
+    const composer = page.getByRole('form', { name: 'Transcription composer' });
+    await composer.locator('input[type=file]').setInputFiles(file);
+    await composer.getByRole('button', { name: 'Send', exact: true }).click();
+    const card = page.getByRole('tabpanel', { name: 'Finished' }).getByRole('article');
+    await expect(card).toContainText('1.234 s');
+    await card.getByText('Segments', { exact: true }).click();
+    await expect(card.getByText('1.233,5–1.234,0 s', { exact: true })).toBeVisible();
+  });
+});
+
 test('the icon-only Stop button cancels a file transcription and keeps the audio queued', async ({ page }) => {
   await page.addInitScript(() => {
     const original = window.fetch.bind(window);
