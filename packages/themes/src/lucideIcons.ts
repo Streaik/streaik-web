@@ -1,6 +1,7 @@
 import {
-  ArrowLeft, ArrowUp, BookOpen, Bot, Boxes, Brain, Check, ChevronDown, CircleDollarSign, Code, Copy, Download, Ellipsis, EllipsisVertical, Gauge, Globe, Info, KeyRound, LogOut, Square,
-  Images, Link, Mic, Palette, PanelLeft, Paperclip, Pencil, Pin, PinOff, Plug, Plus, Scale, Search, Settings, Shield, SquarePen, Terminal, Timer, Trash2, UserRound, Video, Wrench, X,
+  Activity, ArrowLeft, ArrowUp, ArrowUpToLine, BookOpen, Bot, Boxes, Brackets, Brain, Check, ChevronDown, CircleDollarSign, Code, Copy, Download, Ellipsis, EllipsisVertical,
+  FileText, Gauge, GitFork, Globe, Grid3x3, Images, Info, KeyRound, LayoutGrid, Link, ListOrdered, LogOut, MessageSquareText, Mic, Palette, PanelLeft, Paperclip, Pencil,
+  Pin, PinOff, Plug, Plus, Scale, Search, Settings, Shapes, Shield, ShieldCheck, Square, SquarePen, Terminal, Timer, Trash2, UserRound, Video, Volume2, Wrench, X,
 } from 'lucide-react';
 import type { IconSet } from './contract';
 
@@ -49,4 +50,16 @@ export const lucideIcons: IconSet = {
   send: ArrowUp,
   search: Search,
   chevronDown: ChevronDown,
+  grid: LayoutGrid,
+  language: MessageSquareText,
+  decision: GitFork,
+  ranking: ListOrdered,
+  realtime: Activity,
+  transcription: FileText,
+  embedding: Grid3x3,
+  audio: Volume2,
+  moderation: ShieldCheck,
+  shapes: Shapes,
+  contextWindow: Brackets,
+  outputLimit: ArrowUpToLine,
 };

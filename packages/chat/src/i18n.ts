@@ -18,6 +18,14 @@ const resources = Object.fromEntries(Object.keys(languages).map((language, index
   ])),
 }]));
 
+// Keep regional number conventions separate from the selected translation language.
+const browserLocales = typeof navigator === 'undefined' ? undefined
+  : navigator.languages?.length ? navigator.languages : navigator.language || undefined;
+
+export function browserNumberFormat(options?: Intl.NumberFormatOptions) {
+  return new Intl.NumberFormat(browserLocales, options);
+}
+
 const i18n = createInstance();
 function syncDocumentLanguage() {
   if (typeof document !== 'undefined') document.documentElement.lang = i18n.resolvedLanguage ?? 'en';
@@ -34,6 +42,8 @@ export const localizationReady = i18n.use(LanguageDetector).use(initReactI18next
   detection: { order: ['localStorage', 'navigator'], caches: ['localStorage'], lookupLocalStorage: 'streaik.language' },
   interpolation: { escapeValue: false }, // React escapes interpolated text and attributes.
   react: { useSuspense: false },
+}, () => {
+  i18n.services.formatter?.addCached('number', (_language, options) => browserNumberFormat(options).format);
 });
 
 export function useAppTranslation() {

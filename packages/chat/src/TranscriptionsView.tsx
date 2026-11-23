@@ -6,7 +6,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChatIcon } from './ChatIcon';
 import { ModelPicker } from './ModelPicker';
-import { useAppTranslation } from './i18n';
+import { browserNumberFormat, useAppTranslation } from './i18n';
 import { runMicrophone } from './liveTranscription';
 import { dictationFormat, recordDictation } from './microphone';
 import { maxSplittableFileBytes, mergeTranscriptionChunks, splitTranscription } from './splitTranscription';
@@ -23,6 +23,8 @@ type Phase = 'upload' | 'connecting' | 'listening' | 'finishing' | 'dictate-conn
 type Preview = { name: string; text: string; partial?: string };
 const preferredModels = ['openai/gpt-transcribe', 'openai/gpt-4o-transcribe', 'openai/gpt-4o-mini-transcribe', 'openai/whisper-1'];
 const errorMessage = (error: unknown, fallback: string) => error instanceof GatewayError ? error.message : fallback;
+const wholeSeconds = browserNumberFormat({ maximumFractionDigits: 0 });
+const segmentSeconds = browserNumberFormat({ minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 function selectFileModel(models: readonly CatalogModel[], id?: string) {
   return models.find(model => model.id === id) ?? preferredModels.map(id => models.find(model => model.id === id)).find(Boolean)
@@ -66,12 +68,12 @@ function TranscriptCard({ item, menuContainer, remove, onError }: {
         </Menu.Portal>}
       </Menu.Root>
     </header>
-    <p className="transcription-meta">{[model, transcript.language, transcript.durationInSeconds !== undefined ? `${Math.round(transcript.durationInSeconds)} s` : undefined].filter(Boolean).join(' · ')}</p>
+    <p className="transcription-meta">{[model, transcript.language, transcript.durationInSeconds !== undefined ? `${wholeSeconds.format(transcript.durationInSeconds)} s` : undefined].filter(Boolean).join(' · ')}</p>
     {source && <audio controls preload="none" src={source} aria-label={t('Play source audio')} />}
     <div className="transcription-copy" tabIndex={0}>{transcript.text || t('No speech detected.')}</div>
     {transcript.segments.length > 0 && <details><summary>{t('Segments')}</summary><ol className="transcription-segments">
       {transcript.segments.map((segment, index) => <li key={index}>
-        <strong>{segment.startSecond.toFixed(1)}–{segment.endSecond.toFixed(1)} s{segment.speaker ? ` · ${t('Speaker')} ${segment.speaker}` : ''}</strong> {segment.text}
+        <strong>{segmentSeconds.format(segment.startSecond)}–{segmentSeconds.format(segment.endSecond)} s{segment.speaker ? ` · ${t('Speaker')} ${segment.speaker}` : ''}</strong> {segment.text}
       </li>)}
     </ol></details>}
     <div className="transcription-card-actions">

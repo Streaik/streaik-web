@@ -1,9 +1,11 @@
 import { Button } from '@fluentui/react-button';
 import {
-  Add24Regular, ArrowDownload24Regular, ArrowLeft24Regular, ArrowUp24Regular, BookOpen24Regular, Bot24Regular, Checkmark24Regular, ChevronDown24Regular, Code24Regular, Color24Regular, Compose24Regular,
-  BrainCircuit24Regular, Copy24Regular, Cube24Regular, Delete24Regular, Dismiss24Regular, Document24Regular, Edit24Regular, Globe24Regular, Info24Regular, Key24Regular, Money24Regular, MoreHorizontal24Regular, MoreVertical24Regular,
-  Attach24Regular, ImageMultiple24Regular, Link24Regular, Mic24Regular, PanelLeft24Regular, Person24Regular, Pin24Regular, PinOff24Regular, PlugConnected24Regular,
-  Search24Regular, Settings24Regular, Shield24Regular, SignOut24Regular, Stop24Regular, Timer24Regular, Toolbox24Regular, TopSpeed24Regular, Video24Regular, WindowConsoleRegular,
+  Add24Regular, Apps24Regular, ArrowDownload24Regular, ArrowExport24Regular, ArrowLeft24Regular, ArrowUp24Regular, Attach24Regular, BookOpen24Regular, Bot24Regular,
+  BrainCircuit24Regular, BranchFork24Regular, Chat24Regular, Checkmark24Regular, ChevronDown24Regular, Code24Regular, Color24Regular, Compose24Regular, Copy24Regular,
+  Cube24Regular, Delete24Regular, Dismiss24Regular, Document24Regular, DocumentText24Regular, Edit24Regular, Globe24Regular, GridDots24Regular, ImageMultiple24Regular,
+  Info24Regular, Key24Regular, Link24Regular, Mic24Regular, Money24Regular, MoreHorizontal24Regular, MoreVertical24Regular, PanelLeft24Regular, Person24Regular,
+  Pin24Regular, PinOff24Regular, PlugConnected24Regular, Pulse24Regular, Search24Regular, Settings24Regular, Shapes24Regular, Shield24Regular, ShieldCheckmark24Regular,
+  SignOut24Regular, Speaker224Regular, Stop24Regular, TextSortAscending24Regular, TextWordCount24Regular, Timer24Regular, Toolbox24Regular, TopSpeed24Regular, Video24Regular, WindowConsoleRegular,
 } from '@fluentui/react-icons';
 import { FluentProvider } from '@fluentui/react-provider';
 import { Select } from '@fluentui/react-select';
@@ -100,6 +102,18 @@ export const fluent: ThemeAdapter = {
     send: ArrowUp24Regular,
     search: Search24Regular,
     chevronDown: ChevronDown24Regular,
+    grid: Apps24Regular,
+    language: Chat24Regular,
+    decision: BranchFork24Regular,
+    ranking: TextSortAscending24Regular,
+    realtime: Pulse24Regular,
+    transcription: DocumentText24Regular,
+    embedding: GridDots24Regular,
+    audio: Speaker224Regular,
+    moderation: ShieldCheckmark24Regular,
+    shapes: Shapes24Regular,
+    contextWindow: TextWordCount24Regular,
+    outputLimit: ArrowExport24Regular,
   },
   style: (env) => {
     const t = tokens(env);

@@ -3,7 +3,11 @@ import { Button, Tooltip } from '@streaik/themes';
 import type { IconName } from '@streaik/themes';
 import { useState } from 'react';
 import { ChatIcon } from './ChatIcon';
-import { useAppTranslation } from './i18n';
+import { browserNumberFormat, useAppTranslation } from './i18n';
+
+const integer = browserNumberFormat({ maximumFractionDigits: 0 });
+const seconds = browserNumberFormat({ maximumFractionDigits: 2 });
+const dollars = browserNumberFormat({ minimumFractionDigits: 2, maximumFractionDigits: 8 });
 
 function number(value: unknown): number | undefined {
   const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
@@ -21,11 +25,7 @@ function Badge({ icon, label, value, format, unit = '', details }: {
 }
 
 export function MessageActions({ message }: { message: ChatMessage }) {
-  const { t, i18n } = useAppTranslation();
-  const locale = i18n.resolvedLanguage;
-  const integer = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 });
-  const seconds = new Intl.NumberFormat(locale, { maximumFractionDigits: 2 });
-  const dollars = new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 8 });
+  const { t } = useAppTranslation();
   const [copyStatus, setCopyStatus] = useState('');
   const reply = message.parts.flatMap(part => part.type === 'text' && part.text ? [part.text] : []).join('\n\n');
   const { usage, providerMetadata, gateway } = message.metadata ?? {};
