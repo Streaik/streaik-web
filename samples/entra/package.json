@@ -1,0 +1,15 @@
+{
+  "name": "@streaik/sample-entra",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "vite", "build": "vite build" },
+  "dependencies": {
+    "@azure/msal-browser": "5.30.0",
+    "@streaik/chat": "0.1.0",
+    "@streaik/gateway": "0.1.0",
+    "@streaik/themes": "0.1.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  }
+}

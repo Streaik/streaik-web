@@ -1,0 +1,6 @@
+.streaik-theme[data-theme=html][data-scheme] {
+  --background: Canvas; --foreground: CanvasText; --surface: Canvas; --soft: ButtonFace;
+  --muted: GrayText; --border: GrayText; --action: ButtonFace; --on-action: ButtonText;
+  --focus: Highlight; --radius: 2px;
+}
+.streaik-theme[data-theme=html] .ui-button[data-html-variant=subtle] { background: ButtonFace; color: ButtonText; }

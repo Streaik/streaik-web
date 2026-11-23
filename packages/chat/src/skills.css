@@ -1,0 +1,16 @@
+.skill-toolbar { display: flex; gap: .75rem; align-items: center; margin-block: .75rem; }
+.skill-search { flex: 1; min-width: 0; width: 100%; }
+.skill-fields label { display: grid; gap: .375rem; }
+.skill-fields :is(input, select, textarea) {
+  min-width: 0; max-width: 100%; padding: .45rem .6rem; font: inherit; color: inherit;
+  background: transparent; border: 1px solid currentColor; border-radius: .375rem;
+}
+.skill-panel:not([hidden]) { display: grid; gap: .75rem; min-width: 0; padding-block: .75rem; }
+.skill-dialog .skill-panel:not([hidden]) { padding-inline: 1rem; overflow-y: auto; }
+.skill-fields { display: grid; gap: .75rem; }
+.skill-fields details > div { margin-top: .75rem; }
+.skill-fields textarea { resize: vertical; }
+.skill-fields .skill-markdown-input, .skill-manifest { font-family: ui-monospace, monospace; }
+.skill-manifest { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+.skill-file-list { padding: 0; margin: 0; list-style: none; display: grid; gap: .3rem; }
+.skill-file-list li { display: flex; justify-content: space-between; gap: .5rem; align-items: center; overflow-wrap: anywhere; }

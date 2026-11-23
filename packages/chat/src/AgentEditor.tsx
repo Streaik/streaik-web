@@ -1,0 +1,104 @@
+import { Button } from '@streaik/themes';
+import type { CatalogModel } from '@streaik/gateway';
+import { useId, useLayoutEffect, useRef, useState } from 'react';
+import type { FormEvent, ReactNode } from 'react';
+import type { AgentEntry } from './agentCatalog';
+import { AgentDraftError, createAgentDraft, saveAgentDraft } from './agentDraft';
+import type { AgentDraft, AgentTab } from './agentDraft';
+import type { AgentDefinition } from './agentDefinition';
+import { AgentDetailsFields, AgentGeneralFields, AgentRealtimeFields } from './AgentEditorFields';
+import { ChatIcon } from './ChatIcon';
+import { useAppTranslation } from './i18n';
+
+const tabs = [['general', 'General'], ['details', 'Details'], ['realtime', 'Realtime']] as const;
+
+function AgentDialog({ title, children, onClose }: { title: string; children: (close: () => void) => ReactNode; onClose: () => void }) {
+  const { t } = useAppTranslation();
+  const dialog = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  useLayoutEffect(() => {
+    const element = dialog.current;
+    if (element && !element.open) element.showModal();
+  }, []);
+  return <dialog ref={dialog} aria-labelledby={titleId} onClose={onClose} className="chat-settings agent-dialog">
+    <div className="chat-settings-header"><h2 id={titleId}>{title}</h2>
+      <Button className="chat-close" aria-label={t('Close')} title={t('Close')} variant="subtle" onClick={() => dialog.current?.close()}><ChatIcon name="close" /></Button>
+    </div>
+    {children(() => dialog.current?.close())}
+  </dialog>;
+}
+
+export function AgentEditor({ entry, seed, catalog, catalogStatus, tags, onSave, onClose }: {
+  entry?: AgentEntry; seed?: AgentDefinition; catalog: readonly CatalogModel[]; catalogStatus?: string; tags: readonly string[];
+  onSave: (definition: AgentDefinition, entry?: AgentEntry) => void; onClose: () => void;
+}) {
+  const { t } = useAppTranslation();
+  const source = entry?.definition ?? seed;
+  const [initial] = useState(() => createAgentDraft(source));
+  const [draft, setDraft] = useState(initial);
+  const [tab, setTab] = useState<AgentTab>('general');
+  const [error, setError] = useState<Error>();
+  const id = useId();
+  const panels = useRef<HTMLDivElement>(null);
+  const alert = useRef<HTMLParagraphElement>(null);
+  useLayoutEffect(() => { if (panels.current) panels.current.scrollTop = 0; }, [tab]);
+  useLayoutEffect(() => { if (error) alert.current?.focus(); }, [error]);
+
+  function patch(fields: Partial<AgentDraft>) {
+    setDraft((old) => ({ ...old, ...fields }));
+    setError(undefined);
+  }
+
+  function save(event: FormEvent<HTMLFormElement>, close: () => void) {
+    event.preventDefault();
+    try {
+      onSave(saveAgentDraft(draft, source), entry);
+      close();
+    } catch (error) {
+      setTab(error instanceof AgentDraftError ? error.tab : 'general');
+      setError(error instanceof Error ? error : new Error('Could not save this agent.'));
+    }
+  }
+
+  return <AgentDialog title={t(entry ? 'Edit agent' : 'Create agent')} onClose={onClose}>{(close) =>
+    <form className="agent-form" noValidate onSubmit={(event) => save(event, close)}>
+      <div className="catalog-tabs" role="tablist" aria-label={t('Agent settings')}>
+        {tabs.map(([key, label], index) => <button key={key} id={`${id}-${key}-tab`} type="button" role="tab"
+          aria-selected={tab === key} aria-controls={`${id}-${key}-panel`} tabIndex={tab === key ? 0 : -1}
+          onClick={() => setTab(key)} onKeyDown={(event) => {
+            const next = ({ ArrowRight: (index + 1) % tabs.length, ArrowLeft: (index - 1 + tabs.length) % tabs.length,
+              Home: 0, End: tabs.length - 1 } as Record<string, number>)[event.key];
+            if (typeof next !== 'number') return;
+            event.preventDefault();
+            const target = tabs[next][0];
+            setTab(target);
+            event.currentTarget.ownerDocument.getElementById(`${id}-${target}-tab`)?.focus();
+          }}>{t(label)}</button>)}
+      </div>
+      <div className="agent-panels" ref={panels}>
+        {tabs.map(([key]) => <section key={key} className="agent-panel" id={`${id}-${key}-panel`} role="tabpanel"
+          aria-labelledby={`${id}-${key}-tab`} hidden={key !== tab}>
+          {key === 'general' ? <AgentGeneralFields {...{ draft, initial, patch, catalog, catalogStatus }} sample={entry?.source === 'sample'} />
+            : key === 'details' ? <AgentDetailsFields {...{ draft, patch, tags }} />
+              : <AgentRealtimeFields {...{ draft, initial, patch, catalog, catalogStatus }} />}
+        </section>)}
+      </div>
+      {error && <p ref={alert} className="chat-error agent-save-error" role="alert" tabIndex={-1}>{t(error.message)}</p>}
+      <div className="agent-actions">
+        <Button onClick={close}>{t('Cancel')}</Button><Button type="submit" variant="primary">{t('Save agent')}</Button>
+      </div>
+    </form>}
+  </AgentDialog>;
+}
+
+export function ConfirmAgentChange({ entry, onConfirm, onClose }: { entry: AgentEntry; onConfirm: () => void; onClose: () => void }) {
+  const { t } = useAppTranslation();
+  const reset = entry.source === 'sample';
+  const title = t(reset ? 'Reset to sample default' : 'Delete agent');
+  return <AgentDialog title={title} onClose={onClose}>{(close) => <>
+    <p>{t(reset ? 'Restore {{name}} to the sample definition? Its role assignments will stay in place.'
+      : 'Delete {{name}} from this browser? Any role assignments to it will show as unavailable.', { name: entry.definition.name })}</p>
+    <div className="agent-actions"><Button onClick={close}>{t('Cancel')}</Button>
+      <Button variant="primary" onClick={() => { onConfirm(); close(); }}>{title}</Button></div>
+  </>}</AgentDialog>;
+}

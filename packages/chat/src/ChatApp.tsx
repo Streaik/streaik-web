@@ -1,0 +1,705 @@
+import { useChat } from '@ai-sdk/react';
+import { GatewayError, gatewayChatEndpoints, nativeChatEndpoints, pickChatCatalogModels } from '@streaik/gateway';
+import type { ChatRoute, DirectChat } from '@streaik/gateway';
+import type { CatalogModel, ChatMessage, Gateway } from '@streaik/gateway';
+import { Button, ThemeRoot, useColorScheme } from '@streaik/themes';
+import { lazy, memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+import { ChatComposer, AttachmentChip } from './ChatComposer';
+import { httpLink } from './chatAttachments';
+import { MessageActions } from './MessageActions';
+import { MessageClock, MessageTime } from './MessageTime';
+import { withReplyMetadata } from './messageMetadata';
+import { AssistantSpeaker } from './AssistantSpeaker';
+import { ChatIcon } from './ChatIcon';
+import { ChatNavigation } from './ChatNavigation';
+import type { ChatAccount, ChatView } from './ChatNavigation';
+import { ModelsView, ProvidersView } from './CatalogViews';
+import { ModelPicker, resolveModelSelection } from './ModelPicker';
+import { pageRouteMenu } from './routeMenu';
+import { AgentsProvider, useAgents } from './AgentsProvider';
+import { AgentsView } from './AgentsView';
+import { SettingsDialog } from './SettingsDialog';
+import { ChatSettingsDialog, ToolApprovalDialog, ViewContextDialog } from './ChatToolsDialogs';
+import type { ToolReview } from './ChatToolsDialogs';
+import { ChatActivity, groupMessageParts, invocationName } from './ChatActivity';
+import type { Invocation } from './ChatActivity';
+import { loadChatPreferences, saveChatPreferences } from './chatPreferences';
+import type { ChatPreferences } from './chatPreferences';
+import { buildRequestContext, requestContextText, withRequestContext } from './chatContext';
+import type { RequestContext } from './chatContext';
+import { activeChatTools, filterLocalToolReplay, runLocalTool, toolPartName } from './localPlugins';
+import type { ChatTool, ToolDefinition } from './localPlugins';
+import { resolveSkillTool } from './skillTools';
+import type { TurnRemoteSkills } from './skillTools';
+import type { LocalSkill } from './skillBundles';
+import { SkillsView } from './SkillsView';
+import { useLocalSkills } from './useLocalSkills';
+import type { LocalSkills } from './useLocalSkills';
+import { useRemoteSkills } from './useRemoteSkills';
+import type { RemoteSkills } from './useRemoteSkills';
+import { assignedAgent } from './agentCatalog';
+import type { AgentsConfig } from './agentCatalog';
+import { agentModels as configuredAgentModels } from './agentDefinition';
+import { conversationOpeningText, deleteConversation, listConversations, newConversation, newestFirst, saveConversation } from './conversations';
+import type { Conversation } from './conversations';
+import { callMcpTool, discoverMcpTools } from './mcp';
+import type { McpOptions, McpTool } from './mcp';
+import { chatDecisionInput, chatModelDecision, modelDecisionRouter, selectModelRoleId, useDecisionRoute } from './modelDecisions';
+import type { ModelDecision } from './modelDecisions';
+import { conversationNameRoleId, runTextAppAgent, welcomeRoleId } from './textAppAgents';
+import type { TextAppRequest } from './textAppAgents';
+import { WelcomeHeading } from './WelcomeHeading';
+import { useAppTranslation } from './i18n';
+import './chat.css';
+import { useImageRoute } from './imageRoute';
+import type { ImageRouteSetting } from './imageRoute';
+import { useTranscriptionRoute } from './transcriptionPreferences';
+import type { TranscriptionRouteSetting } from './transcriptionPreferences';
+export { localizationReady, useAppTranslation } from './i18n';
+export { default as providerDirectory } from './provider-directory.json';
+export type { AgentsConfig } from './agentCatalog';
+export type { AgentDefinition } from './agentDefinition';
+
+const AssistantMarkdown = lazy(() => import('./AssistantMarkdown'));
+const ImagesView = lazy(() => import('./ImagesView'));
+const TranscriptionsView = lazy(() => import('./TranscriptionsView'));
+
+type Connection = {
+  ready: boolean;
+  /** Host-selected stable account/profile ID, never an auth token or key. Omit to disable persistence. */
+  historyProfile?: string;
+  modelRevision?: number;
+  emptyMessage: string;
+  account?: ChatAccount;
+  signIn?: ReactNode;
+  settings?: ReactNode;
+  apiKeySettings?: ReactNode;
+  mcp?: McpOptions;
+  direct?: DirectChat;
+};
+
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof GatewayError ? error.message : fallback;
+}
+
+function useModels(source: Gateway | DirectChat | undefined, ready: boolean, revision: number, scope?: string) {
+  const { t } = useAppTranslation();
+  const [result, setResult] = useState<{ source: Gateway | DirectChat; stamp: string; catalog: CatalogModel[]; error?: { detail?: string } }>();
+  const [refresh, setRefresh] = useState(0);
+  const stamp = JSON.stringify([scope, revision, refresh]);
+  useEffect(() => {
+    if (!ready || !source) return;
+    const controller = new AbortController();
+    void source.listModelCatalog(controller.signal).then(
+      (catalog) => { if (!controller.signal.aborted) setResult({ source, stamp, catalog }); },
+      (error: unknown) => {
+        if (!controller.signal.aborted) setResult({ source, stamp, catalog: [], error: { detail: errorMessage(error, '') || undefined } });
+      },
+    );
+    return () => controller.abort();
+  }, [source, ready, stamp]);
+  const current = ready && result && result.source === source && result.stamp === stamp ? result : undefined;
+  return { result: current && { catalog: current.catalog, error: current.error && t(current.error.detail ?? 'Could not load models.') },
+    reload: () => setRefresh((n) => n + 1) };
+}
+
+const Message = memo(function Message({ message }: { message: ChatMessage }) {
+  const { t } = useAppTranslation();
+  const user = message.role === 'user';
+  const groups = groupMessageParts(message.parts, user);
+  if (!groups.length) return null;
+  return <article className="chat-message" data-role={message.role} aria-label={t(user ? 'You' : 'Assistant')}>
+    {user ? <MessageTime timestamp={message.metadata?.timestamp} /> : <div className="chat-message-header">
+      <AssistantSpeaker model={message.metadata?.model} />
+      <span className="chat-badge chat-ai-badge"><ChatIcon name="agents" />{t('Generated by AI')}</span>
+      <MessageTime timestamp={message.metadata?.timestamp} />
+    </div>}
+    <div className="chat-message-body">
+      {groups.map((group) => {
+        if (group.type === 'attachment') {
+          const url = group.part.type === 'file' ? httpLink(group.part.url) : undefined;
+          return <AttachmentChip key={group.start} name={group.name ?? t('Attachments')} url={url}
+            note={group.part.type === 'text' ? t('As text') : undefined} />;
+        }
+        if (group.type === 'activity') return <ChatActivity key={group.start} parts={group.parts}
+          renderMarkdown={text => <Suspense fallback={<div className="chat-user-text">{text}</div>}><AssistantMarkdown text={text} /></Suspense>} />;
+        return user ? <div key={group.start} className="chat-user-text">{group.text}</div>
+          : <Suspense key={group.start} fallback={<div className="chat-user-text">{group.text}</div>}><AssistantMarkdown text={group.text} /></Suspense>;
+      })}
+    </div>
+    {!user && <MessageActions message={message} />}
+  </article>;
+});
+
+function Transcript({ messages }: { messages: ChatMessage[] }) {
+  const { t } = useAppTranslation();
+  const scroll = useRef<HTMLDivElement>(null);
+  const follow = useRef(true);
+  useLayoutEffect(() => {
+    const node = scroll.current;
+    if (node && follow.current) node.scrollTop = node.scrollHeight;
+  }, [messages]);
+  return <section ref={scroll} onScroll={() => {
+    const node = scroll.current;
+    if (node) follow.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
+  }} className="chat-transcript" aria-label={t('Conversation')} tabIndex={0}>
+    <MessageClock><div className="chat-column">{messages.map((message) => <Message key={message.id} message={message} />)}</div></MessageClock>
+  </section>;
+}
+
+export function ChatApp({ appName = 'Streak', gateway, connection, agents }: { appName?: string; gateway: Gateway; connection: Connection; agents?: AgentsConfig }) {
+  const scope = connection.historyProfile ? JSON.stringify([gateway.historyScope, connection.historyProfile]) : undefined;
+  const settings = useRef<HTMLDialogElement>(null);
+  const [route, setRoute] = useState<ChatRoute>({ mode: 'gateway', endpoint: '/api/chat' });
+  const [profile, setProfile] = useState(() => ({ scope, preferences: loadChatPreferences(scope) }));
+  const decisions = useDecisionRoute(scope);
+  const images = useImageRoute(scope);
+  const transcriptions = useTranscriptionRoute(scope);
+  const models = useModels(route.mode === 'direct' ? connection.direct : gateway, connection.ready, connection.modelRevision ?? 0, scope);
+  // Reload preferences on profile changes without remounting the user settings dialog.
+  let preferences = profile.preferences;
+  if (profile.scope !== scope) {
+    preferences = loadChatPreferences(scope);
+    setProfile({ scope, preferences });
+  }
+  function updatePreferences(next: ChatPreferences) {
+    setProfile({ scope, preferences: next });
+    saveChatPreferences(scope, next);
+  }
+  return <ThemeRoot>
+    <AgentsProvider config={agents} scope={scope}>
+      <HistoryChat key={scope ?? ''} appName={appName} gateway={gateway} connection={connection} scope={scope} models={models}
+        route={route} onRoute={setRoute} decisions={decisions} images={images} transcriptions={transcriptions} onSettings={() => settings.current?.showModal()}
+        preferences={preferences} onPreferences={updatePreferences} />
+      <SettingsDialog dialog={settings} apiKeySettings={connection.apiKeySettings} accountSettings={connection.settings} images={gateway.historyScope !== 'direct' ? images : undefined}
+        transcriptions={gateway.historyScope !== 'direct' ? transcriptions : undefined}
+        convertAttachmentsToText={preferences.convertAttachmentsToText}
+        onConvertAttachmentsToTextChange={convertAttachmentsToText => updatePreferences({ ...preferences, convertAttachmentsToText })} />
+    </AgentsProvider>
+  </ThemeRoot>;
+}
+
+function HistoryChat({ appName, gateway, connection, scope, models, route, onRoute, decisions, images, transcriptions, onSettings, preferences, onPreferences }: {
+  appName: string; gateway: Gateway; connection: Connection; scope?: string; models: ReturnType<typeof useModels>; onSettings: () => void;
+  route: ChatRoute; onRoute: (route: ChatRoute) => void;
+  decisions: ReturnType<typeof useDecisionRoute>;
+  images: ImageRouteSetting;
+  transcriptions: TranscriptionRouteSetting;
+  preferences: ChatPreferences; onPreferences: (preferences: ChatPreferences) => void;
+}) {
+  const { t } = useAppTranslation();
+  const [nav, setNav] = useState(false);
+  const [selectedView, setView] = useState<ChatView>('chat');
+  const agentsEnabled = !!useAgents();
+  const localSkills = useLocalSkills(scope);
+  const remoteSkills = useRemoteSkills(gateway, connection.ready && gateway.historyScope !== 'direct', connection.modelRevision ?? 0);
+  const view = selectedView === 'agents' && !agentsEnabled ? 'chat' : selectedView;
+  const [active, setActive] = useState(newConversation);
+  const [history, setHistory] = useState<Conversation[]>([]);
+  const [loading, setLoading] = useState(!!scope);
+  const [storageIssue, setStorageIssue] = useState('');
+  // Transcript effects and pin clicks can both enqueue writes before React renders again.
+  const latestHistory = useRef<Conversation[]>([]);
+  const writes = useRef(Promise.resolve());
+  const pendingNames = useRef(new Map<string, AbortController>());
+
+  useEffect(() => {
+    const pending = pendingNames.current;
+    return () => {
+      for (const controller of pending.values()) controller.abort();
+      pending.clear();
+    };
+  }, [gateway, connection.ready, connection.modelRevision]);
+
+  function updateHistory(records: Conversation[]) {
+    latestHistory.current = records;
+    setHistory(records);
+  }
+
+  useEffect(() => {
+    if (!scope) return;
+    let live = true;
+    void listConversations(scope).then((records) => {
+      if (!live) return;
+      records.sort(newestFirst);
+      updateHistory(records);
+      if (records[0]) setActive(records[0]);
+    }).catch(() => { if (live) setStorageIssue('Could not open local chat history.'); })
+      .finally(() => { if (live) setLoading(false); });
+    return () => { live = false; };
+  }, [scope]);
+
+  function save(conversation: Conversation) {
+    if (scope) writes.current = writes.current.then(() => saveConversation(scope, conversation))
+      .catch(() => setStorageIssue('Could not save this conversation to this browser.'));
+  }
+
+  function persist(conversation: Conversation, nameRequest?: TextAppRequest) {
+    const records = latestHistory.current;
+    const previous = records.find((item) => item.id === conversation.id);
+    const merged = { ...conversation, metadata: { ...conversation.metadata,
+      name: previous?.metadata?.name ?? conversation.metadata?.name, pinned: previous?.metadata?.pinned } };
+    updateHistory([merged, ...records.filter((item) => item.id !== merged.id)]);
+    save(merged);
+
+    if (previous || !nameRequest || merged.metadata.name) return;
+    const text = conversationOpeningText(merged);
+    if (!text) return;
+    const { id } = merged;
+    const controller = new AbortController();
+    pendingNames.current.set(id, controller);
+    void runTextAppAgent(conversationNameRoleId, nameRequest, text, controller.signal).then(name => {
+      if (pendingNames.current.get(id) !== controller) return;
+      pendingNames.current.delete(id);
+      if (!name || controller.signal.aborted) return;
+      // Merge into the latest record, not the transcript that started the request.
+      const records = latestHistory.current;
+      const current = records.find(item => item.id === id);
+      if (!current || current.metadata?.name) return;
+      const renamed = { ...current, metadata: { ...current.metadata, name } };
+      updateHistory(records.map(item => item.id === id ? renamed : item));
+      save(renamed);
+    });
+  }
+
+  function togglePin(id: string) {
+    const records = latestHistory.current;
+    const record = records.find((item) => item.id === id);
+    if (!record) return;
+    const updated = { ...record, metadata: { ...record.metadata, pinned: record.metadata?.pinned !== true } };
+    updateHistory(records.map((item) => item.id === id ? updated : item));
+    save(updated);
+  }
+
+  function remove(id: string) {
+    pendingNames.current.get(id)?.abort();
+    pendingNames.current.delete(id);
+    updateHistory(latestHistory.current.filter((item) => item.id !== id));
+    if (active.id === id) setActive(newConversation());
+    if (scope) writes.current = writes.current.then(() => deleteConversation(scope, id))
+      .catch(() => setStorageIssue('Could not delete this conversation from this browser.'));
+  }
+
+  if (loading) return <p className="chat-start" role="status">{t('Loading chat history…')}</p>;
+  return <ChatSession key={active.id} appName={appName} gateway={gateway} connection={connection} conversation={active} history={history} storageIssue={storageIssue}
+    nav={nav} view={view} onView={(next) => {
+      setView(next);
+      if (window.matchMedia('(max-width: 42rem)').matches) setNav(false);
+    }} toggleNav={() => setNav((open) => !open)} onPersist={persist}
+    onNew={() => { setView('chat'); setActive(newConversation()); }}
+    onSwitch={(item) => { setView('chat'); if (item.id !== active.id) setActive(item); }} onPin={togglePin} onDelete={remove}
+    models={models} route={route} onRoute={onRoute} decisions={decisions} images={images} transcriptions={transcriptions} scope={scope} onSettings={onSettings}
+    preferences={preferences} onPreferences={onPreferences}
+    localSkills={localSkills} remoteSkills={remoteSkills} readHistory={scope ? () => latestHistory.current : undefined} />;
+}
+
+type ToolResult = { output: unknown; images?: string[] };
+type Turn = { model: string; route: ChatRoute; tools: ChatTool[]; context?: RequestContext;
+  catalog: readonly CatalogModel[]; skills: readonly LocalSkill[]; remoteSkills?: TurnRemoteSkills;
+  seen: Set<string>; resolved: Set<string>; automatic: { calls: number } };
+const isApiChat = (route: ChatRoute | undefined) => !route || (route.mode === 'gateway' && route.endpoint === '/api/chat');
+const toolComplete = (part: Invocation) => part.state === 'output-available' || part.state === 'output-error' || part.state === 'approval-responded';
+
+function ChatSession({ appName, gateway, connection, conversation, history, storageIssue, nav, view, onView, toggleNav, onPersist, onNew, onSwitch, onPin, onDelete, models, route, onRoute, decisions, images, transcriptions, scope, onSettings, preferences, onPreferences, localSkills, remoteSkills, readHistory }: {
+  appName: string; gateway: Gateway; connection: Connection; conversation: Conversation; history: Conversation[]; storageIssue: string;
+  nav: boolean; toggleNav: () => void; onPersist: (conversation: Conversation, nameRequest?: TextAppRequest) => void; onNew: () => void;
+  view: ChatView; onView: (view: ChatView) => void;
+  onSwitch: (conversation: Conversation) => void; onPin: (id: string) => void; onDelete: (id: string) => void;
+  models: ReturnType<typeof useModels>; onSettings: () => void;
+  route: ChatRoute; onRoute: (route: ChatRoute) => void;
+  decisions: ReturnType<typeof useDecisionRoute>;
+  images: ImageRouteSetting;
+  transcriptions: TranscriptionRouteSetting;
+  scope?: string;
+  preferences: ChatPreferences; onPreferences: (preferences: ChatPreferences) => void;
+  localSkills: LocalSkills;
+  remoteSkills: RemoteSkills;
+  readHistory?: () => readonly Conversation[];
+}) {
+  const { t, i18n } = useAppTranslation();
+  const darkMode = useColorScheme() === 'dark';
+  const agents = useAgents();
+  const [selectedIds, setSelectedIds] = useState<string[] | undefined>(() =>
+    conversation.metadata?.model ? [conversation.metadata.model] : undefined);
+  const [pendingModel, setPendingModel] = useState<string>();
+  const [deciding, setDeciding] = useState(false);
+  const [turn, setTurn] = useState<Turn>();
+  const chatSettings = useRef<HTMLDialogElement>(null);
+  const contextDialog = useRef<HTMLDialogElement>(null);
+  const [menuContainer, setMenuContainer] = useState<HTMLDivElement | null>(null);
+  const [agentToolbar, setAgentToolbar] = useState<HTMLDivElement | null>(null);
+  const [imageToolbar, setImageToolbar] = useState<HTMLDivElement | null>(null);
+  const saved = useRef(conversation.messages);
+  const nameRequest = useRef<TextAppRequest>(undefined);
+  const direct = connection.direct;
+  // Agents and media use the gateway catalog even when chat is routed directly.
+  const fetchGatewayModels = route.mode === 'direct' && (view === 'agents' || (view === 'images' || view === 'transcriptions') && gateway.historyScope !== 'direct');
+  const gatewayModels = useModels(gateway, connection.ready && fetchGatewayModels, connection.modelRevision ?? 0, scope);
+  const transport = useMemo<ReturnType<Gateway['chatTransport']>>(() => {
+    const apiChat = gateway.chatTransport();
+    return {
+      async sendMessages(request) {
+        const last = request.messages.at(-1);
+        const previous = request.trigger === 'submit-message' && last?.role === 'assistant' ? last : undefined;
+        const { route, decision, context, ...body } = (request.body ?? {}) as {
+          model?: string; route?: ChatRoute; decision?: ModelDecision; context?: RequestContext; tools?: ToolDefinition[];
+        };
+        let model = body.model;
+        const useGateway = route?.mode !== 'direct';
+        const enabledSkillIds = new Set(context?.skills?.availableSkills.skills.map(({ id }) => id));
+        request = { ...request, body, messages: filterLocalToolReplay(request.messages, useGateway ? body.tools ?? [] : [], isApiChat(route), enabledSkillIds) };
+        if (route?.mode === 'gateway' && decision) {
+          const { endpoint, ...choice } = decision;
+          const input = chatDecisionInput(request.messages);
+          if (!input.length) setPendingModel(body.model);
+          else {
+            setDeciding(true);
+            try {
+              const winner = await gateway.decideChoice(endpoint, { ...choice, input }, request.abortSignal);
+              request.abortSignal?.throwIfAborted();
+              model = winner;
+              setPendingModel(winner);
+              setTurn((current) => current && { ...current, model: winner });
+              request = { ...request, body: { ...body, model: winner } };
+            } finally { setDeciding(false); }
+          }
+        }
+        if (isApiChat(route)) {
+          const stream = await apiChat.sendMessages({ ...request, body: { ...request.body, ...(body.tools?.length && { clientToolResultApproval: true }) },
+            messages: withRequestContext(request.messages, context) });
+          return withReplyMetadata(stream, model, previous);
+        }
+        if (route?.mode === 'gateway' && gatewayChatEndpoints.includes(route.endpoint)) {
+          const stream = await gateway.chatTransport(route.endpoint).sendMessages({ ...request,
+            body: { ...request.body, ...(context && { instructions: requestContextText(context).join('\n') }) } });
+          return withReplyMetadata(stream, model, previous);
+        }
+        if (route?.mode === 'direct' && direct && nativeChatEndpoints.includes(route.endpoint)) {
+          return withReplyMetadata(await direct.chatTransport(route.endpoint).sendMessages(request), model, previous);
+        }
+        throw new GatewayError('The selected chat route is unavailable.');
+      },
+      async reconnectToStream() { return null; },
+    };
+  }, [gateway, direct]);
+  const { messages, sendMessage, regenerate, setMessages, addToolOutput, stop, status, error } = useChat({
+    id: conversation.id, messages: conversation.messages, transport, throttle: preferences.delay || undefined,
+  });
+  useEffect(() => () => { void stop(); }, [stop]);
+  const [tools, setTools] = useState<McpTool[] | null>(null);
+  const [mcpNotice, setMcpNotice] = useState('');
+  const [toolNotice, setToolNotice] = useState('');
+  const [toolBusy, setToolBusy] = useState(false);
+  const [staged, setStaged] = useState<{ turn: Turn; callId: string; result: ToolResult }>();
+  const [toolImages, setToolImages] = useState<string[]>([]);
+  const operation = useRef<AbortController | null>(null);
+  const mcp = connection.mcp;
+  const hasHistory = !!readHistory;
+  const language = i18n.resolvedLanguage ?? i18n.language ?? 'en';
+  const gatewayRoute = route.mode === 'gateway';
+  const appAgentContext = useMemo(() => buildRequestContext(appName, language, darkMode), [appName, language, darkMode]);
+  const appAgentTransport = useMemo(() => route.mode === 'direct' ? direct?.chatTransport(route.endpoint)
+    : gateway.chatTransport(route.endpoint), [gateway, direct, route]);
+  const { online: skillsOnline, skills: providerSkills, busy: skillsBusy, needsLoad: needsSkills, cursor: skillCursor,
+    error: skillCatalogError, load: loadSkills } = remoteSkills;
+  const enabledRemoteSkills = useMemo(() => gatewayRoute && skillsOnline ? providerSkills.filter(skill => preferences.remoteSkillIds.includes(skill.id)) : [],
+    [gatewayRoute, skillsOnline, providerSkills, preferences.remoteSkillIds]);
+  // Restore saved selections even if the user never opens the Skills tab in this session.
+  const restoringSkills = gatewayRoute && skillsOnline && enabledRemoteSkills.length < preferences.remoteSkillIds.length
+    && skillCatalogError === undefined && (skillsBusy || needsSkills || !!skillCursor);
+  useEffect(() => {
+    if (restoringSkills && !skillsBusy) loadSkills(skillCursor);
+  }, [restoringSkills, skillsBusy, loadSkills, skillCursor]);
+  const hasSkills = enabledRemoteSkills.length > 0 || localSkills.skills.some(({ enabled }) => enabled);
+  const enabledTools = useMemo(() => activeChatTools(route, preferences.plugins, hasHistory, mcp ? tools ?? [] : [], hasSkills),
+    [route, preferences.plugins, hasHistory, mcp, tools, hasSkills]);
+  const context = useMemo(() => gatewayRoute ? buildRequestContext(appName, language, darkMode, localSkills.skills, enabledRemoteSkills) : undefined,
+    [gatewayRoute, appName, language, darkMode, localSkills.skills, enabledRemoteSkills]);
+  const last = messages.at(-1);
+  const parts = last?.role === 'assistant' ? last.parts : [];
+  const toolParts = parts.flatMap(part => {
+    if (!('toolCallId' in part) || !turn || part.providerExecuted || turn.seen.has(part.toolCallId)) return [];
+    const name = toolPartName(part);
+    const tool = turn.tools.find(tool => tool.definition.name === name);
+    return tool || (isApiChat(turn.route) && part.state === 'approval-requested') ? [{ part, tool }] : [];
+  });
+  const pending = toolParts.find(({ part }) => !toolComplete(part) && !turn?.resolved.has(part.toolCallId));
+  const stagedResult = staged && staged.turn === turn && staged.callId === pending?.part.toolCallId ? staged.result : undefined;
+  useEffect(() => () => { operation.current?.abort(); }, []);
+
+  function requestBody(turn: Turn) {
+    return { model: turn.model, route: turn.route, context: turn.context,
+      tools: turn.tools.map(({ definition: { name, description, inputSchema } }) => ({ name, description, inputSchema })) };
+  }
+
+  // Stage browser results outside the SDK transcript. Nothing can replay an unreviewed output.
+  // Continue once per completed batch, with the original route, model and tool set.
+  useEffect(() => {
+    if (status !== 'ready' || toolBusy || operation.current || !turn || !toolParts.length) return;
+    if (pending && isApiChat(turn.route)) {
+      const { part, tool } = pending;
+      if (part.state !== 'approval-requested' || !tool) {
+        setToolNotice('The gateway did not return an approval for this client tool.');
+        setTurn(undefined);
+      } else if (!stagedResult) {
+        if (turn.automatic.calls >= 8) {
+          setToolNotice('Local tool limit reached for this turn.');
+          setTurn(undefined);
+        } else {
+          turn.automatic.calls++;
+          void completeTool(part, tool, 'stage');
+        }
+      }
+      return;
+    }
+    if (pending?.part.state === 'input-available' && (pending.tool?.source === 'skill' ||
+        (pending.tool?.source === 'local' && !pending.tool.plugin.approval))) {
+      if (turn.automatic.calls >= 8) {
+        setToolNotice('Local tool limit reached for this turn.');
+        setTurn(undefined);
+      } else {
+        turn.automatic.calls++;
+        void completeTool(pending.part, pending.tool, 'run');
+      }
+      return;
+    }
+    if (toolParts.every(({ part }) => toolComplete(part))) {
+      toolParts.forEach(({ part }) => turn.seen.add(part.toolCallId));
+      void sendMessage(undefined, { body: requestBody(turn) });
+    }
+  });
+
+  async function discover() {
+    if (!mcp || operation.current) return;
+    const controller = new AbortController();
+    operation.current = controller; setToolBusy(true); setMcpNotice('');
+    try {
+      const result = await discoverMcpTools(mcp, controller.signal);
+      if (!controller.signal.aborted) { setTools(result); if (!result.length) setMcpNotice('No MCP tools were found.'); }
+    } catch {
+      if (!controller.signal.aborted) setMcpNotice('Could not discover MCP tools. Check the standalone MCP app and your access.');
+    } finally {
+      if (operation.current === controller) {
+        operation.current = null;
+        if (!controller.signal.aborted) setToolBusy(false);
+      }
+    }
+  }
+
+  async function completeTool(part: Invocation, tool: ChatTool, action: 'stage' | 'run' | 'decline') {
+    if (!turn || turn.resolved.has(part.toolCallId) || operation.current || status !== 'ready') return;
+    const controller = new AbortController();
+    // The render snapshot can lag behind addToolOutput when message updates are throttled.
+    if (action !== 'stage') turn.resolved.add(part.toolCallId);
+    operation.current = controller; setToolBusy(true);
+    if (tool.source === 'mcp') setMcpNotice('');
+    try {
+      let output: unknown, images: string[] | undefined;
+      if (tool.source === 'local') {
+        output = action === 'decline' ? { isError: true, content: [{ type: 'text', text: 'The user declined to share local chat history.' }] }
+          : runLocalTool(tool, part.input, { catalog: turn.catalog, history: tool.plugin.requiresHistory ? readHistory?.() ?? [] : [] });
+      } else if (tool.source === 'skill') {
+        output = await resolveSkillTool(tool.definition.name, part.input, turn.skills, turn.remoteSkills, controller.signal);
+      } else {
+        output = 'The user declined to run this MCP tool.';
+        if (action !== 'decline') {
+          try {
+            if (!mcp) throw new Error('MCP is unavailable.');
+            const result = await callMcpTool(mcp, tool.tool, part.input, controller.signal);
+            output = result.text;
+            images = result.images;
+          } catch { output = 'The MCP tool could not be completed.'; }
+        }
+      }
+      if (controller.signal.aborted) return;
+      if (action === 'stage') setStaged({ turn, callId: part.toolCallId, result: { output, images } });
+      else {
+        if (images?.length) setToolImages(images);
+        await addToolOutput({ tool: tool.definition.name, toolCallId: part.toolCallId, output });
+      }
+    } catch {
+      if (!controller.signal.aborted) { setToolNotice('Could not apply the tool result.'); setTurn(undefined); }
+    } finally {
+      if (operation.current === controller) {
+        operation.current = null;
+        if (!controller.signal.aborted) setToolBusy(false);
+      }
+    }
+  }
+
+  function answerTool(approved: boolean) {
+    if (!turn || !pending || !last || toolBusy || operation.current || status !== 'ready') return;
+    const { part, tool } = pending;
+    if (turn.resolved.has(part.toolCallId)) return;
+    if (!isApiChat(turn.route)) {
+      if (tool) void completeTool(part, tool, approved ? 'run' : 'decline');
+      return;
+    }
+    const result = stagedResult;
+    if (part.state !== 'approval-requested' || !result) return;
+    turn.resolved.add(part.toolCallId);
+    setStaged(undefined);
+    if (approved && result?.images?.length) setToolImages(result.images);
+    // Apply the decision and approved output atomically, preserving a signature when provided.
+    const approval = { ...part.approval, approved };
+    const answered: Invocation = approved
+      ? { ...part, state: 'output-available', approval: { ...approval, approved: true }, output: result.output }
+      : { ...part, state: 'approval-responded', approval, output: undefined };
+    setMessages(current => current.map(message => message.id === last.id ? { ...message,
+      parts: message.parts.map(item => 'toolCallId' in item && item.toolCallId === part.toolCallId ? answered : item) } : message));
+  }
+
+  function beginTurn(model: string) {
+    setToolNotice('');
+    setPendingModel(decision ? undefined : model);
+    const seen = new Set(messages.flatMap(message => message.parts.flatMap(part => 'toolCallId' in part ? [part.toolCallId] : [])));
+    const next: Turn = { model, route, tools: enabledTools, context, catalog, skills: localSkills.skills, seen, resolved: new Set(), automatic: { calls: 0 },
+      remoteSkills: enabledRemoteSkills.length ? { skills: enabledRemoteSkills, download: gateway.downloadSkill, bundles: new Map() } : undefined };
+    setTurn(next);
+    return { ...requestBody(next), ...(decision && { decision }) };
+  }
+
+  function stopTurn() {
+    operation.current?.abort();
+    operation.current = null;
+    setToolBusy(false);
+    setStaged(undefined);
+    setTurn(undefined);
+    void stop();
+  }
+
+  function pendingReview(): ToolReview | undefined {
+    if (!turn || !pending || status !== 'ready') return;
+    const { tool, part } = pending;
+    const name = tool?.source === 'mcp' ? tool.tool.title || tool.tool.remoteName : invocationName(part);
+    const details = { id: part.toolCallId, name, input: part.input, disabled: toolBusy || !connection.ready };
+    if (isApiChat(turn.route)) {
+      if (part.state === 'approval-requested' && stagedResult) return { ...details, kind: 'result', ...stagedResult };
+    } else if (part.state === 'input-available' && (tool?.source === 'mcp' || (tool?.source === 'local' && tool.plugin.approval))) {
+      return { ...details, kind: 'execution', destination: tool.source === 'mcp' && mcp
+        ? { server: tool.tool.server.title, host: mcp.base.host } : undefined };
+    }
+  }
+  const review = pendingReview();
+  const { result, reload } = models;
+  const busy = status === 'submitted' || status === 'streaming';
+  const progress = busy ? deciding ? t('Choosing a model…') : t('Assistant is responding…')
+    : toolBusy && turn ? t('Running tool…') : undefined;
+  const catalog = result?.catalog ?? [];
+  const agentModels = route.mode === 'direct' ? gatewayModels.result : result;
+  const hasGateway = gateway.historyScope !== 'direct';
+  const imageModels = hasGateway ? agentModels : undefined;
+  const imageRouter = view === 'images' && imageModels ? modelDecisionRouter(agents, imageModels.catalog, decisions.selected) : undefined;
+  const imageStatus = !hasGateway ? t('No gateway is configured.') : !connection.ready ? connection.emptyMessage
+    : !imageModels ? t('Loading models…') : imageModels.error;
+  const agentModelStatus = !connection.ready ? t('Connect to the gateway to browse models. You can still edit this agent.')
+    : !agentModels ? t('Loading gateway models…') : agentModels.error;
+  const compatible = route.mode === 'direct' ? catalog.filter(item => direct?.supports(item.provider, route.endpoint)) : pickChatCatalogModels(catalog);
+  const router = gatewayRoute ? modelDecisionRouter(agents, catalog, decisions.selected) : undefined;
+  const { byId: compatibleById, selected } = resolveModelSelection(compatible, selectedIds, !!router);
+  const model = selected[0];
+  const welcomeAgent = assignedAgent(agents, welcomeRoleId);
+  const welcomeModels = configuredAgentModels(welcomeAgent).filter(({ type }) => type !== 'decision');
+  const welcomeModel = welcomeModels.find(({ id }) => compatibleById.has(id))?.id;
+  const welcomeInstructions = welcomeAgent?.instructions;
+  const welcomeRequest = useMemo(() => welcomeModel && welcomeInstructions && appAgentTransport
+    ? { model: welcomeModel, instructions: welcomeInstructions, transport: appAgentTransport, context: appAgentContext }
+    : undefined, [welcomeModel, welcomeInstructions, appAgentTransport, appAgentContext]);
+
+  function prepareName() {
+    const agent = assignedAgent(agents, conversationNameRoleId);
+    const model = configuredAgentModels(agent).find(({ id, type }) => type !== 'decision' && compatibleById.has(id));
+    if (agent && model && appAgentTransport) {
+      nameRequest.current = { model: model.id, instructions: agent.instructions, transport: appAgentTransport, context: appAgentContext };
+    }
+  }
+  useEffect(() => {
+    // Persist the submitted user turn and the terminal (including manually stopped) transcript.
+    // Do not write on every text delta, or save an empty new chat.
+    if (status === 'streaming' || !messages.length || messages === saved.current) return;
+    saved.current = messages;
+    onPersist({ ...conversation, messages,
+      metadata: { ...conversation.metadata, model: pendingModel ?? model?.id, updatedAt: new Date().toISOString() } }, nameRequest.current);
+  }, [messages, status, conversation, pendingModel, model?.id, onPersist]);
+  const hasDecisions = agents?.config.roles?.some(({ id }) => id === selectModelRoleId);
+  const decision = chatModelDecision(router, selected);
+  const routesLocked = busy || toolBusy || (status === 'ready' && toolParts.length > 0);
+  const canSend = !!model && !routesLocked && !restoringSkills;
+  const routeMenu = pageRouteMenu(view, {
+    chat: connection.account ? { selected: route, direct: direct?.endpoints(!connection.ready), disabled: routesLocked, onSelect: onRoute } : undefined,
+    decisions: connection.account && hasDecisions ? decisions : undefined,
+    images: hasGateway ? images : undefined,
+    transcriptions: hasGateway ? transcriptions : undefined,
+  });
+  const modelStatus = !connection.ready ? connection.emptyMessage : !result ? t('Loading models…') :
+    result.error ?? (!compatible.length ? route.mode === 'direct' ? t('No models for this Direct route. Check your provider keys or choose another route.')
+      : t('No compatible models are available. Check the gateway and its provider credentials.') : null);
+
+  return <div ref={setMenuContainer} className="chat-shell" data-nav={nav ? 'expanded' : 'collapsed'} data-view={view}>
+      <ChatNavigation appName={appName} expanded={nav} history={history} active={view === 'chat' ? conversation.id : ''} busy={busy || toolBusy}
+        account={connection.account} container={menuContainer} view={view} onView={onView}
+        toggle={toggleNav} onNew={onNew} onOpen={onSwitch}
+        onPin={onPin} onDelete={onDelete} onSettings={onSettings} routes={routeMenu} />
+      <header className="chat-toolbar" hidden={view !== 'chat' && view !== 'agents' && view !== 'skills' && view !== 'images' && view !== 'transcriptions' && !connection.signIn}>
+        {view === 'chat' && <ModelPicker models={compatible} selected={selected} multiple={!!router}
+          loading={connection.ready && !result} disabled={routesLocked} onChange={setSelectedIds} />}
+        {(view === 'images' || view === 'transcriptions') && <div className="chat-image-toolbar" ref={setImageToolbar} />}
+        {connection.signIn && <div className="chat-account">{connection.signIn}</div>}
+        {(view === 'agents' || view === 'skills') && <div ref={setAgentToolbar} />}
+      </header>
+      <main className="chat-main" data-empty={!messages.length} hidden={view !== 'chat'}>
+        {messages.length ? <Transcript messages={messages} /> : null}
+        <div className="chat-column chat-dock">
+           {!messages.length && <WelcomeHeading request={welcomeRequest} discovering={connection.ready && !result && welcomeModels.length > 0} />}
+           {storageIssue && <div className="chat-notice" role="status">{t(storageIssue)}</div>}
+          {modelStatus && <div className="chat-notice" role="status">
+            {modelStatus}{connection.ready && result && <Button onClick={reload}>{t('Refresh models')}</Button>}
+          </div>}
+          {error && <div className="chat-notice chat-error" role="alert">
+            {t(errorMessage(error, 'The reply was interrupted. You can retry or send another message.'))}
+            <Button disabled={!canSend} onClick={() => { if (model && canSend) void regenerate({ body: beginTurn(model.id) }); }}>{t('Retry')}</Button>
+          </div>}
+          {mcp && <section className="chat-notice" aria-label={t('MCP tools')}>
+             {tools === null ? <Button onClick={() => { void discover(); }} disabled={!connection.ready || routesLocked}>{t('Discover MCP tools')}</Button>
+               : <details><summary>{t('{{count, number}} MCP tools enabled', { count: tools.length })}</summary><ul>{tools.map(tool => <li key={tool.name}>{tool.server.title}: {tool.remoteName}</li>)}</ul>
+                <Button disabled={routesLocked} onClick={() => { setTools(null); setTurn(undefined); }}>{t('Disable MCP tools')}</Button></details>}
+             {mcpNotice && <p role="status">{t(mcpNotice)}</p>}
+             {toolImages.map((image, index) => <img className="chat-mcp-image" key={index} alt={t('MCP image {{index, number}}', { index: index + 1 })} src={image} />)}
+           </section>}
+          {toolNotice && <p className="chat-notice" role="status">{t(toolNotice)}</p>}
+          <div className="chat-progress" role="status">{(progress || restoringSkills) && <><span className="chat-spinner" aria-hidden="true" />
+            {progress || t('Loading provider skills…')}</>}</div>
+          <ChatComposer busy={busy || (status === 'ready' && toolParts.length > 0)} canSend={canSend} onStop={stopTurn}
+            convert={preferences.convertAttachmentsToText}
+            onChatSettings={() => chatSettings.current?.showModal()} onViewContext={() => contextDialog.current?.showModal()}
+            onSend={(parts) => {
+              if (!model || !canSend) return;
+              if (!messages.length) prepareName();
+              void sendMessage({ role: 'user', parts, metadata: { timestamp: new Date().toISOString() } }, { body: beginTurn(model.id) });
+            }} />
+        </div>
+      </main>
+      <ChatSettingsDialog dialog={chatSettings} value={preferences} onChange={onPreferences} gateway={gatewayRoute}
+        hasHistory={hasHistory} locked={routesLocked} localSkills={localSkills} remoteSkills={remoteSkills} />
+      <ViewContextDialog dialog={contextDialog} context={(busy || toolParts.length > 0) && turn ? turn.context : context}
+        tools={(busy || toolParts.length > 0) && turn ? turn.tools : enabledTools} />
+      {review && <ToolApprovalDialog key={review.id} review={review} onAnswer={answerTool} onStop={stopTurn} />}
+      <footer className="chat-disclaimer" hidden={view !== 'chat'}>{t('{{appName}} can make mistakes. Check important information.', { appName })}</footer>
+      {view === 'images' ? <Suspense fallback={<main className="catalog-main"><p role="status">{t('Loading images…')}</p></main>}>
+        <ImagesView gateway={gateway} scope={scope} route={images.selected} toolbar={imageToolbar} catalog={imageModels?.catalog}
+          loading={hasGateway && connection.ready && !imageModels} router={imageRouter} status={imageStatus} />
+      </Suspense> : view === 'transcriptions' ? <Suspense fallback={<main className="catalog-main"><p role="status">{t('Loading transcriptions…')}</p></main>}>
+        <TranscriptionsView gateway={gateway} scope={scope} route={transcriptions.selected} toolbar={imageToolbar} catalog={imageModels?.catalog}
+          loading={hasGateway && connection.ready && !imageModels} status={imageStatus} />
+      </Suspense> : view !== 'chat' && <main className="catalog-main">
+        {view === 'models' ? <ModelsView models={result?.error ? undefined : result?.catalog}
+          status={!connection.ready ? connection.emptyMessage : !result ? t('Loading models…') : result.error}
+           refresh={connection.ready && result ? reload : undefined} /> : view === 'agents'
+          ? <AgentsView catalog={agentModels?.catalog ?? []} catalogStatus={agentModelStatus}
+            toolbar={agentToolbar} menuContainer={menuContainer} /> : view === 'skills'
+          ? <SkillsView store={localSkills} gateway={gateway} remote={remoteSkills} toolbar={agentToolbar} menuContainer={menuContainer} />
+          : <ProvidersView appName={appName} />}
+      </main>}
+  </div>;
+}

@@ -1,0 +1,24 @@
+.images-content { width: min(100% - 2rem, 66rem); margin-inline: auto; padding-block: 1rem 2rem; }
+.images-content h1 { margin-block: 1.5rem .85rem; font-size: clamp(1.75rem, 5vw, 2.45rem); }
+.images-library { margin-block: 2.5rem 1.5rem; }
+.images-library h2 { margin-block: 0 .85rem; font-size: clamp(1.35rem, 4vw, 1.75rem); }
+.images-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 11rem), 1fr)); gap: .75rem; padding: 0; margin: 0; list-style: none; }
+.image-tile { aspect-ratio: 1; min-width: 0; overflow: hidden; border-radius: var(--radius); background: var(--surface); }
+.image-tile img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.image-shimmer { position: relative; background: var(--soft); }
+.image-shimmer::after { content: ''; position: absolute; inset: 0; background: linear-gradient(105deg, transparent 20%, color-mix(in srgb, var(--foreground) 12%, transparent) 50%, transparent 80%); animation: image-shimmer 1.6s ease-in-out infinite; }
+@keyframes image-shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { .image-shimmer::after { animation: none; } }
+.images-progress { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.images-content .chat-composer-actions > :last-child { margin-inline-start: auto; }
+.images-content .chat-composer .chat-attachment-menu { inset-block: calc(100% + .4rem) auto; }
+.image-settings-dialog form { display: grid; gap: .8rem; }
+.image-settings-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: .75rem; }
+.image-settings-fields label, .image-file-setting { display: grid; gap: .35rem; min-width: 0; }
+.image-settings-fields :is(input, select) { width: 100%; min-width: 0; box-sizing: border-box; padding: .5rem; border: 1px solid var(--border); border-radius: var(--radius); color: inherit; background: var(--surface); font: inherit; }
+.image-setting-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.image-svg-switch, .image-file-preview { display: flex; align-items: center; gap: .5rem; }
+.image-file-preview span { min-width: 0; overflow-wrap: anywhere; }
+.image-file-preview img { width: 3rem; height: 3rem; object-fit: contain; border-radius: var(--radius); }
+.image-settings-dialog .chat-tool-footer { flex-wrap: wrap; }
+.image-settings-dialog .chat-tool-footer > :first-child { margin-inline-end: auto; }

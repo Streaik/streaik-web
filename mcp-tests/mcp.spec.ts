@@ -1,0 +1,198 @@
+import { expect, test } from '@playwright/test';
+import type { APIRequestContext, APIResponse, Page } from '@playwright/test';
+
+const model = 'openai/gpt-4.1-mini';
+const mcp = 'http://localhost:15281';
+const delegated = 'http://localhost:15282';
+const version = '2026-07-28';
+const auth = { openai: { Authorization: 'Bearer browser-openai' }, google: { 'x-goog-api-key': 'browser-google' },
+  anthropic: { 'x-api-key': 'browser-anthropic' } };
+const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jf2sAAAAASUVORK5CYII=';
+
+function sse(events: unknown[]) { return events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n'; }
+
+async function exerciseChat(page: Page, approve: boolean) {
+  const calls: string[] = [];
+  const mcpFailures: string[] = [];
+  let chatRequests = 0;
+  let decisions = 0;
+  const routed = !approve;
+  const candidate = 'openai/gpt-5-nano';
+  const router = 'openai/test-router';
+  const instructions = 'Choose the model most suitable for concise image prompts.';
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [
+    { id: model }, ...(routed ? [{ id: candidate }, { id: router, type: 'decision', name: 'Test router' }] : []),
+  ] } }));
+  await page.route('**/gateway/v1/decisions', (route) => {
+    decisions++;
+    expect(routed).toBe(true);
+    expect(route.request().postDataJSON()).toMatchObject({ model: router, questions: [{ name: 'chat_model', instructions }] });
+    return route.fulfill({ json: { answers: [{ name: 'chat_model', type: 'choice', choice: candidate }] } });
+  });
+  page.on('request', request => {
+    if (request.url().startsWith(mcp) && request.method() === 'POST' && request.postDataJSON().method === 'tools/call')
+      calls.push(request.postDataJSON().params.name);
+  });
+  page.on('response', async response => {
+    if (response.url().startsWith(mcp) && response.request().method() === 'POST' && response.request().postDataJSON().method === 'tools/call')
+      mcpFailures.push(await response.text().catch(() => `HTTP ${response.status()}`));
+  });
+  await page.route('**/gateway/api/chat', async route => {
+    chatRequests++;
+    const sent = route.request().postDataJSON();
+    const tool = 'mcp_openai_images_OpenAIImages_CreateImage';
+    expect(sent.model).toBe(routed ? candidate : model);
+    expect(sent.clientToolResultApproval).toBe(true);
+    expect(sent.tools.map((tool: { name: string }) => tool.name)).toContain(tool);
+    const headers = { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' };
+    if (chatRequests === 1) {
+      await route.fulfill({ headers, body: sse([
+        { type: 'start', messageId: 'mcp-assistant' }, { type: 'start-step' },
+        { type: 'tool-input-available', toolCallId: 'fixture-tool', toolName: tool, input: { prompt: 'A tiny landscape' }, dynamic: true },
+        { type: 'tool-approval-request', toolCallId: 'fixture-tool', approvalId: 'fixture-review' },
+        { type: 'finish-step' }, { type: 'finish', finishReason: 'tool-calls' },
+      ]) });
+    } else {
+      const reviewed = sent.messages.at(-1).parts.find((part: { toolCallId?: string }) => part.toolCallId === 'fixture-tool');
+      expect(reviewed, mcpFailures.join('\n')).toMatchObject({
+        state: approve ? 'output-available' : 'approval-responded',
+        approval: { id: 'fixture-review', approved: approve },
+      });
+      expect(reviewed.approval).not.toHaveProperty('signature');
+      if (approve) expect(reviewed.output).toBe('MCP returned 1 image(s), displayed to the user.');
+      else expect(reviewed).not.toHaveProperty('output');
+      expect(JSON.stringify(sent)).not.toContain('browser-openai');
+      expect(JSON.stringify(sent)).not.toContain('iVBOR');
+      await route.fulfill({ headers, body: sse([
+        { type: 'start', messageId: 'mcp-assistant' }, { type: 'start-step' },
+        { type: 'text-start', id: 'reply' }, { type: 'text-delta', id: 'reply', delta: 'Chat continued after MCP.' },
+        { type: 'text-end', id: 'reply' }, { type: 'finish-step' }, { type: 'finish', finishReason: 'stop' },
+      ]) });
+    }
+  });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Account menu' }).click();
+  await page.getByRole('menuitem', { name: 'Settings' }).click();
+  await page.getByRole('tab', { name: 'API keys', exact: true }).click();
+  await page.getByRole('button', { name: 'Add API key', exact: true }).click();
+  await page.getByLabel('Provider', { exact: true }).selectOption('openai');
+  await page.getByLabel('OpenAI API key').fill('browser-openai');
+  await page.getByRole('button', { name: 'Save OpenAI key' }).click();
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
+  if (routed) {
+    await page.getByRole('button', { name: 'Agents', exact: true }).click();
+    await page.getByRole('button', { name: 'Create agent', exact: true }).click();
+    const editor = page.getByRole('dialog', { name: 'Create agent', exact: true });
+    await editor.getByLabel('Name', { exact: true }).fill('Fixture router');
+    await editor.getByLabel('Description', { exact: true }).fill('Selects the chat model.');
+    await editor.getByLabel('Instructions', { exact: true }).fill(instructions);
+    await editor.getByRole('button', { name: 'Add model', exact: true }).click();
+    await editor.getByRole('option', { name: `Test router (${router})`, exact: true }).click();
+    await editor.getByRole('button', { name: 'Save agent', exact: true }).click();
+    await page.getByRole('button', { name: 'New chat', exact: true }).click();
+    await page.getByRole('button', { name: 'Account menu' }).click();
+    await page.getByRole('menuitem', { name: 'Settings' }).click();
+    await page.getByRole('tab', { name: 'Agents', exact: true }).click();
+    await page.getByRole('combobox', { name: 'Select a model', exact: true }).click();
+    await page.getByRole('option', { name: 'Fixture router', exact: true }).click();
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await page.getByRole('button', { name: 'Model', exact: true }).click();
+    await page.getByRole('option', { name: 'gpt-5-nano', exact: true }).click();
+    await page.keyboard.press('Escape');
+  }
+  await page.getByRole('button', { name: 'Discover MCP tools' }).click();
+  await expect(page.getByText('7 MCP tools enabled')).toBeVisible();
+  await page.getByText('7 MCP tools enabled').click();
+  await expect(page.getByText('Anthropic Skills: AnthropicSkills_Get')).toBeVisible();
+  await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Create a tiny landscape.');
+  await page.getByRole('button', { name: 'Send', exact: false }).click();
+  const review = page.getByRole('dialog', { name: 'Review tool result' });
+  await expect(review.getByRole('tabpanel', { name: 'Output' })).toContainText('MCP returned 1 image(s)');
+  await expect(review.getByRole('img', { name: 'MCP image 1' })).toBeVisible();
+  await review.getByRole('tab', { name: 'Input' }).click();
+  await expect(review.getByRole('tabpanel', { name: 'Input' })).toContainText('A tiny landscape');
+  expect(calls).toEqual(['OpenAIImages_CreateImage']);
+  expect(chatRequests).toBe(1);
+  await review.getByRole('button', { name: approve ? 'Approve and share' : 'Decline', exact: true }).click();
+  await expect(page.getByText('Chat continued after MCP.')).toBeVisible();
+  if (approve) {
+    const image = page.getByRole('img', { name: 'MCP image 1' });
+    await expect(image).toBeVisible();
+    await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1);
+  } else await expect(page.getByRole('img', { name: 'MCP image 1' })).toHaveCount(0);
+  expect(calls).toEqual(['OpenAIImages_CreateImage']);
+  expect(chatRequests).toBe(2);
+  expect(decisions).toBe(routed ? 1 : 0);
+}
+
+test('browser executes once, previews the image in a review modal, and shares the approved result', async ({ page }) => exerciseChat(page, true));
+test('the assigned router runs once and its chosen model continues after an MCP denial', async ({ page }) => exerciseChat(page, false));
+
+async function rpc(request: APIRequestContext, host: string, path: string, method: string, params: object = {}, headers: Record<string, string> = {},
+  headerVersion: string | null = version, bodyVersion = version) {
+  return request.post(`${host}/${path}`, {
+    headers: { Accept: 'application/json, text/event-stream', 'Mcp-Method': method,
+      ...('name' in params ? { 'Mcp-Name': String(params.name) } : {}),
+      ...(headerVersion ? { 'Mcp-Protocol-Version': headerVersion } : {}), ...headers },
+    data: { jsonrpc: '2.0', id: 1, method, params: { ...params, _meta: { 'io.modelcontextprotocol/protocolVersion': bodyVersion,
+      'io.modelcontextprotocol/clientCapabilities': {}, 'io.modelcontextprotocol/clientInfo': { name: 'Streaik MCP tests', version: '1.0.0' } } } },
+  });
+}
+
+async function rpcBody(response: APIResponse) {
+  const text = await response.text();
+  return response.headers()['content-type']?.startsWith('text/event-stream')
+    ? JSON.parse(text.split(/\r?\n/).filter(line => line.startsWith('data: ')).at(-1)!.slice(6))
+    : JSON.parse(text);
+}
+
+test('catalog and routes are isolated, stateless, and enforce the exact protocol version', async ({ request }) => {
+  const catalog = await (await request.get(`${mcp}/catalog.json`)).json();
+  expect(catalog.protocolVersion).toBe(version);
+  expect(catalog.servers.map(({ id }: { id: string }) => id)).toEqual(['openai-images', 'google-images', 'anthropic-skills']);
+  for (const versionHeader of [null, '2025-11-25', '2099-01-01']) {
+    const response = await rpc(request, mcp, 'openai-images', 'tools/list', {}, {}, versionHeader);
+    expect(response.status()).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: -32022, data: { supported: [version] } } });
+  }
+  const mismatch = await rpc(request, mcp, 'openai-images', 'tools/list', {}, {}, version, '2025-11-25');
+  expect(mismatch.status()).toBe(400);
+  const list = await rpc(request, mcp, 'anthropic-skills', 'tools/list');
+  expect(list.status(), await list.text()).toBe(200);
+  expect(list.headers()['mcp-session-id']).toBeUndefined();
+  expect((await rpcBody(list)).result.tools.map(({ name }: { name: string }) => name)).toEqual(['AnthropicSkills_List', 'AnthropicSkills_Get']);
+  const badTool = await rpc(request, mcp, 'anthropic-skills', 'tools/call', { name: 'OpenAIImages_CreateImage', arguments: { prompt: 'Example' } });
+  expect((await rpcBody(badTool)).error).toBeTruthy();
+  expect((await request.get(`${mcp}/openai-images`, { headers: { Accept: 'text/event-stream' } })).status()).toBe(405);
+  expect((await request.get(`${mcp}/openai-images/sse`)).status()).toBe(404);
+});
+
+test('all provider tools execute with isolated credentials; delegated mode only uses server-side keys', async ({ request }) => {
+  const invoke = async (host: string, server: string, name: string, args: object, headers: Record<string, string>) => {
+    const response = await rpc(request, host, server, 'tools/call', { name, arguments: args }, headers);
+    expect(response.status(), await response.text()).toBe(200);
+    const payload = await rpcBody(response);
+    expect(payload, JSON.stringify(payload)).toHaveProperty('result');
+    return payload.result;
+  };
+  const edit = await invoke(mcp, 'openai-images', 'OpenAIImages_CreateImageEdit', { prompt: 'Test', fileUrl: png }, { ...auth.openai, ...auth.google, ...auth.anthropic });
+  expect(edit.content[0]).toMatchObject({ type: 'image', mimeType: 'image/png', data: png.split(',')[1] });
+  const ask = await invoke(mcp, 'openai-images', 'OpenAIImages_AskImages', { question: 'Test', imageUrls: [png] }, auth.openai);
+  expect(ask.content[0].text).toBe('OpenAI sees an image.');
+  for (const inputs of [{}, { fileUrl: png }]) {
+    const generated = await invoke(mcp, 'google-images', 'GoogleNanoBanana_CreateImage', { prompt: 'Test', model: 'gemini-nano-banana-2.1', ...inputs }, { ...auth.google, ...auth.openai });
+    expect(generated.content[0].type).toBe('image');
+  }
+  const google = await invoke(mcp, 'google-images', 'GoogleNanoBanana_AskImages', { question: 'Test', imageUrls: [png] }, auth.google);
+  expect(google.content[0].text).toBe('Google sees an image.');
+  const keyMissing = await invoke(mcp, 'anthropic-skills', 'AnthropicSkills_List', {}, auth.openai);
+  expect(keyMissing).toMatchObject({ isError: true, content: [{ text: 'The provider credential is missing.' }] });
+  const list = await invoke(mcp, 'anthropic-skills', 'AnthropicSkills_List', {}, auth.anthropic);
+  expect(list.content[0].text).toContain('Fixture Skill');
+  const unauthorized = await rpc(request, delegated, 'anthropic-skills', 'tools/list', {}, auth.openai);
+  expect(unauthorized.status()).toBe(401);
+  const detail = await invoke(delegated, 'anthropic-skills', 'AnthropicSkills_Get', { skillId: 'skill_test' },
+    { ...auth.anthropic, Authorization: 'Bearer test-mcp-token' });
+  expect(detail.content[0].text).toContain('Fixture Skill');
+});

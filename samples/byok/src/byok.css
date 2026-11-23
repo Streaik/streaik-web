@@ -1,0 +1,23 @@
+.byok-settings { gap: .8rem; }
+.byok-providers { display: grid; padding: 0; margin: 0; list-style: none; }
+.byok-provider {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .25rem .65rem;
+  padding: .5rem 0; border-bottom: 1px solid var(--border);
+}
+.byok-empty, .byok-editor, .byok-storage {
+  padding: .75rem; border: 1px solid var(--border); border-radius: var(--radius);
+}
+.byok-empty, .byok-storage { background: var(--soft); }
+.byok-editor, .byok-storage { display: grid; gap: .65rem; }
+.byok-storage-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .3rem .65rem; }
+.byok-storage-heading h4 { margin: 0; }
+.byok-storage-state {
+  border: 1px solid var(--border); border-radius: 1rem; background: var(--surface);
+  color: var(--muted); font-size: .8rem; padding: .05rem .5rem;
+}
+.byok-key-form { display: grid; gap: .4rem; }
+.byok-key-form .ui-input { box-sizing: border-box; max-width: 100%; }
+.byok-provider-select { background: var(--surface); color: var(--foreground); border: 1px solid var(--border); border-radius: var(--radius); }
+.byok-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+.byok-settings .byok-notice:not(:empty) { color: var(--foreground); }
+.byok-settings .byok-notice:empty { height: 0; margin-top: -.8rem; }

@@ -1,0 +1,16 @@
+.transcription-hint { margin: .4rem .55rem 0; color: var(--muted); }
+.transcription-submit { margin-inline-start: auto; display: flex; align-items: center; gap: .4rem; }
+.transcription-queue { list-style: none; padding: 0 .55rem; margin: 0; display: grid; gap: .3rem; }
+.transcription-queue li { min-width: 0; display: flex; justify-content: space-between; align-items: center; gap: .5rem; overflow-wrap: anywhere; }
+.transcription-queue small { display: block; color: var(--muted); }
+.transcription-queue button { border: 0; background: transparent; color: inherit; cursor: pointer; }
+.transcription-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: 1rem; }
+.transcription-card { display: grid; align-content: start; gap: .7rem; min-width: 0; padding: 1rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.transcription-card h2, .transcription-meta { margin: 0; overflow-wrap: anywhere; }
+.transcription-meta, .transcription-partial { color: var(--muted); }
+.transcription-card audio { max-width: 100%; }
+.transcription-copy { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24rem; overflow: auto; }
+.transcription-preview { min-height: 9rem; }
+.transcription-segments { overflow: auto; max-height: 16rem; padding-inline-start: 1.5rem; overflow-wrap: anywhere; }
+.transcription-card-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+.transcription-fields select { min-width: 0; max-width: 100%; }

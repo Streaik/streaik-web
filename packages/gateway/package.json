@@ -1,0 +1,12 @@
+{
+  "name": "@streaik/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.107",
+    "@ai-sdk/openai": "^4.0.122",
+    "ai": "^7.0.179"
+  }
+}

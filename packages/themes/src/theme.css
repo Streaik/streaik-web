@@ -1,0 +1,26 @@
+/* Surface contract and dimensions only. Each adapter styles its own controls. */
+.streaik-theme {
+  --background: #fff; --foreground: #18181b; --muted: #52525b; --surface: #fff;
+  --soft: #f4f4f5; --border: #dedee2; --action: #18181b; --on-action: #fafafa;
+  --focus: #2563eb; --danger: #b91c1c; --radius: 0.5rem;
+  color-scheme: light;
+  color: var(--foreground); background: var(--background);
+  font: 400 1rem/1.5 ui-sans-serif, system-ui, sans-serif;
+}
+.streaik-theme[data-scheme=dark] {
+  --background: #0b0b0d; --foreground: #fafafa; --muted: #a1a1aa; --surface: #0b0b0d;
+  --soft: #202023; --border: #2b2b2f; --action: #fafafa; --on-action: #18181b;
+  --focus: #93c5fd; --danger: #fca5a5;
+  color-scheme: dark;
+}
+.streaik-theme *, .streaik-theme *::before, .streaik-theme *::after { box-sizing: border-box; }
+.streaik-theme :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.streaik-theme :is(.ui-button, .ui-select, .ui-textarea, .ui-input) { min-width: 0; }
+.streaik-theme .ui-button { padding: .35rem .65rem; min-height: 2.25rem; cursor: pointer; }
+.streaik-theme .ui-button:disabled { opacity: .55; cursor: default; }
+.streaik-theme select.ui-select { max-width: 100%; min-height: 2.25rem; padding-inline: .55rem 1.4rem; }
+.streaik-theme textarea.ui-textarea { display: block; width: 100%; min-height: 4rem; max-height: 35dvh; padding: .6rem; resize: vertical; }
+.streaik-theme .ui-input { width: 100%; min-height: 2rem; padding-inline: .55rem; font: inherit; }
+.appearance-row { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
+.appearance-row select { max-width: 100%; font: inherit; }
+.appearance-fields { display: grid; gap: .55rem; min-width: 0; margin: 0; border: 1px solid var(--border); border-radius: var(--radius); }

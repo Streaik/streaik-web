@@ -1,0 +1,29 @@
+{
+  "name": "streaik-monorepo",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "workspaces": [
+    "packages/*",
+    "samples/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev:byok",
+    "dev:byok": "npm run dev -w @streaik/sample-byok",
+    "dev:entra": "npm run dev -w @streaik/sample-entra",
+    "build": "npm run typecheck && npm run build --workspaces --if-present",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "test:browser": "playwright test",
+    "test:mcp": "playwright test --config playwright.mcp.config.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1",
+    "@types/node": "^24",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "6.3.0",
+    "typescript": "6.0.3",
+    "vite": "8.3.8"
+  }
+}
