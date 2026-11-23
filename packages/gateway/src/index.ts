@@ -5,6 +5,8 @@ import { decisionChoiceBody, gatewayDecisionEndpoints, readDecisionChoice } from
 import type { DecisionChoice, GatewayDecisionEndpoint } from './decisionChoice.ts';
 import { imageRequestBody, isImageEndpoint, readImageResponse } from './images.ts';
 import type { GatewayImageEndpoint, ImageRequest, ImageResponse } from './images.ts';
+import { readVideoOperation, readVideoStatus, videoOperationParts } from './videos.ts';
+import type { VideoRequest, VideoStatus } from './videos.ts';
 import { googleLiveTranscriptionSetup, isTranscriptionEndpoint, liveTranscriptionProvider, openAITranscriptionSession, readLiveTranscriptionCredential, readTranscript, readTranscriptStream, supportsFileTranscription, transcriptionBody } from './transcriptions.ts';
 import type { GatewayTranscriptionEndpoint, TranscriptionOptions } from './transcriptions.ts';
 export { gatewayTranscriptionEndpoints, googleLiveTranscriptionSetup, isLiveTranscriptionModel, isTranscriptionEndpoint, openAITranscriptionSocket, supportsFileTranscription, transcriptionFileAccept, transcriptionMediaType, transcriptionUploadLimit, usesTranscriptionWebSocket } from './transcriptions.ts';
@@ -17,6 +19,7 @@ export { gatewayDecisionEndpoints } from './decisionChoice.ts';
 export type { DecisionChoice, GatewayDecisionEndpoint } from './decisionChoice.ts';
 export { gatewayImageEndpoints, imageBatchSizes, imageSource, isImageEndpoint, maxImageCount } from './images.ts';
 export type { GatewayImageEndpoint, ImageFileInput, ImageInput, ImageOptions, ImageProviderOptions, ImageRequest, ImageResponse } from './images.ts';
+export type { VideoAsset, VideoRequest, VideoStatus } from './videos.ts';
 export type { TokenRates } from './tokenPricing.ts';
 
 export const nativeChatEndpoints = ['/v1/responses', '/v1/messages', '/v1/chat/completions'] as const;
@@ -43,7 +46,7 @@ import type { RemoteSkill, RemoteSkillVersion, SkillPage, SkillPageOptions, Skil
 export type { RemoteSkill, RemoteSkillVersion, SkillPage, SkillPageOptions, SkillUploadTargets } from './skills.ts';
 export { maxSkillZipBytes } from './skills.ts';
 
-export type CredentialRequest = { kind: 'models' } | { kind: 'chat' | 'decision' | 'image' | 'skill' | 'transcription' | 'realtime'; provider: string };
+export type CredentialRequest = { kind: 'models' } | { kind: 'chat' | 'decision' | 'image' | 'video' | 'skill' | 'transcription' | 'realtime'; provider: string };
 export type Credentials = (request: CredentialRequest) => HeadersInit | Promise<HeadersInit>;
 export type ChatModel = { id: string; name: string; provider: string };
 export type CatalogModel = ChatModel & {
@@ -55,7 +58,9 @@ export type CatalogModel = ChatModel & {
   maxTokens?: number;
 };
 
-export class GatewayError extends Error {}
+export class GatewayError extends Error {
+  constructor(message: string, readonly httpStatus?: number) { super(message); }
+}
 
 export function normalizeGatewayBase(value: string, appUrl: string): URL {
   const url = new URL(value, appUrl);
@@ -177,7 +182,7 @@ export async function requestHttp(destination: string, credentials: HeadersInit,
   }
   if (!response.ok) {
     await response.body?.cancel();
-    throw new GatewayError(statusMessage(response.status, target));
+    throw new GatewayError(statusMessage(response.status, target), response.status);
   }
   return response;
 }
@@ -196,6 +201,7 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
   const root = baseUrl?.href;
   const modelsUrl = root && new URL('v1/models', root).href;
   const chatUrl = root && new URL('api/chat', root).href;
+  const videosUrl = root && new URL('api/videos', root).href;
 
   async function request(destination: string | undefined, auth: CredentialRequest, init: RequestInit = {}) {
     if (!destination) throw new GatewayError('No gateway is configured. Choose Route → Direct to chat with a provider.');
@@ -215,6 +221,15 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
 
   async function skillRequest(path: string, auth: CredentialRequest, init: RequestInit = {}) {
     return request(root && new URL(path, root).href, auth, init);
+  }
+
+  async function videoRequest(path: string | undefined, provider: string, init: RequestInit): Promise<unknown> {
+    if (!path) throw new GatewayError('No gateway is configured.');
+    const response = await request(path, { kind: 'video', provider }, init);
+    try { return await response.json(); } catch {
+      init.signal?.throwIfAborted();
+      throw new GatewayError('The gateway returned an unreadable video response.');
+    }
   }
 
   return {
@@ -267,6 +282,18 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
         throw new GatewayError('The gateway returned an unreadable image response.');
       }
       return readImageResponse(endpoint, data, image.model);
+    },
+    async startVideo({ model, prompt }: VideoRequest, signal?: AbortSignal): Promise<string> {
+      const match = /^([a-z0-9-]+)\/(\S.*)$/.exec(model);
+      if (!match) throw new GatewayError('Choose a valid video model.');
+      const payload = await videoRequest(videosUrl, match[1], {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model, prompt }), signal,
+      });
+      return readVideoOperation(payload, match[1]);
+    },
+    async getVideoStatus(operation: string, signal?: AbortSignal): Promise<VideoStatus> {
+      const { provider, token } = videoOperationParts(operation);
+      return readVideoStatus(await videoRequest(videosUrl && `${videosUrl}/${provider}/${token}`, provider, { signal }));
     },
     async transcribe(endpoint: GatewayTranscriptionEndpoint, model: string, file: File, options: TranscriptionOptions, signal: AbortSignal,
       preview: (text: string) => void = () => {}) {

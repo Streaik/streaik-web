@@ -15,21 +15,23 @@ export function AttachmentChip({ name, url, note, children }: { name: string; ur
 }
 
 type ImageDraft = { prompt: string; attachments: DraftAttachment[] };
-type ComposerProps = { busy: boolean; canSend: boolean; onStop: () => void } & (
-  { image?: undefined; convert: boolean; onSend: (parts: AttachmentPart[]) => void; onChatSettings: () => void; onViewContext: () => void } |
-  { image: { draft: ImageDraft; onChange: (value: ImageDraft) => void; onSend: () => void; onSettings: () => void } }
+type ComposerProps = { busy: boolean; canSend: boolean } & (
+  { image?: undefined; video?: undefined; convert: boolean; onSend: (parts: AttachmentPart[]) => void; onChatSettings: () => void; onViewContext: () => void; onStop: () => void } |
+  { image: { draft: ImageDraft; onChange: (value: ImageDraft) => void; onSend: () => void; onSettings: () => void }; video?: undefined; onStop: () => void } |
+  { image?: undefined; video: { prompt: string; onChange: (prompt: string) => void; onSend: () => void }; onStop?: undefined }
 );
 
 export function ChatComposer(props: ComposerProps) {
-  const { busy, canSend, onStop, image } = props;
-  const convert = !image && props.convert;
+  const { busy, canSend, onStop, image, video } = props;
+  const media = !!(image || video);
+  const convert = !image && !video && props.convert;
   const { t } = useAppTranslation();
   const id = useId();
   const [localDraft, setLocalDraft] = useState('');
   const [localAttachments, setLocalAttachments] = useState<DraftAttachment[]>([]);
-  const draft = image?.draft.prompt ?? localDraft;
+  const draft = image?.draft.prompt ?? video?.prompt ?? localDraft;
   const attachments = image?.draft.attachments ?? localAttachments;
-  const setDraft = (prompt: string) => image ? image.onChange({ prompt, attachments }) : setLocalDraft(prompt);
+  const setDraft = (prompt: string) => image ? image.onChange({ prompt, attachments }) : video ? video.onChange(prompt) : setLocalDraft(prompt);
   const setAttachments = (items: DraftAttachment[]) => image ? image.onChange({ prompt: draft, attachments: items }) : setLocalAttachments(items);
   const [notice, setNotice] = useState('');
   const [preparing, setPreparing] = useState(false);
@@ -104,14 +106,14 @@ export function ChatComposer(props: ComposerProps) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if ((!draft.trim() && (image || !attachments.length)) || !canSend || busy || pending.current) return;
-    if (image) { setNotice(''); image.onSend(); return; }
+    if ((!draft.trim() && (media || !attachments.length)) || !canSend || busy || pending.current) return;
+    if (image || video) { setNotice(''); (image ?? video)?.onSend(); return; }
     pending.current = true;
     setPreparing(true);
     setNotice('');
     try {
       const parts = await composeAttachmentParts(draft, attachments, convert);
-      if (!mounted.current || !latest.current.canSend || latest.current.image) return;
+      if (!mounted.current || !latest.current.canSend || latest.current.image || latest.current.video) return;
       latest.current.onSend(parts);
       setDraft('');
       setAttachments([]);
@@ -120,22 +122,24 @@ export function ChatComposer(props: ComposerProps) {
   }
 
   return <>
-    <form className="chat-composer" onSubmit={submit} aria-label={t(image ? 'Image composer' : 'Message composer')} data-file-drag={dragging || undefined}
+    <form className="chat-composer" onSubmit={submit} aria-label={t(image ? 'Image composer' : video ? 'Video composer' : 'Message composer')} data-file-drag={dragging || undefined}
       onDragEnter={event => {
         if (!event.dataTransfer.types.includes('Files')) return;
         event.preventDefault();
+        if (video) return;
         dragDepth.current++;
         if (!pending.current) setDragging(true);
       }} onDragOver={event => {
         if (!event.dataTransfer.types.includes('Files')) return;
         event.preventDefault();
-        event.dataTransfer.dropEffect = pending.current ? 'none' : 'copy';
+        event.dataTransfer.dropEffect = video || pending.current ? 'none' : 'copy';
       }} onDragLeave={() => {
         dragDepth.current = Math.max(0, dragDepth.current - 1);
         if (!dragDepth.current) setDragging(false);
       }} onDrop={event => {
         if (!event.dataTransfer.types.includes('Files')) return;
         event.preventDefault();
+        if (video) return;
         dragDepth.current = 0;
         setDragging(false);
         addFiles(event.dataTransfer.files);
@@ -149,7 +153,8 @@ export function ChatComposer(props: ComposerProps) {
           </AttachmentChip>
         </li>)}
       </ul>}
-      <Textarea aria-label={t(image ? 'Image prompt' : 'Message')} placeholder={t(image ? 'Describe a new image' : 'Ask anything')} rows={image ? 3 : 2} value={draft} readOnly={preparing || !!image && busy}
+      <Textarea aria-label={t(image ? 'Image prompt' : video ? 'Video prompt' : 'Message')}
+        placeholder={t(image ? 'Describe a new image' : video ? 'Describe a new video' : 'Ask anything')} rows={media ? 3 : 2} value={draft} readOnly={preparing || media && busy}
         onChange={event => setDraft(event.currentTarget.value)} onKeyDown={event => {
           if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
             event.preventDefault();
@@ -160,7 +165,7 @@ export function ChatComposer(props: ComposerProps) {
       {notice && <p className="chat-attachment-notice" role="alert">{t(notice)}</p>}
       {preparing && <p className="chat-attachment-notice" role="status">{t('Preparing attachments…')}</p>}
       <div className="chat-composer-actions">
-        <div className="chat-attachment-actions">
+        {!video && <div className="chat-attachment-actions">
           <span ref={trigger}><Button className="chat-composer-icon" type="button" variant="subtle" aria-label={t('Add attachments')}
             title={t('Add attachments')} aria-haspopup="menu" aria-expanded={menuOpen} aria-controls={menuOpen ? `${id}-menu` : undefined}
             disabled={preparing || !!image && busy} onClick={() => setMenuOpen(!menuOpen)} onKeyDown={event => {
@@ -178,20 +183,20 @@ export function ChatComposer(props: ComposerProps) {
             if (event.currentTarget.files) addFiles(event.currentTarget.files);
             event.currentTarget.value = '';
           }} />
-        </div>
+        </div>}
         {image ? <Button className="chat-composer-icon" type="button" variant="subtle" aria-label={t('Image settings')}
-          title={t('Image settings')} aria-haspopup="dialog" disabled={busy} onClick={image.onSettings}><ChatIcon name="settings" /></Button> : <>
+          title={t('Image settings')} aria-haspopup="dialog" disabled={busy} onClick={image.onSettings}><ChatIcon name="settings" /></Button> : !video && <>
           <span className="chat-composer-settings"><Button className="chat-composer-icon" type="button" variant="subtle" aria-label={t('Chat settings')}
             title={t('Chat settings')} aria-haspopup="dialog" onClick={props.onChatSettings}><ChatIcon name="settings" /></Button></span>
           <Button className="chat-composer-icon" type="button" variant="subtle" aria-label={t('View context')}
             title={t('View context')} aria-haspopup="dialog" onClick={props.onViewContext}><ChatIcon name="info" /></Button>
         </>}
-        {busy ? <Button key="stop" type="button" onClick={onStop}>{t('Stop')}</Button>
+        {busy && onStop ? <Button key="stop" type="button" onClick={onStop}>{t('Stop')}</Button>
           : <Button key="send" className="chat-send" type="submit" variant="primary" aria-label={t('Send')} title={t('Send')}
-            disabled={!canSend || preparing || (!draft.trim() && (!!image || !attachments.length))}><ChatIcon name="send" /></Button>}
+            disabled={busy || !canSend || preparing || (!draft.trim() && (media || !attachments.length))}><ChatIcon name="send" /></Button>}
       </div>
     </form>
-    <dialog ref={dialog} className="chat-settings chat-link-dialog" aria-labelledby={`${id}-link-title`}>
+    {!video && <dialog ref={dialog} className="chat-settings chat-link-dialog" aria-labelledby={`${id}-link-title`}>
       <form onSubmit={addLink}>
         <header className="chat-settings-header"><h2 id={`${id}-link-title`}>{t('Add link')}</h2></header>
         <div className="chat-link-fields">
@@ -211,6 +216,6 @@ export function ChatComposer(props: ComposerProps) {
           <Button type="submit" variant="primary">{t('Add link')}</Button>
         </footer>
       </form>
-    </dialog>
+    </dialog>}
   </>;
 }
