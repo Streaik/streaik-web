@@ -26,7 +26,7 @@ The chat client supports:
 - **Conversation history** with local persistence, search and configurable chat preferences
 - **Streaming UI** with interactive apps, cards and structured response rendering
 - **Speech** with generation, streaming playback and realtime transcription
-- **Transcriptions** with configurable file splitting, overlap handling and merged results
+- **Transcriptions** with configurable file splitting, overlap handling and merged results. **Real-time** streams microphone audio to supported OpenAI, Gladia, and Google Gemini 3.5 Transcribe Live models and displays text only. **Dictate** records a short clip and uploads it when you stop.
 - **Images and video** with generation, provider-specific options and asynchronous jobs
 - **Benchmarks** with multi-model comparisons, configurable routing and repeatable test runs
 - **Usage analytics** with interactive charts, token consumption and cost tracking

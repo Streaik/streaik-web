@@ -41,6 +41,8 @@ export const chatMessages = {
   'Connecting microphone…': ['Microfoon verbinden…', 'Conectando el micrófono…'],
   'Listening…': ['Luisteren…', 'Escuchando…'],
   'Finishing microphone transcription…': ['Microfoontranscriptie afronden…', 'Finalizando la transcripción del micrófono…'],
+  'Google microphone transcription disconnected or failed.': ['De Google-microfoontranscriptie is verbroken of mislukt.', 'La transcripción del micrófono de Google se desconectó o falló.'],
+  'Google did not finish the last microphone segment.': ['Google heeft het laatste microfoonsegment niet voltooid.', 'Google no terminó el último segmento del micrófono.'],
   'Transcribing audio…': ['Audio transcriberen…', 'Transcribiendo audio…'],
   'Waiting for transcript…': ['Wachten op de transcriptie…', 'Esperando la transcripción…'],
   'Image composer': ['Afbeeldingsinvoer', 'Editor de imágenes'],

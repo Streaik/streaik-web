@@ -309,7 +309,7 @@ test('Google Live Transcribe waits for setup, streams PCM, and saves only finali
       } else throw new Error('Unexpected message in transcription-only session.');
     });
   });
-  await openTranscriptions(page, 'Google', [
+  await openTranscriptions(page, 'Google Gemini', [
     { id: 'google/gemini-2.5-flash-native-audio-preview', type: 'audio', tags: ['realtime'] },
     { id: googleModel, type: 'transcription', tags: ['realtime'] },
   ]);
@@ -348,7 +348,7 @@ test('Google Live Transcribe rejects untrusted socket targets and releases the m
     socket.onClose(() => { closed = true; });
     // Never acknowledge: this verifies capture stays cancellable while setup is pending.
   });
-  await openTranscriptions(page, 'Google', [{ id: googleModel, type: 'transcription' }]);
+  await openTranscriptions(page, 'Google Gemini', [{ id: googleModel, type: 'transcription' }]);
   await start(page).click();
   await expect(page.getByRole('alert')).toContainText('did not return a valid microphone session credential');
   await expect(page.locator('html')).toHaveAttribute('data-track', 'stopped');
