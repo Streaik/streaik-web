@@ -86,9 +86,10 @@ test('malformed or non-inline image responses are not accepted for saving', asyn
 
 test('image settings use the Vercel and native property names, including masks and typed multipart data', async () => {
   const svg = { model: 'svg-model', reasoning: { effort: 'medium' } };
-  const providerOptions = { quality: 'high', background: 'transparent', output_format: 'svg', svg, frame_count: 3, input_fidelity: 'high' };
+  const generationOptions = { quality: 'high', background: 'transparent', output_format: 'svg', svg, frame_count: 3 };
+  const editOptions = { ...generationOptions, input_fidelity: 'high' };
   const common = { model, prompt, n: 2, size: '1024x1024' };
-  const settings = { ...common, aspectRatio: '1:1', seed: -12, providerOptions };
+  const settings = { ...common, aspectRatio: '1:1', seed: -12 };
   const mask = { ...attachment, file: new File(['mask'], 'mask.png', { type: attachment.mediaType }) };
   const reference = { image_url: 'data:image/png;base64,bWFzaw==' };
   const vercelFile = { type: 'file', data: 'bWFzaw==', mediaType: 'image/png' };
@@ -107,24 +108,45 @@ test('image settings use the Vercel and native property names, including masks a
       const body = JSON.parse(request.body);
       if (destination.endsWith('api/images')) {
         assert.deepEqual(body, { ...common, aspectRatio: '1:1', seed: -12, files: [{ type: 'url', url }], mask: vercelFile,
-          providerOptions: { openai: { ...providerOptions, markup: reference } } });
+          providerOptions: { openai: { ...editOptions, markup: reference } } });
         return Response.json({ images: ['AQIDBA=='], warnings: [], response: { modelId: model, timestamp: '2026-01-01T00:00:00Z' } });
       }
       if (destination.endsWith('/edits')) {
-        assert.deepEqual(body, { ...common, aspect_ratio: '1:1', seed: -12, ...providerOptions,
+        assert.deepEqual(body, { ...common, aspect_ratio: '1:1', seed: -12, ...editOptions,
           images: [{ image_url: url }], mask: reference, markup: reference });
       } else {
-        const { input_fidelity, ...generationOptions } = providerOptions;
         assert.deepEqual(body, { ...common, ...generationOptions, aspect_ratio: '1:1', seed: -12 });
       }
     }
     return Response.json({ data: [{ b64_json: 'AQIDBA==' }] });
   });
-  await gateway.generateImages('/api/images', { ...settings, inputs: [{ url }], mask, markup: mask });
-  await gateway.generateImages('/v1/images/generations', { ...settings, inputs: [] });
-  await gateway.generateImages('/v1/images/edits', { ...settings, inputs: [{ url }], mask, markup: mask });
-  await gateway.generateImages('/v1/images/edits', { ...settings, inputs: [attachment], mask });
+  await gateway.generateImages('/api/images', { ...settings, providerOptions: { openai: editOptions }, inputs: [{ url }], mask, markup: mask });
+  await gateway.generateImages('/v1/images/generations', { ...settings, body: generationOptions, inputs: [] });
+  await gateway.generateImages('/v1/images/edits', { ...settings, body: editOptions, inputs: [{ url }], mask, markup: mask });
+  await gateway.generateImages('/v1/images/edits', { ...settings, body: editOptions, inputs: [attachment], mask });
   assert.deepEqual(paths, ['/api/images', '/v1/images/generations', '/v1/images/edits', '/v1/images/edits']);
+});
+
+test('Vercel preserves provider JSON and native edits fall back to JSON for typed extensions', async () => {
+  const model = 'openrouter/vendor/image-model';
+  const extra = { steps: 12, flags: { preserve_faces: false, strength: 0 }, variants: ['ink', null] };
+  const providerOptions = { openrouter: extra, google: { image_size: '2K' } };
+  const image = { image_url: 'data:image/png;base64,AQIDBA==' };
+  const requests = [];
+  const gateway = createGateway(root, () => ({}), async (destination, request) => {
+    assert.equal(request.headers.get('content-type'), 'application/json');
+    requests.push(JSON.parse(request.body));
+    return destination.endsWith('/api/images')
+      ? Response.json({ images: ['AQIDBA=='], warnings: [], response: { modelId: model, timestamp: '2026-01-01T00:00:00Z' } })
+      : Response.json({ data: [{ b64_json: 'AQIDBA==' }] });
+  });
+  await gateway.generateImages('/api/images', { model, prompt, inputs: [], providerOptions, body: { ignored: true } });
+  await gateway.generateImages('/v1/images/edits', { model, prompt, inputs: [attachment], mask: attachment, providerOptions,
+    body: { ...extra, Model: 'ignored', n: 20, size: 'ignored', images: [], mask: null, stream: true, providerMetadata: { ignored: true } } });
+  assert.deepEqual(requests, [
+    { model, prompt, n: 1, providerOptions },
+    { model, prompt, n: 1, images: [image], mask: image, ...extra },
+  ]);
 });
 
 test('image batches respect the total, configured maximum, and model limits', () => {
