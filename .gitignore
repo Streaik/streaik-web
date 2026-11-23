@@ -6,3 +6,4 @@ dist/
 playwright-report/
 test-results/
 samples/fakton/
+!/samples/byok/.env.production
