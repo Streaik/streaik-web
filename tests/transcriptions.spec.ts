@@ -223,12 +223,14 @@ test('Gladia consumes the gateway session URL, streams PCM and drains the final 
   await expect(page.locator('html')).toHaveAttribute('data-track', 'stopped');
 });
 
-test('GPT Live Transcribe stays enabled with no file model and uses ephemeral WebSocket transcription', async ({ page }) => {
-  const model = 'openai/gpt-live-transcribe';
+for (const [model, languageOptions] of [
+  ['openai/gpt-live-transcribe', { languages: ['nl'] }],
+  ['openai/gpt-realtime-whisper', { language: 'nl' }],
+] as const) test(`${model} stays enabled with no file model and uses ephemeral WebSocket transcription`, async ({ page }) => {
   await mockAudio(page);
   await page.route('**/gateway/v1/realtime/client_secrets', async route => {
     expect(route.request().postDataJSON()).toEqual({ session: { type: 'transcription', audio: { input: {
-      format: { type: 'audio/pcm', rate: 24000 }, transcription: { model, languages: ['nl'] }, turn_detection: null,
+      format: { type: 'audio/pcm', rate: 24000 }, transcription: { model, ...languageOptions }, turn_detection: null,
     } } } });
     await route.fulfill({ json: { value: 'test-ephemeral-secret', expires_at: Math.floor(Date.now() / 1000) + 60 } });
   });
@@ -335,7 +337,7 @@ test('Google Live Transcribe waits for setup, streams PCM, and saves only finali
   await expect(page.getByRole('tabpanel', { name: 'Finished' }).getByText('Eerste zin. Tweede zin.', { exact: true })).toBeVisible();
 });
 
-test('Google Live Transcribe rejects untrusted socket targets and releases the mic when setup is cancelled', async ({ page }) => {
+test('Google Live Transcribe rejects untrusted socket targets, cleans up on cancel, and retains confirmed text on disconnect', async ({ page }) => {
   await mockAudio(page);
   let valid = false;
   const token = 'auth_tokens/cancel-test';
@@ -346,7 +348,15 @@ test('Google Live Transcribe rejects untrusted socket targets and releases the m
   await page.routeWebSocket(`${googleSocket}**`, socket => {
     sockets++;
     socket.onClose(() => { closed = true; });
-    // Never acknowledge: this verifies capture stays cancellable while setup is pending.
+    if (sockets === 1) return; // Leave the first setup pending so the user can cancel it.
+    socket.onMessage(raw => {
+      const message = JSON.parse(String(raw));
+      if (message.setup) socket.send(JSON.stringify({ setupComplete: {} }));
+      if (!message.realtimeInput?.audio) return;
+      socket.send(JSON.stringify({ serverContent: { inputTranscription: { text: 'Confirmed before disconnect' },
+        interimInputTranscription: { text: 'Unconfirmed before disconnect' } } }));
+      socket.close({ code: 1011 });
+    });
   });
   await openTranscriptions(page, 'Google Gemini', [{ id: googleModel, type: 'transcription' }]);
   await start(page).click();
@@ -362,6 +372,14 @@ test('Google Live Transcribe rejects untrusted socket targets and releases the m
   await expect.poll(() => closed).toBe(true);
   await expect(start(page)).toBeEnabled();
   await expect(page.getByRole('alert')).toHaveCount(0);
+
+  await start(page).click();
+  await expect(page.getByRole('alert')).toContainText('Google microphone transcription disconnected');
+  await expect(page.locator('html')).toHaveAttribute('data-track', 'stopped');
+  await page.getByRole('tab', { name: 'Finished', exact: true }).click();
+  const finished = page.getByRole('tabpanel', { name: 'Finished' });
+  await expect(finished.getByText('Confirmed before disconnect', { exact: true })).toBeVisible();
+  await expect(finished).not.toContainText('Unconfirmed before disconnect');
 });
 
 test('Dictate warns, records only on confirmation, submits on Stop, and keeps a failed recording for retry', async ({ page }) => {
