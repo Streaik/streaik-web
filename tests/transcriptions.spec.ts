@@ -224,17 +224,6 @@ test('Gladia consumes the gateway session URL, streams PCM and drains the final 
 test('GPT Live Transcribe stays enabled with no file model and uses ephemeral WebSocket transcription', async ({ page }) => {
   const model = 'openai/gpt-live-transcribe';
   await mockAudio(page);
-  await page.addInitScript(() => {
-    const NativeWebSocket = window.WebSocket;
-    window.WebSocket = class extends NativeWebSocket {
-      constructor(url: string | URL, protocols?: string | string[]) {
-        super(url, protocols);
-        if (String(url).startsWith('wss://api.openai.com')) {
-          document.documentElement.dataset.micAuth = JSON.stringify(protocols) === JSON.stringify(['realtime', 'openai-insecure-api-key.test-ephemeral-secret']) ? 'ephemeral' : 'invalid';
-        }
-      }
-    };
-  });
   await page.route('**/gateway/v1/realtime/client_secrets', async route => {
     expect(route.request().postDataJSON()).toEqual({ session: { type: 'transcription', audio: { input: {
       format: { type: 'audio/pcm', rate: 24000 }, transcription: { model, languages: ['nl'] }, turn_detection: null,
@@ -262,6 +251,18 @@ test('GPT Live Transcribe stays enabled with no file model and uses ephemeral We
   await expect(page.getByLabel('Real-time model')).toHaveValue(model);
   await page.getByLabel('Audio language (optional)').fill('nl');
   await page.getByRole('button', { name: 'Done', exact: true }).click();
+  // Wrap Playwright's routed WebSocket after its init script has installed it.
+  await page.evaluate(() => {
+    const RoutedWebSocket = window.WebSocket;
+    window.WebSocket = class extends RoutedWebSocket {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols);
+        if (String(url).startsWith('wss://api.openai.com')) {
+          document.documentElement.dataset.micAuth = JSON.stringify(protocols) === JSON.stringify(['realtime', 'openai-insecure-api-key.test-ephemeral-secret']) ? 'ephemeral' : 'invalid';
+        }
+      }
+    };
+  });
   await start(page).click();
   await expect(page.locator('html')).toHaveAttribute('data-mic-auth', 'ephemeral');
   await expect(preview(page)).toContainText('Preview before stop');

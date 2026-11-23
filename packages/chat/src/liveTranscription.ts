@@ -47,7 +47,7 @@ export async function runMicrophone(gateway: Gateway, model: string, language: s
   } finally { events.signal.removeEventListener('abort', release); release(); }
 }
 
-async function capturePcm(stream: MediaStream, rate: number, signal: AbortSignal, write: (bytes: ArrayBuffer) => void) {
+async function capturePcm(stream: MediaStream, rate: number, signal: AbortSignal, setup: AbortSignal, write: (bytes: ArrayBuffer) => void) {
   const audio = new AudioContext({ sampleRate: rate });
   const ready = new EventTarget();
   let source: MediaStreamAudioSourceNode | undefined;
@@ -62,10 +62,10 @@ async function capturePcm(stream: MediaStream, rate: number, signal: AbortSignal
   }
   try {
     // Closing the context aborts capture setup as well as a running worklet.
-    signal.addEventListener('abort', close, { once: true });
-    signal.throwIfAborted();
+    setup.addEventListener('abort', close, { once: true });
+    setup.throwIfAborted();
     await audio.audioWorklet.addModule(new URL('./microphonePcm.worklet.js', import.meta.url));
-    signal.throwIfAborted();
+    setup.throwIfAborted();
     source = audio.createMediaStreamSource(stream);
     pcm = new AudioWorkletNode(audio, 'streaik-microphone-pcm', { channelCount: 1, channelCountMode: 'explicit' });
     mute = audio.createGain();
@@ -76,7 +76,8 @@ async function capturePcm(stream: MediaStream, rate: number, signal: AbortSignal
       else if (!signal.aborted && event.data instanceof ArrayBuffer) write(event.data);
     };
     await audio.resume();
-    signal.throwIfAborted();
+    setup.throwIfAborted();
+    signal.addEventListener('abort', close, { once: true });
     return {
       async flush() {
         if (!pcm) return;
@@ -88,10 +89,9 @@ async function capturePcm(stream: MediaStream, rate: number, signal: AbortSignal
       close() { signal.removeEventListener('abort', close); close(); },
     };
   } catch (error) {
-    signal.removeEventListener('abort', close);
     close();
     throw error;
-  }
+  } finally { setup.removeEventListener('abort', close); }
 }
 
 async function openAISocket(stream: MediaStream, secret: string, events: Stop) {
@@ -140,7 +140,7 @@ async function openAISocket(stream: MediaStream, secret: string, events: Stop) {
   socket.addEventListener('message', message);
   try {
     await wait(socket, 'open', startup, () => socket.readyState === WebSocket.OPEN);
-    capture = await capturePcm(stream, 24000, signal, sendAudio);
+    capture = await capturePcm(stream, 24000, signal, startup, sendAudio);
     startup.throwIfAborted();
     events.ready();
     await untilStop(events.stop, signal);
@@ -303,7 +303,7 @@ async function gladia(stream: MediaStream, url: string, events: Stop) {
   ws.addEventListener('error', fail);
   try {
     await wait(ws, 'open', startup, () => ws.readyState === WebSocket.OPEN);
-    capture = await capturePcm(stream, 16000, signal, bytes => {
+    capture = await capturePcm(stream, 16000, signal, startup, bytes => {
       if (ws.readyState !== WebSocket.OPEN) return;
       if (ws.bufferedAmount > 128_000) { fail(); return; }
       ws.send(bytes);

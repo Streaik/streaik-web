@@ -96,7 +96,7 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, cat
   // Dictation transcribes a finished clip, even when uploaded files are set to stream.
   const dictateRoute = route === '/api/transcriptions/stream' ? '/api/transcriptions' : route;
   const dictateModel = dictateRoute === route ? fileModel : selectFileModel(ASR.filter(({ id }) => supportsFileTranscription(dictateRoute, id)), settings.fileModel);
-  const liveModels = ASR.filter(model => isLiveTranscriptionModel(model.id));
+  const liveModels = (catalog ?? []).filter(model => isLiveTranscriptionModel(model.id));
   const liveModel = liveModels.find(model => model.id === settings.liveModel) ??
     liveModels.find(model => model.provider === fileModel?.provider) ?? liveModels.find(model => model.provider === 'openai') ?? liveModels[0];
   const busy = phase !== undefined;
