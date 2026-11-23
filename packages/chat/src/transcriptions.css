@@ -7,8 +7,6 @@
 .transcription-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: 1rem; }
 .transcription-card { display: grid; align-content: start; gap: .7rem; min-width: 0; padding: 1rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 .transcription-card-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: .5rem; }
-.chat-menu.transcription-card-menu { min-width: 0; }
-.transcription-card-menu .chat-menu-item { justify-content: center; min-width: 2.125rem; }
 .transcription-card h2, .transcription-meta { margin: 0; overflow-wrap: anywhere; }
 .transcription-meta, .transcription-partial { color: var(--muted); }
 .transcription-card audio { max-width: 100%; }

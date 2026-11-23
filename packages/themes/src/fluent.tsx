@@ -1,7 +1,7 @@
 import { Button } from '@fluentui/react-button';
 import {
   Add24Regular, ArrowDownload24Regular, ArrowLeft24Regular, ArrowUp24Regular, BookOpen24Regular, Bot24Regular, Checkmark24Regular, ChevronDown24Regular, Code24Regular, Color24Regular, Compose24Regular,
-  BrainCircuit24Regular, Copy24Regular, Cube24Regular, Delete24Regular, Dismiss24Regular, Document24Regular, Edit24Regular, Globe24Regular, Info24Regular, Key24Regular, Money24Regular, MoreHorizontal24Regular,
+  BrainCircuit24Regular, Copy24Regular, Cube24Regular, Delete24Regular, Dismiss24Regular, Document24Regular, Edit24Regular, Globe24Regular, Info24Regular, Key24Regular, Money24Regular, MoreHorizontal24Regular, MoreVertical24Regular,
   Attach24Regular, ImageMultiple24Regular, Link24Regular, Mic24Regular, PanelLeft24Regular, Person24Regular, Pin24Regular, PinOff24Regular, PlugConnected24Regular,
   Search24Regular, Settings24Regular, Shield24Regular, SignOut24Regular, Stop24Regular, Timer24Regular, Toolbox24Regular, TopSpeed24Regular, Video24Regular, WindowConsoleRegular,
 } from '@fluentui/react-icons';
@@ -83,6 +83,7 @@ export const fluent: ThemeAdapter = {
     key: Key24Regular,
     logout: SignOut24Regular,
     more: MoreHorizontal24Regular,
+    moreVertical: MoreVertical24Regular,
     pin: Pin24Regular,
     unpin: PinOff24Regular,
     trash: Delete24Regular,

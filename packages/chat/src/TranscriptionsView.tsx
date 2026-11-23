@@ -43,7 +43,6 @@ function TranscriptCard({ item, menuContainer, remove, onError }: {
   const { transcript, name, model } = item;
   const copyLabel = t('Copy');
   const downloadLabel = t('Download');
-  const deleteLabel = t('Delete');
   function download() {
     const url = URL.createObjectURL(new Blob([transcript.text], { type: 'text/plain;charset=utf-8' }));
     const link = document.createElement('a');
@@ -57,11 +56,11 @@ function TranscriptCard({ item, menuContainer, remove, onError }: {
       <h2>{name}</h2>
       <Menu.Root modal={false}>
         <Tooltip content={t('More actions')}><Menu.Trigger type="button" className="chat-row-button"
-          aria-label={t('More actions for {{title}}', { title: name })}><ChatIcon name="more" /></Menu.Trigger></Tooltip>
+          aria-label={t('More actions for {{title}}', { title: name })}><ChatIcon name="moreVertical" /></Menu.Trigger></Tooltip>
         {menuContainer && <Menu.Portal container={menuContainer}>
-          <Menu.Content className="chat-menu transcription-card-menu" align="end" sideOffset={4} collisionPadding={8} hideWhenDetached>
-            <Menu.Item className="chat-menu-item" data-danger aria-label={deleteLabel} title={deleteLabel} textValue={deleteLabel} onSelect={remove}>
-              <ChatIcon name="trash" />
+          <Menu.Content className="chat-menu" align="end" sideOffset={4} collisionPadding={8} hideWhenDetached>
+            <Menu.Item className="chat-menu-item" data-danger onSelect={remove}>
+              <ChatIcon name="trash" /> {t('Delete')}
             </Menu.Item>
           </Menu.Content>
         </Menu.Portal>}

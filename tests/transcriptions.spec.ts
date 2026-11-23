@@ -115,7 +115,8 @@ test('all file routes, drag and drop, interrupted SSE, and scoped finished cards
   await expect(card.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
   await expect(deleteAction).toBeHidden();
   await more.press('Enter');
-  await expectIconOnly(deleteAction);
+  await expect(deleteAction).toHaveText('Delete');
+  await expect(deleteAction.locator('svg')).toBeVisible();
   await expect(deleteAction).toBeFocused();
   await deleteAction.press('Enter');
   await expect(card).toHaveCount(0);
