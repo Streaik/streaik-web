@@ -3,7 +3,7 @@ import type { GatewayTranscriptionEndpoint, TranscriptionOptions } from '@streai
 import { useState } from 'react';
 
 export type TranscriptionRouteSetting = { selected: GatewayTranscriptionEndpoint; onSelect: (route: GatewayTranscriptionEndpoint) => void };
-export type TranscriptionPreferences = TranscriptionOptions & { fileModel?: string; liveModel?: string; split?: boolean; overlap?: number };
+export type TranscriptionPreferences = TranscriptionOptions & { fileModel?: string; liveModel?: string; split?: boolean; overlap?: number; skipDictateWarning?: boolean };
 
 function read(key: string | undefined) {
   try { return key ? localStorage.getItem(key) : null; } catch { return null; }
@@ -34,7 +34,7 @@ export function useTranscriptionPreferences(scope?: string) {
         liveModel: typeof data.liveModel === 'string' ? data.liveModel : undefined,
         language: typeof data.language === 'string' ? data.language.slice(0, 35) : undefined,
         prompt: typeof data.prompt === 'string' ? data.prompt.slice(0, 1000) : undefined,
-        split: data.split === true, diarization: data.diarization === true,
+        split: data.split === true, diarization: data.diarization === true, skipDictateWarning: data.skipDictateWarning === true,
         overlap: typeof data.overlap === 'number' && data.overlap >= 0 && data.overlap <= 10 ? data.overlap : 5 };
     } catch { return {}; }
   });

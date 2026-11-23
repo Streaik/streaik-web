@@ -28,12 +28,30 @@ export function transcriptionMediaType(file: File): string | undefined {
   return (Object.hasOwn(mediaTypes, ext) ? mediaTypes[ext] : undefined) ?? (/^audio\/[\w.+-]+$/.test(type) ? type : undefined);
 }
 
+const openAILive = /^openai\/gpt-live-transcribe(?:-\d{4}-\d{2}-\d{2})?$/;
+const openAIWhisper = /^openai\/gpt-realtime-whisper(?:-\d{4}-\d{2}-\d{2})?$/;
+const openAILegacyLive = /^openai\/gpt-realtime(?:-[\w-]+)?-transcribe(?:-|$)/;
+
 export function isLiveTranscriptionModel(model: string) {
-  return /^openai\/gpt-realtime(?:-[\w-]+)?-transcribe(?:-|$)/.test(model) || model === 'gladia/solaria-1';
+  return openAILive.test(model) || openAIWhisper.test(model) || openAILegacyLive.test(model) || model === 'gladia/solaria-1';
+}
+
+export function openAITranscriptionSocket(model: string) {
+  return openAILive.test(model) || openAIWhisper.test(model);
+}
+
+export function openAITranscriptionSession(model: string, language?: string) {
+  const socket = openAITranscriptionSocket(model);
+  return { type: 'transcription', audio: { input: {
+    ...(socket ? { format: { type: 'audio/pcm', rate: 24000 } } : {}),
+    transcription: { model, ...(language ? openAILive.test(model) ? { languages: [language] } : { language } : {}) },
+    turn_detection: socket ? null : { type: 'server_vad' },
+  } } };
 }
 
 export function supportsFileTranscription(route: GatewayTranscriptionEndpoint, model: string) {
-  if (!/^(openai|openrouter|google|gladia|deepgram)\//.test(model) || /^openai\/gpt-(?:4o-)?realtime/.test(model)) return false;
+  if (!/^(openai|openrouter|google|gladia|deepgram)\//.test(model) ||
+      (model.startsWith('openai/') && (isLiveTranscriptionModel(model) || /^openai\/gpt-(?:4o-)?realtime/.test(model)))) return false;
   return route !== '/api/transcriptions/stream' || /^openai\/gpt-(?:4o(?:-mini)?-)?transcribe(?:$|-(?!diarize))/.test(model) || model.startsWith('deepgram/');
 }
 

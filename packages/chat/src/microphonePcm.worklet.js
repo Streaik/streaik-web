@@ -1,5 +1,5 @@
-// AudioWorklet runs outside the UI thread. Gladia expects little-endian PCM16.
-class GladiaPcm extends AudioWorkletProcessor {
+// Both streaming transports use little-endian mono PCM16.
+class MicrophonePcm extends AudioWorkletProcessor {
   buffer = new DataView(new ArrayBuffer(2048));
   count = 0;
   stopped = false;
@@ -30,4 +30,4 @@ class GladiaPcm extends AudioWorkletProcessor {
   }
 }
 
-registerProcessor('streaik-gladia-pcm', GladiaPcm);
+registerProcessor('streaik-microphone-pcm', MicrophonePcm);

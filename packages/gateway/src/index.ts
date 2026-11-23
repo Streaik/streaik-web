@@ -5,9 +5,9 @@ import { decisionChoiceBody, gatewayDecisionEndpoints, readDecisionChoice } from
 import type { DecisionChoice, GatewayDecisionEndpoint } from './decisionChoice.ts';
 import { imageRequestBody, isImageEndpoint, readImageResponse } from './images.ts';
 import type { GatewayImageEndpoint, ImageRequest, ImageResponse } from './images.ts';
-import { isLiveTranscriptionModel, isTranscriptionEndpoint, readLiveTranscriptionCredential, readTranscript, readTranscriptStream, supportsFileTranscription, transcriptionBody } from './transcriptions.ts';
+import { isLiveTranscriptionModel, isTranscriptionEndpoint, openAITranscriptionSession, openAITranscriptionSocket, readLiveTranscriptionCredential, readTranscript, readTranscriptStream, supportsFileTranscription, transcriptionBody } from './transcriptions.ts';
 import type { GatewayTranscriptionEndpoint, TranscriptionOptions } from './transcriptions.ts';
-export { gatewayTranscriptionEndpoints, isLiveTranscriptionModel, isTranscriptionEndpoint, supportsFileTranscription, transcriptionFileAccept, transcriptionMediaType, transcriptionUploadLimit } from './transcriptions.ts';
+export { gatewayTranscriptionEndpoints, isLiveTranscriptionModel, isTranscriptionEndpoint, openAITranscriptionSocket, supportsFileTranscription, transcriptionFileAccept, transcriptionMediaType, transcriptionUploadLimit } from './transcriptions.ts';
 export type { GatewayTranscriptionEndpoint, Transcript, TranscriptSegment, TranscriptionOptions } from './transcriptions.ts';
 import { readTokenPricing } from './tokenPricing.ts';
 import type { TokenRates } from './tokenPricing.ts';
@@ -288,9 +288,7 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
       if (!isLiveTranscriptionModel(model)) throw new GatewayError('Choose an OpenAI or Gladia microphone model.');
       const provider = model.startsWith('openai/') ? 'openai' : 'gladia';
       const path = provider === 'openai' ? 'v1/realtime/client_secrets' : 'api/realtime/token/gladia/solaria-1';
-      const body = provider === 'openai' ? { session: { type: 'transcription', audio: { input: {
-        transcription: { model, ...(language ? { language } : {}) }, turn_detection: { type: 'server_vad' },
-      } } } } : { sessionConfig: { providerOptions: { gladia: {
+      const body = provider === 'openai' ? { session: openAITranscriptionSession(model, language) } : { sessionConfig: { providerOptions: { gladia: {
         encoding: 'wav/pcm', sample_rate: 16000, channels: 1, bit_depth: 16,
         ...(language ? { language_config: { languages: [language] } } : {}),
       } } } };

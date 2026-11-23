@@ -1,5 +1,6 @@
-import { GatewayError } from '@streaik/gateway';
+import { GatewayError, openAITranscriptionSocket } from '@streaik/gateway';
 import type { Gateway, Transcript, TranscriptSegment } from '@streaik/gateway';
+import { getMicrophone, stopTracks } from './microphone';
 
 type Update = (transcript: Transcript, partial: string) => void;
 type Stop = { signal: AbortSignal; stop: AbortSignal; ready: () => void; update: Update };
@@ -30,27 +31,140 @@ function untilStop(stop: AbortSignal, signal: AbortSignal) {
   return wait(stop, 'abort', signal, () => stop.aborted);
 }
 
-function stopTracks(stream: MediaStream) {
-  for (const track of stream.getTracks()) track.stop();
-}
-
 export async function runMicrophone(gateway: Gateway, model: string, language: string | undefined, events: Stop) {
-  if (!navigator.mediaDevices?.getUserMedia) throw new GatewayError('Microphone access requires a secure browser context.');
-  let stream: MediaStream;
-  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } }); }
-  catch (error) {
-    if (error instanceof DOMException && error.name === 'NotAllowedError') throw new GatewayError('Allow microphone access to start transcription.');
-    throw new GatewayError('Could not access a microphone.');
-  }
+  const stream = await getMicrophone(events.signal);
   const release = () => stopTracks(stream);
   events.signal.addEventListener('abort', release, { once: true });
   try {
     events.signal.throwIfAborted();
     const credential = await gateway.liveTranscriptionCredential(model, language, AbortSignal.any([events.signal, AbortSignal.timeout(20_000)]));
     events.signal.throwIfAborted();
-    if (credential.provider === 'openai') await openAI(stream, credential.secret, events);
+    if (credential.provider === 'openai') {
+      if (openAITranscriptionSocket(model)) await openAISocket(stream, credential.secret, events);
+      else await openAI(stream, credential.secret, events);
+    }
     else await gladia(stream, credential.url, events);
   } finally { events.signal.removeEventListener('abort', release); release(); }
+}
+
+async function capturePcm(stream: MediaStream, rate: number, signal: AbortSignal, write: (bytes: ArrayBuffer) => void) {
+  const audio = new AudioContext({ sampleRate: rate });
+  const ready = new EventTarget();
+  let source: MediaStreamAudioSourceNode | undefined;
+  let pcm: AudioWorkletNode | undefined;
+  let mute: GainNode | undefined;
+  function close() {
+    source?.disconnect();
+    pcm?.port.close();
+    pcm?.disconnect();
+    mute?.disconnect();
+    if (audio.state !== 'closed') void audio.close().catch(() => {});
+  }
+  try {
+    // Closing the context aborts capture setup as well as a running worklet.
+    signal.addEventListener('abort', close, { once: true });
+    signal.throwIfAborted();
+    await audio.audioWorklet.addModule(new URL('./microphonePcm.worklet.js', import.meta.url));
+    signal.throwIfAborted();
+    source = audio.createMediaStreamSource(stream);
+    pcm = new AudioWorkletNode(audio, 'streaik-microphone-pcm', { channelCount: 1, channelCountMode: 'explicit' });
+    mute = audio.createGain();
+    mute.gain.value = 0;
+    source.connect(pcm).connect(mute).connect(audio.destination);
+    pcm.port.onmessage = event => {
+      if (event.data === 'flushed') ready.dispatchEvent(new Event('flushed'));
+      else if (!signal.aborted && event.data instanceof ArrayBuffer) write(event.data);
+    };
+    await audio.resume();
+    signal.throwIfAborted();
+    return {
+      async flush() {
+        if (!pcm) return;
+        const timeout = AbortSignal.timeout(300);
+        const flushed = wait(ready, 'flushed', AbortSignal.any([signal, timeout]));
+        pcm.port.postMessage('stop');
+        await flushed.catch(error => { if (!timeout.aborted || signal.aborted) throw error; });
+      },
+      close() { signal.removeEventListener('abort', close); close(); },
+    };
+  } catch (error) {
+    signal.removeEventListener('abort', close);
+    close();
+    throw error;
+  }
+}
+
+async function openAISocket(stream: MediaStream, secret: string, events: Stop) {
+  const failure = new AbortController();
+  const signal = AbortSignal.any([events.signal, failure.signal]);
+  const startup = AbortSignal.any([signal, AbortSignal.timeout(25_000)]);
+  const fail = () => failure.abort(new GatewayError('OpenAI microphone transcription disconnected or failed.'));
+  // Pass only the ephemeral client secret, in the provider's browser WebSocket subprotocol.
+  const socket = new WebSocket('wss://api.openai.com/v1/realtime?intent=transcription', ['realtime', `openai-insecure-api-key.${secret}`]);
+  const changes = new EventTarget();
+  const turns = new Map<string, { partial: string; final?: string }>();
+  let capture: Awaited<ReturnType<typeof capturePcm>> | undefined;
+  let bytesSent = 0;
+  let committing = false;
+  let committedId = '';
+  let finished = false;
+  const close = () => socket.close();
+  const sendAudio = (bytes: ArrayBuffer) => {
+    if (socket.readyState !== WebSocket.OPEN || socket.bufferedAmount > 128_000) { fail(); return; }
+    socket.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: btoa(String.fromCharCode(...new Uint8Array(bytes))) }));
+    bytesSent += bytes.byteLength;
+  };
+  const message = (event: MessageEvent) => {
+    const part = readEvent(event.data);
+    if (part.type === 'error' || part.type === 'conversation.item.input_audio_transcription.failed') { fail(); return; }
+    const id = typeof part.item_id === 'string' ? part.item_id : '';
+    if (committing && part.type === 'input_audio_buffer.committed') committedId = id;
+    if (part.type !== 'conversation.item.input_audio_transcription.delta' && part.type !== 'conversation.item.input_audio_transcription.completed') return;
+    const turn = turns.get(id) ?? { partial: '' };
+    if (part.type === 'conversation.item.input_audio_transcription.delta' && typeof part.delta === 'string' && turn.final === undefined) {
+      turn.partial += part.delta;
+    }
+    if (part.type === 'conversation.item.input_audio_transcription.completed' && typeof part.transcript === 'string') {
+      turn.final = part.transcript;
+      turn.partial = '';
+      if (committing && (!committedId || id === committedId)) finished = true;
+    }
+    turns.set(id, turn);
+    events.update({ text: [...turns.values()].map(turn => turn.final?.trim()).filter(Boolean).join(' '), segments: [] },
+      [...turns.values()].map(turn => turn.partial.trim()).filter(Boolean).join(' '));
+    if (finished) changes.dispatchEvent(new Event('finished'));
+  };
+  events.signal.addEventListener('abort', close, { once: true });
+  socket.addEventListener('close', fail);
+  socket.addEventListener('error', fail);
+  socket.addEventListener('message', message);
+  try {
+    await wait(socket, 'open', startup, () => socket.readyState === WebSocket.OPEN);
+    capture = await capturePcm(stream, 24000, signal, sendAudio);
+    startup.throwIfAborted();
+    events.ready();
+    await untilStop(events.stop, signal);
+    await capture.flush();
+    stopTracks(stream);
+    if (!bytesSent) return;
+    // The provider requires at least 100 ms in an explicitly committed buffer.
+    if (bytesSent < 4800) sendAudio(new ArrayBuffer(4800 - bytesSent));
+    signal.throwIfAborted();
+    committing = true;
+    socket.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+    const drain = AbortSignal.timeout(10_000);
+    await wait(changes, 'finished', AbortSignal.any([signal, drain]), () => finished).catch(error => {
+      if (!drain.aborted || signal.aborted) throw error;
+      throw new GatewayError('OpenAI did not finish the last microphone segment.');
+    });
+  } finally {
+    capture?.close();
+    events.signal.removeEventListener('abort', close);
+    socket.removeEventListener('close', fail);
+    socket.removeEventListener('error', fail);
+    socket.removeEventListener('message', message);
+    close();
+  }
 }
 
 async function openAI(stream: MediaStream, secret: string, events: Stop) {
@@ -161,10 +275,7 @@ async function gladia(stream: MediaStream, url: string, events: Stop) {
   const startup = AbortSignal.any([signal, AbortSignal.timeout(25_000)]);
   const fail = () => failure.abort(new GatewayError('Gladia microphone transcription disconnected or failed.'));
   const ws = new WebSocket(url);
-  let audio: AudioContext | undefined;
-  let source: MediaStreamAudioSourceNode | undefined;
-  let pcm: AudioWorkletNode | undefined;
-  let mute: GainNode | undefined;
+  let capture: Awaited<ReturnType<typeof capturePcm>> | undefined;
   let stopping = false, finished = false;
   const changes = new EventTarget();
   const confirmed: TranscriptSegment[] = [];
@@ -191,29 +302,17 @@ async function gladia(stream: MediaStream, url: string, events: Stop) {
   ws.addEventListener('close', closed);
   ws.addEventListener('error', fail);
   try {
-    audio = new AudioContext({ sampleRate: 16000 });
-    await Promise.all([wait(ws, 'open', startup, () => ws.readyState === WebSocket.OPEN),
-      audio.audioWorklet.addModule(new URL('./gladiaPcm.worklet.js', import.meta.url))]);
-    startup.throwIfAborted();
-    source = audio.createMediaStreamSource(stream);
-    pcm = new AudioWorkletNode(audio, 'streaik-gladia-pcm', { channelCount: 1, channelCountMode: 'explicit' });
-    mute = audio.createGain();
-    mute.gain.value = 0;
-    source.connect(pcm).connect(mute).connect(audio.destination);
-    pcm.port.onmessage = event => {
-      if (event.data === 'flushed') { changes.dispatchEvent(new Event('flushed')); return; }
-      if (signal.aborted || ws.readyState !== WebSocket.OPEN) return;
+    await wait(ws, 'open', startup, () => ws.readyState === WebSocket.OPEN);
+    capture = await capturePcm(stream, 16000, signal, bytes => {
+      if (ws.readyState !== WebSocket.OPEN) return;
       if (ws.bufferedAmount > 128_000) { fail(); return; }
-      ws.send(event.data);
-    };
-    await audio.resume();
+      ws.send(bytes);
+    });
     startup.throwIfAborted();
     events.ready();
     await untilStop(events.stop, signal);
+    await capture.flush();
     stopTracks(stream);
-    const flush = AbortSignal.timeout(300);
-    pcm.port.postMessage('stop');
-    await wait(changes, 'flushed', AbortSignal.any([signal, flush])).catch(error => { if (!flush.aborted || signal.aborted) throw error; });
     stopping = true;
     ws.send(JSON.stringify({ type: 'stop_recording' }));
     const drain = AbortSignal.timeout(7000);
@@ -222,15 +321,11 @@ async function gladia(stream: MediaStream, url: string, events: Stop) {
       throw new GatewayError('Gladia did not confirm the end of the microphone session.');
     });
   } finally {
+    capture?.close();
     events.signal.removeEventListener('abort', close);
     ws.removeEventListener('message', message);
     ws.removeEventListener('close', closed);
     ws.removeEventListener('error', fail);
     close();
-    source?.disconnect();
-    pcm?.port.close();
-    pcm?.disconnect();
-    mute?.disconnect();
-    if (audio && audio.state !== 'closed') await audio.close().catch(() => {});
   }
 }

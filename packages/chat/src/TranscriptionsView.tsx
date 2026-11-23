@@ -1,4 +1,4 @@
-import { GatewayError, isLiveTranscriptionModel, supportsFileTranscription, transcriptionFileAccept, transcriptionMediaType, transcriptionUploadLimit } from '@streaik/gateway';
+import { GatewayError, isLiveTranscriptionModel, openAITranscriptionSocket, supportsFileTranscription, transcriptionFileAccept, transcriptionMediaType, transcriptionUploadLimit } from '@streaik/gateway';
 import type { CatalogModel, Gateway, GatewayTranscriptionEndpoint, Transcript } from '@streaik/gateway';
 import { Button } from '@streaik/themes';
 import { useEffect, useId, useRef, useState } from 'react';
@@ -7,6 +7,7 @@ import { ChatIcon } from './ChatIcon';
 import { ModelPicker } from './ModelPicker';
 import { useAppTranslation } from './i18n';
 import { runMicrophone } from './liveTranscription';
+import { dictationFormat, recordDictation } from './microphone';
 import { maxSplittableFileBytes, mergeTranscriptionChunks, splitTranscription } from './splitTranscription';
 import { deleteTranscript, listTranscripts, saveTranscript } from './transcriptionLibrary';
 import type { SavedTranscript } from './transcriptionLibrary';
@@ -14,12 +15,18 @@ import { useTranscriptionPreferences } from './transcriptionPreferences';
 import './images.css';
 import './transcriptions.css';
 
-type Item = { id: string; file: File; issue?: string };
+type Target = { route: GatewayTranscriptionEndpoint; model: string };
+type Item = { id: string; file: File; issue?: string; dictation?: Target };
 type Tab = 'finished' | 'streaming';
-type Phase = 'upload' | 'connecting' | 'listening' | 'finishing';
+type Phase = 'upload' | 'connecting' | 'listening' | 'finishing' | 'dictate-connecting' | 'dictating' | 'dictate-finishing';
 type Preview = { name: string; text: string; partial?: string };
 const preferredModels = ['openai/gpt-transcribe', 'openai/gpt-4o-transcribe', 'openai/gpt-4o-mini-transcribe', 'openai/whisper-1'];
 const errorMessage = (error: unknown, fallback: string) => error instanceof GatewayError ? error.message : fallback;
+
+function selectFileModel(models: readonly CatalogModel[], id?: string) {
+  return models.find(model => model.id === id) ?? preferredModels.map(id => models.find(model => model.id === id)).find(Boolean)
+    ?? models.find(model => model.provider === 'openai') ?? models[0];
+}
 
 function TranscriptCard({ item, remove, onError }: { item: SavedTranscript; remove: () => void; onError: () => void }) {
   const { t } = useAppTranslation();
@@ -77,20 +84,29 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, cat
   const [libraryError, setLibraryError] = useState('');
   const picker = useRef<HTMLInputElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
+  const dictateWarning = useRef<HTMLDialogElement>(null);
+  const skipWarning = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
-  const operation = useRef<{ abort: AbortController; stop?: AbortController }>(null);
+  const operation = useRef<{ abort: AbortController; stop?: AbortController; mode: 'upload' | 'live' | 'dictate' }>(null);
   const enabled = !status && !loading;
   const fileLimit = transcriptionUploadLimit(route);
   const ASR = (catalog ?? []).filter(model => model.type === 'transcription');
   const models = ASR.filter(({ id }) => supportsFileTranscription(route, id));
-  const fileModel = models.find(model => model.id === settings.fileModel) ??
-    preferredModels.map(id => models.find(model => model.id === id)).find(Boolean) ?? models.find(model => model.provider === 'openai') ?? models[0];
+  const fileModel = selectFileModel(models, settings.fileModel);
+  // Dictation transcribes a finished clip, even when uploaded files are set to stream.
+  const dictateRoute = route === '/api/transcriptions/stream' ? '/api/transcriptions' : route;
+  const dictateModel = dictateRoute === route ? fileModel : selectFileModel(ASR.filter(({ id }) => supportsFileTranscription(dictateRoute, id)), settings.fileModel);
   const liveModels = ASR.filter(model => isLiveTranscriptionModel(model.id));
   const liveModel = liveModels.find(model => model.id === settings.liveModel) ??
     liveModels.find(model => model.provider === fileModel?.provider) ?? liveModels.find(model => model.provider === 'openai') ?? liveModels[0];
   const busy = phase !== undefined;
-  const mic = busy && phase !== 'upload';
-  const liveLabel = mic ? 'Stop microphone transcription' : 'Start microphone transcription';
+  const live = phase === 'connecting' || phase === 'listening' || phase === 'finishing';
+  const dictating = phase === 'dictate-connecting' || phase === 'dictating' || phase === 'dictate-finishing';
+  const canCapture = !!globalThis.navigator?.mediaDevices?.getUserMedia;
+  const canRecord = canCapture && !!dictationFormat();
+  const liveSocket = liveModel && (liveModel.provider === 'gladia' || openAITranscriptionSocket(liveModel.id));
+  const canLive = canCapture && (liveSocket ? typeof WebSocket !== 'undefined' && typeof AudioWorkletNode !== 'undefined' : typeof RTCPeerConnection !== 'undefined');
+  const canSubmit = enabled && !busy && queue.some(item => item.dictation || fileModel);
 
   useEffect(() => {
     let current = true;
@@ -132,38 +148,47 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, cat
     } catch { setLibraryError('Could not delete the saved transcript.'); }
   }
 
+  async function transcribeFile(item: Item, target: Target, signal: AbortSignal) {
+    const { file, id } = item;
+    const streaming = target.route === '/api/transcriptions/stream';
+    if (streaming) setPreview({ name: file.name, text: '' });
+    try {
+      const send = (part: File, before = '') => gateway.transcribe(target.route, target.model, part, settings, signal,
+        chunk => setPreview({ name: file.name, text: [before, chunk].filter(Boolean).join(' ') }));
+      let transcript: Transcript;
+      const limit = transcriptionUploadLimit(target.route);
+      if (!item.dictation && file.size > limit && settings.split) {
+        const results: { transcript: Transcript; offset: number }[] = [];
+        for await (const { file: part, offset } of splitTranscription(file, limit, settings.overlap ?? 5, signal)) {
+          results.push({ transcript: await send(part, mergeTranscriptionChunks(results).text), offset });
+        }
+        transcript = mergeTranscriptionChunks(results);
+      } else transcript = await send(file);
+      signal.throwIfAborted();
+      if (streaming) setPreview({ name: file.name, text: transcript.text });
+      await store(file.name, target.model, transcript, file.slice(0, file.size, transcriptionMediaType(file)));
+      setQueue(items => items.filter(item => item.id !== id));
+    } catch (error) {
+      if (signal.aborted) return;
+      const issue = errorMessage(error, item.dictation ? 'Could not transcribe the dictation. Use Send to retry.' : 'The file could not be transcribed.');
+      setQueue(items => items.map(item => item.id === id ? { ...item, issue } : item));
+    }
+  }
+
   async function upload() {
-    if (!enabled || !fileModel || !queue.length || operation.current) return;
+    if (!canSubmit || operation.current) return;
     const abort = new AbortController();
-    operation.current = { abort };
+    operation.current = { abort, mode: 'upload' };
     const { signal } = abort;
-    const streaming = route === '/api/transcriptions/stream';
+    const streaming = route === '/api/transcriptions/stream' && !!fileModel && queue.some(item => !item.dictation);
     setError(''); setPhase('upload'); setTab(streaming ? 'streaming' : 'finished');
     setQueue(items => items.map(item => ({ ...item, issue: undefined })));
     try {
-      for (const { id, file } of queue) {
+      for (const item of queue) {
         if (signal.aborted) break;
-        if (streaming) setPreview({ name: file.name, text: '' });
-        try {
-          const send = (part: File, before = '') => gateway.transcribe(route, fileModel.id, part, settings, signal,
-            chunk => setPreview({ name: file.name, text: [before, chunk].filter(Boolean).join(' ') }));
-          let transcript: Transcript;
-          if (file.size > fileLimit && settings.split) {
-            const results: { transcript: Transcript; offset: number }[] = [];
-            for await (const { file: part, offset } of splitTranscription(file, fileLimit, settings.overlap ?? 5, signal)) {
-              results.push({ transcript: await send(part, mergeTranscriptionChunks(results).text), offset });
-            }
-            transcript = mergeTranscriptionChunks(results);
-          } else transcript = await send(file);
-          signal.throwIfAborted();
-          if (streaming) setPreview({ name: file.name, text: transcript.text });
-          await store(file.name, fileModel.id, transcript, file.slice(0, file.size, transcriptionMediaType(file)));
-          setQueue(items => items.filter(item => item.id !== id));
-        } catch (error) {
-          if (signal.aborted) break;
-          const issue = errorMessage(error, 'The file could not be transcribed.');
-          setQueue(items => items.map(item => item.id === id ? { ...item, issue } : item));
-        }
+        const target = item.dictation ?? (fileModel && { route, model: fileModel.id });
+        if (target) await transcribeFile(item, target, signal);
+        else setQueue(items => items.map(entry => entry.id === item.id ? { ...entry, issue: 'Choose a file transcription model.' } : entry));
       }
     } finally {
       operation.current = null;
@@ -171,16 +196,53 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, cat
     }
   }
 
+  async function startDictation() {
+    if (!enabled || !dictateModel || !canRecord || operation.current) return;
+    const abort = new AbortController(), stop = new AbortController();
+    operation.current = { abort, stop, mode: 'dictate' };
+    const target = { model: dictateModel.id, route: dictateRoute };
+    const { signal } = abort;
+    setError(''); setPhase('dictate-connecting');
+    try {
+      const file = await recordDictation(signal, stop.signal, transcriptionUploadLimit(dictateRoute), () => setPhase('dictating'));
+      signal.throwIfAborted();
+      const item = { id: crypto.randomUUID(), file, dictation: target };
+      setQueue(items => [...items, item]);
+      setTab('finished'); setPhase('upload');
+      await transcribeFile(item, target, signal);
+    } catch (error) {
+      if (!signal.aborted) setError(errorMessage(error, 'Could not record the dictation.'));
+    } finally {
+      operation.current = null;
+      setPhase(undefined);
+    }
+  }
+
+  function dictate() {
+    if (operation.current) {
+      if (operation.current.mode !== 'dictate') return;
+      if (phase === 'dictate-connecting') operation.current.abort.abort();
+      if (phase === 'dictating') { setPhase('dictate-finishing'); operation.current.stop?.abort(); }
+      return;
+    }
+    if (!enabled || !dictateModel || !canRecord) return;
+    if (settings.skipDictateWarning) void startDictation();
+    else {
+      if (skipWarning.current) skipWarning.current.checked = false;
+      dictateWarning.current?.showModal();
+    }
+  }
+
   async function microphone() {
     if (operation.current) {
-      if (!operation.current.stop) return;
+      if (operation.current.mode !== 'live' || !operation.current.stop) return;
       if (phase === 'connecting') operation.current.abort.abort();
       if (phase === 'listening') { setPhase('finishing'); operation.current.stop.abort(); }
       return;
     }
-    if (!enabled || !liveModel) return;
+    if (!enabled || !liveModel || !canLive) return;
     const abort = new AbortController(), stop = new AbortController();
-    operation.current = { abort, stop };
+    operation.current = { abort, stop, mode: 'live' };
     const name = t('Microphone transcription');
     let final: Transcript = { text: '', segments: [] };
     setError(''); setTab('streaming'); setPreview({ name, text: '' }); setPhase('connecting');
@@ -205,7 +267,9 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, cat
   }
 
   const phaseLabel = phase === 'connecting' ? 'Connecting microphone…' : phase === 'listening' ? 'Listening…'
-    : phase === 'finishing' ? 'Finishing microphone transcription…' : phase === 'upload' ? 'Transcribing audio…' : '';
+    : phase === 'finishing' ? 'Finishing microphone transcription…' : phase === 'upload' ? 'Transcribing audio…'
+    : phase === 'dictate-connecting' ? 'Connecting microphone…' : phase === 'dictating' ? 'Recording dictation…'
+    : phase === 'dictate-finishing' ? 'Finishing dictation…' : '';
   const options = ['finished', 'streaming'] as const;
   return <main className="catalog-main images-main" aria-labelledby={`${id}-heading`}>
     {toolbar && createPortal(<ModelPicker models={models} selected={fileModel ? [fileModel] : []} multiple={false} loading={loading}
@@ -235,17 +299,26 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, cat
           <Button className="chat-composer-icon" type="button" variant="subtle" aria-label={t('Transcription settings')} title={t('Transcription settings')}
             aria-haspopup="dialog" onClick={() => dialog.current?.showModal()} disabled={busy}><ChatIcon name="settings" /></Button>
           <div className="transcription-submit">
-            <Button type="button" aria-label={t(liveLabel)} title={t(liveLabel)} aria-pressed={mic} variant={mic ? 'primary' : 'subtle'}
-              className="chat-composer-icon" disabled={phase === 'finishing' || phase === 'upload' || !mic && (!enabled || !liveModel)}
-              onClick={() => void microphone()}><ChatIcon name="mic" /></Button>
+            <Button type="button" aria-pressed={dictating} variant={dictating ? 'primary' : 'subtle'}
+              disabled={dictating ? phase === 'dictate-finishing' : busy || !enabled || !dictateModel || !canRecord} onClick={dictate}>
+              <ChatIcon name="mic" /> {t(dictating ? 'Stop Dictate' : 'Dictate')}
+            </Button>
+            <Button type="button" aria-pressed={live} variant={live ? 'primary' : 'subtle'} title={liveModel?.name}
+              disabled={live ? phase === 'finishing' : busy || !enabled || !liveModel || !canLive} onClick={() => void microphone()}>
+              <ChatIcon name="speed" /> {t(live ? 'Stop Real-time' : 'Real-time')}
+            </Button>
             {phase === 'upload' ? <Button type="button" onClick={() => operation.current?.abort.abort()}>{t('Stop')}</Button>
               : <Button type="submit" className="chat-send" variant="primary" aria-label={t('Send')} title={t('Send')}
-                disabled={busy || !queue.length || !enabled || !fileModel}><ChatIcon name="send" /></Button>}
+                disabled={!canSubmit}><ChatIcon name="send" /></Button>}
           </div>
         </div>
       </form>
       {(status || phaseLabel) && <p className="chat-attachment-notice" role="status">{status || t(phaseLabel)}</p>}
       {!status && catalog && !fileModel && <p className="chat-attachment-notice" role="status">{t('No models support this file transcription route.')}</p>}
+      {enabled && catalog && !busy && (!canCapture ? <p className="chat-attachment-notice">{t('Microphone access requires a secure browser context.')}</p> : <>
+        {(!dictateModel || !canRecord) && <p className="chat-attachment-notice">{t(!dictateModel ? 'Dictate needs a file transcription model.' : 'Dictate recording is not supported in this browser.')}</p>}
+        {(!liveModel || !canLive) && <p className="chat-attachment-notice">{t(!liveModel ? 'No compatible Real-time transcription model is available.' : 'Real-time transcription is not supported in this browser.')}</p>}
+      </>)}
       {error && <p className="chat-attachment-notice" role="alert">{t(error)}</p>}
       {libraryError && <p className="chat-attachment-notice" role="alert">{t(libraryError)}</p>}
       <section className="images-library" aria-label={t('Transcription results')}>
@@ -277,7 +350,7 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, cat
       <form method="dialog">
         <header className="chat-settings-header"><h2 id={`${id}-settings`}>{t('Transcription settings')}</h2></header>
         <div className="chat-link-fields transcription-fields">
-          <label htmlFor={`${id}-live`}>{t('Microphone model')}</label>
+          <label htmlFor={`${id}-live`}>{t('Real-time model')}</label>
           <select id={`${id}-live`} value={liveModel?.id ?? ''} disabled={!liveModels.length} onChange={event => change({ liveModel: event.target.value })}>
             {!liveModels.length && <option value="">{t('No model available')}</option>}
             {liveModels.map(model => <option key={model.id} value={model.id}>{model.id}</option>)}
@@ -297,6 +370,23 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, cat
               onChange={event => change({ overlap: Math.max(0, Math.min(10, Number(event.target.value))) })} /></>}
         </div>
         <div className="transcription-card-actions"><Button type="submit" variant="primary">{t('Done')}</Button></div>
+      </form>
+    </dialog>
+    <dialog className="chat-settings chat-link-dialog" ref={dictateWarning} aria-labelledby={`${id}-dictate-warning`}>
+      <form method="dialog" onSubmit={event => {
+        if ((event.nativeEvent as SubmitEvent).submitter?.getAttribute('value') !== 'continue') return;
+        if (skipWarning.current?.checked) change({ skipDictateWarning: true });
+        void startDictation();
+      }}>
+        <header className="chat-settings-header"><h2 id={`${id}-dictate-warning`}>{t('Dictate is for short messages')}</h2></header>
+        <div className="chat-link-fields transcription-fields">
+          <p>{t('Use Dictate for a few sentences. Use Real-time for longer meetings or conversations. Dictate sends the recording when you stop.')}</p>
+          <label><input type="checkbox" ref={skipWarning} /> {t('Do not show again')}</label>
+        </div>
+        <div className="transcription-card-actions">
+          <Button type="submit" value="cancel">{t('Cancel')}</Button>
+          <Button type="submit" value="continue" variant="primary">{t('Continue recording')}</Button>
+        </div>
       </form>
     </dialog>
   </main>;
