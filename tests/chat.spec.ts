@@ -1595,6 +1595,88 @@ test('sidebar catalog pins are opt-in, independent of navigation, and saved acro
   await expect(models).toHaveCount(0);
 });
 
+test.describe('Dutch regional settings with English interface', () => {
+  test.use({ locale: 'nl-NL' });
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('streaik.language', 'en'));
+  });
+
+  test('model badges and tabs show distinct icons and regional counts', async ({ page }) => {
+    const types = [
+      ['language', 'Language'], ['image', 'Image'], ['decision', 'Decision'], ['reranking', 'Reranking'],
+      ['speech', 'Speech'], ['transcription', 'Transcription'], ['video', 'Video'], ['embedding', 'Embedding'],
+      ['audio', 'Audio'], ['moderation', 'Moderation'], ['unrecognized', 'Other'],
+    ];
+    const data = types.map(([type, name]) => ({ id: `openai/example-${type}`, type, name,
+      ...(type === 'language' ? { context_window: 128_000, max_tokens: 4_096 } : {}),
+      ...(type === 'audio' ? { tags: ['realtime'] } : {}),
+    }));
+    await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [
+      ...data, ...Array.from({ length: 1234 - data.length }, (_, index) => ({ id: `openai/other-${index}`, type: 'other' })),
+    ] } }));
+    await page.goto('/');
+    await showSettings(page); await addKey(page); await closeSettings(page);
+    await openCatalog(page, 'Models');
+    await expect(page.getByText('Explore 1.234 models available from your gateway, grouped by capability.')).toBeVisible();
+
+    const tabs = page.getByRole('tablist', { name: 'Model capabilities' });
+    await expect(tabs.getByRole('tab', { name: 'All (1.234)', exact: true })).toBeVisible();
+    const tabIcons = tabs.locator('svg[aria-hidden=true]');
+    await expect(tabIcons).toHaveCount(types.length + 2); // All, each type, and Realtime.
+    const glyphs = await tabIcons.evaluateAll(icons => icons.map(icon => icon.innerHTML));
+    expect(new Set(glyphs).size).toBe(glyphs.length);
+
+    const results = page.getByRole('tabpanel');
+    const card = (name: string) => results.getByRole('article').filter({ has: page.getByRole('heading', { name, exact: true }) });
+    for (const [, name] of types) {
+      const tabIcon = tabs.getByRole('tab', { name: `${name} (${name === 'Other' ? '1.224' : '1'})`, exact: true }).locator('svg');
+      const badgeIcon = card(name).locator('.catalog-type-badge svg[aria-hidden=true]');
+      await expect(badgeIcon).toBeVisible();
+      expect(await badgeIcon.innerHTML()).toBe(await tabIcon.innerHTML());
+    }
+
+    const contextLabel = 'Context window: 128.000 tokens';
+    const outputLabel = 'Maximum output: 4.096 tokens';
+    const contextBadge = card('Language').getByRole('img', { name: contextLabel, exact: true });
+    const outputBadge = card('Language').getByRole('img', { name: outputLabel, exact: true });
+    await expect(contextBadge).toHaveText('128.000');
+    await expect(outputBadge).toHaveText('4.096');
+    expect(await contextBadge.locator('svg').innerHTML()).not.toBe(await outputBadge.locator('svg').innerHTML());
+    await expect(card('Image').locator('.catalog-token-badge')).toHaveCount(0);
+    await contextBadge.focus();
+    await expect(page.getByRole('tooltip', { name: contextLabel, exact: true })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await outputBadge.hover();
+    await expect(page.getByRole('tooltip', { name: outputLabel, exact: true })).toBeVisible();
+  });
+
+  test('chat metrics use regional grouping and decimal separators', async ({ page }) => {
+    await mockModels(page);
+    await page.route('**/gateway/api/chat', route => {
+      const events = [
+        { type: 'start', messageId: 'regional-reply' },
+        { type: 'text-start', id: 't' }, { type: 'text-delta', id: 't', delta: 'Regional reply' }, { type: 'text-end', id: 't' },
+        { type: 'finish', finishReason: 'stop', messageMetadata: {
+          usage: { promptTokens: 1200, completionTokens: 34, totalTokens: 1234 },
+          providerMetadata: { gateway: { cost: 0.0000104, ttft: 1.25, tps: 20 } },
+        } },
+      ];
+      return route.fulfill({ headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' },
+        body: events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n' });
+    });
+    await page.goto('/');
+    await showSettings(page); await addKey(page); await closeSettings(page);
+    await expectChatModel(page);
+    const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+    await composer.fill('Show regional metrics');
+    await composer.press('Enter');
+    const reply = page.getByRole('article', { name: 'Assistant' });
+    await expect(reply.getByRole('img', { name: 'Total tokens: 1.234 (1.200 input · 34 output)', exact: true })).toHaveText('1.234');
+    await expect(reply.getByRole('img', { name: /^Time to first token:/ })).toHaveText('1,25 s');
+    await expect(reply.getByRole('img', { name: /^Gateway cost \(USD\):/ })).toHaveText('0,0000104');
+  });
+});
+
 test.describe('touch sidebar', () => {
   test.use({ hasTouch: true, viewport: { width: 390, height: 844 } });
 

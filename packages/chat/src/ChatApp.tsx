@@ -150,7 +150,7 @@ function Transcript({ messages }: { messages: ChatMessage[] }) {
   </section>;
 }
 
-export function ChatApp({ appName = 'Streak', gateway, connection, agents }: { appName?: string; gateway: Gateway; connection: Connection; agents?: AgentsConfig }) {
+export function ChatApp({ appName = 'Streaik', gateway, connection, agents }: { appName?: string; gateway: Gateway; connection: Connection; agents?: AgentsConfig }) {
   const scope = connection.historyProfile ? JSON.stringify([gateway.historyScope, connection.historyProfile]) : undefined;
   const settings = useRef<HTMLDialogElement>(null);
   const [route, setRoute] = useState<ChatRoute>({ mode: 'gateway', endpoint: '/api/chat' });
