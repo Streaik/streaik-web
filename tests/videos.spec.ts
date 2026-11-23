@@ -21,9 +21,9 @@ async function addKey(page: Page) {
   const settings = page.getByRole('dialog', { name: 'Settings', exact: true });
   await settings.getByRole('tab', { name: 'API keys' }).click();
   await settings.getByRole('button', { name: 'Add API key' }).click();
-  await settings.getByLabel('Provider', { exact: true }).selectOption({ label: 'Google' });
-  await settings.getByLabel('Google API key', { exact: true }).fill('fixture-video-key');
-  await settings.getByRole('button', { name: 'Save Google key' }).click();
+  await settings.getByLabel('Provider', { exact: true }).selectOption('google');
+  await settings.getByLabel('Google Gemini API key', { exact: true }).fill('fixture-video-key');
+  await settings.getByRole('button', { name: 'Save Google Gemini key' }).click();
   await expect(settings.getByRole('status')).toHaveText('Provider key saved.');
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
 }
