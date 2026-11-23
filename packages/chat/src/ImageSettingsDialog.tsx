@@ -132,7 +132,10 @@ function OpenAIImageFields(props: ProviderFormProps) {
           <label><span>{t('SVG model')}</span><input value={stringOption(svg.model) ?? ''}
             onChange={event => setOption('svg', { ...svg, model: event.currentTarget.value || undefined })} /></label>
           <ChoiceField label="Reasoning effort" value={stringOption(reasoning?.effort)} choices={['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']}
-            onChange={effort => setOption('svg', { ...svg, reasoning: { ...reasoning, effort } })} />
+            onChange={effort => {
+              const next = { ...reasoning, effort };
+              setOption('svg', { ...svg, reasoning: Object.values(next).some(field => field !== undefined) ? next : undefined });
+            }} />
         </div>}
       </section>
     </>}

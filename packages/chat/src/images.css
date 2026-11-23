@@ -13,10 +13,10 @@
 .images-content .chat-composer-actions > :last-child { margin-inline-start: auto; }
 .images-content .chat-composer .chat-attachment-menu { inset-block: calc(100% + .4rem) auto; }
 .image-settings-dialog form { display: grid; gap: .8rem; }
+.image-settings-dialog [role='tabpanel']:not([hidden]) { display: grid; gap: .8rem; }
 .image-settings-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: .75rem; }
 .image-settings-fields label, .image-file-setting { display: grid; gap: .35rem; min-width: 0; }
 .image-settings-fields :is(input, select) { width: 100%; min-width: 0; box-sizing: border-box; padding: .5rem; border: 1px solid var(--border); border-radius: var(--radius); color: inherit; background: var(--surface); font: inherit; }
-.image-setting-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
 .image-svg-switch, .image-file-preview { display: flex; align-items: center; gap: .5rem; }
 .image-file-preview span { min-width: 0; overflow-wrap: anywhere; }
 .image-file-preview img { width: 3rem; height: 3rem; object-fit: contain; border-radius: var(--radius); }

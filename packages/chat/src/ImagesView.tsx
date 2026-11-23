@@ -17,8 +17,10 @@ import './images.css';
 function imageWarningMessage(warning: unknown) {
   if (typeof warning === 'string') return warning.trim();
   if (!warning || typeof warning !== 'object') return '';
-  const { message, details } = warning as { message?: unknown; details?: unknown };
-  return typeof message === 'string' ? message.trim() : typeof details === 'string' ? details.trim() : '';
+  const { message, details, type, feature } = warning as Record<string, unknown>;
+  if (typeof message === 'string' && message.trim()) return message.trim();
+  const detail = typeof details === 'string' ? details.trim() : '';
+  return typeof type === 'string' && typeof feature === 'string' ? `${type}: ${feature}. ${detail}`.trim() : detail;
 }
 
 export default function ImagesView({ gateway, scope, route, toolbar, catalog, loading: loadingModels, router, status }: {
@@ -46,8 +48,8 @@ export default function ImagesView({ gateway, scope, route, toolbar, catalog, lo
   const eligible = edit ? selected.filter(({ id }) => canEditImage(route, id)) : selected;
   const candidates = settings.mask ? eligible.filter(model => canMaskImage(route, model)) : eligible;
   const maskIssue = settings.mask ? imageMaskIssue(route, selected, references) : '';
-  const routeIssue = route === '/v1/images/generations' && references ? 'Remove attachments or choose an image edit route.'
-    : maskIssue || (edit && selected.length && !eligible.length ? 'This model does not support image editing.'
+  const routeIssue = maskIssue || (route === '/v1/images/generations' && references ? 'Remove attachments or choose an image edit route.'
+    : edit && selected.length && !eligible.length ? 'This model does not support image editing.'
     : route === '/v1/images/edits' && !references ? 'Add a reference image to edit.' : '');
   const busy = !!phase;
   const canSend = candidates.length > 0 && !routeIssue && !status;

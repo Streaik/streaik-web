@@ -1020,6 +1020,8 @@ async function prepareImageDecisions(page: Page, useDirectChat = false) {
     { id: imagen, type: 'image', name: 'Imagen' }, { id: gptImage1, type: 'image', name: 'GPT Image 1' },
     { id: gptImage2, type: 'image', name: 'GPT Image 2', description: 'An image editor.' },
     { id: 'openai/other-image', type: 'image', name: 'Other Image' },
+    { id: 'imagerouter/vendor/image', type: 'image', name: 'ImageRouter image' },
+    { id: 'openrouter/vendor/image', type: 'image', name: 'OpenRouter image' },
   ] } }));
   await page.route('**/gateway/v1/skills?*', route => route.fulfill({ json: { data: [], has_more: false } }));
   await page.goto('/');
@@ -1081,6 +1083,13 @@ test('Images routes checked models through the shared agent and generates with t
     await expect(generated).toHaveCount(count);
     await expect(prompt).toHaveValue('');
   };
+  const toggleRouters = async () => {
+    await modelPicker(page).click();
+    await page.getByRole('option', { name: 'ImageRouter image', exact: true }).click();
+    await page.getByRole('option', { name: 'OpenRouter image', exact: true }).click();
+    await page.keyboard.press('Escape');
+  };
+  await toggleRouters();
   await composer.getByRole('button', { name: 'Image settings' }).click();
   const imageSettings = page.getByRole('dialog', { name: 'Image settings' });
   await imageSettings.getByLabel('Number of images').fill('5');
@@ -1088,8 +1097,12 @@ test('Images routes checked models through the shared agent and generates with t
   await expect(imageSettings.getByRole('combobox', { name: 'Image model', exact: true })).toHaveCount(0);
   await imageSettings.getByRole('tab', { name: 'Google', exact: true }).click();
   await imageSettings.getByRole('tabpanel', { name: 'Google', exact: true }).getByLabel('Output format').selectOption('jpeg');
+  await imageSettings.getByRole('tab', { name: 'ImageRouter', exact: true }).click();
+  await imageSettings.getByRole('tabpanel', { name: 'ImageRouter', exact: true }).getByLabel('Quality').selectOption('low');
+  await imageSettings.getByRole('tab', { name: 'OpenRouter', exact: true }).click();
+  await imageSettings.getByRole('tabpanel', { name: 'OpenRouter', exact: true }).getByLabel('Quality').selectOption('medium');
   await imageSettings.getByRole('tab', { name: 'OpenAI', exact: true }).click();
-  await imageSettings.getByLabel('Quality').selectOption('high');
+  await imageSettings.getByRole('tabpanel', { name: 'OpenAI', exact: true }).getByLabel('Quality').selectOption('high');
   await imageSettings.getByRole('button', { name: 'Save image settings', exact: true }).click();
 
   await openRoute(page);
@@ -1100,7 +1113,12 @@ test('Images routes checked models through the shared agent and generates with t
   await expect(imageSettings.getByLabel('Edit mask')).toHaveCount(0);
   await imageSettings.getByRole('tab', { name: 'Google', exact: true }).click();
   await expect(imageSettings.getByRole('tabpanel', { name: 'Google', exact: true }).getByLabel('Output format')).toHaveValue('jpeg');
+  await imageSettings.getByRole('tab', { name: 'ImageRouter', exact: true }).click();
+  await expect(imageSettings.getByRole('tabpanel', { name: 'ImageRouter', exact: true }).getByLabel('Quality')).toHaveValue('low');
+  await imageSettings.getByRole('tab', { name: 'OpenRouter', exact: true }).click();
+  await expect(imageSettings.getByRole('tabpanel', { name: 'OpenRouter', exact: true }).getByLabel('Quality')).toHaveValue('medium');
   await imageSettings.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await toggleRouters();
   await send('A blue bird', 5);
   await openRoute(page, 'Decisions');
   await page.getByRole('menuitemradio', { name: '/api/decisions', exact: true }).click();
