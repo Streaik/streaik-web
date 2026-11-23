@@ -27,7 +27,8 @@ The chat client supports:
 - **Streaming UI** with interactive apps, cards and structured response rendering
 - **Speech** with generation, streaming playback and realtime transcription
 - **Transcriptions** with configurable file splitting, overlap handling and merged results. **Real-time** streams microphone audio to supported OpenAI, Gladia, and Google Gemini 3.5 Transcribe Live models and displays text only. **Dictate** records a short clip and uploads it when you stop.
-- **Images and video** with generation, provider-specific options and asynchronous jobs
+- **Images** with generation and provider-specific options
+- **Videos** with prompt-only generation and inline playback. Pending jobs and results are saved locally for the current gateway/profile. Reopen Videos with the same credentials to resume polling; gateway job references and provider-hosted video links can expire.
 - **Benchmarks** with multi-model comparisons, configurable routing and repeatable test runs
 - **Usage analytics** with interactive charts, token consumption and cost tracking
 - **Performance metrics** including time to first token (TTFT) and tokens per second (TPS)
