@@ -96,7 +96,7 @@ export default function VideosView({ gateway, library, toolbar, catalog, loading
       <h1 id={heading}>{t('Videos')}</h1>
       <ChatComposer busy={library.busy} canSend={canSend} video={{ prompt, onChange: setPrompt, onSend: () => { void generate(); } }} />
       {status && <p className="chat-attachment-notice" role="status">{status}</p>}
-      {!status && !model && <p className="chat-attachment-notice" role="status">{t('No video models are available.')}</p>}
+      {!status && !models.length && <p className="chat-attachment-notice" role="status">{t('No video models are available.')}</p>}
       {library.startError && <p className="chat-attachment-notice" role="alert">{t(library.startError)}</p>}
       <section className="images-library" aria-labelledby={`${heading}-library`}>
         <h2 id={`${heading}-library`}>{t('My videos')}</h2>
