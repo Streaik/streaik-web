@@ -16,7 +16,11 @@ const mediaTypes: Record<string, string> = {
   aif: 'audio/aiff', aiff: 'audio/aiff', wma: 'audio/x-ms-wma', mov: 'audio/quicktime',
 };
 export const transcriptionFileAccept = `audio/*,${Object.keys(mediaTypes).map(ext => `.${ext}`).join(',')}`;
-export const maxTranscriptionFileBytes = 25 * 1024 * 1024 - 16 * 1024; // Leave room for multipart metadata.
+export function transcriptionUploadLimit(route: GatewayTranscriptionEndpoint) {
+  if (route === '/v1/audio/transcriptions') return 25 * 1024 * 1024 - 16 * 1024;
+  // JSON carries base64; leave room for settings under Kestrel's default 30 MB body limit.
+  return Math.floor((30_000_000 - 64 * 1024) * 3 / 4);
+}
 
 export function transcriptionMediaType(file: File): string | undefined {
   const type = file.type.split(';')[0].toLowerCase();
@@ -45,11 +49,11 @@ export async function transcriptionBody(route: GatewayTranscriptionEndpoint, mod
   const provider = model.split('/')[0];
   const mediaType = transcriptionMediaType(file);
   if (!mediaType || !file.size) throw new GatewayError('Choose a supported, nonempty audio file.');
-  if (file.size > maxTranscriptionFileBytes) throw new GatewayError('This audio file exceeds the upload limit.');
+  if (file.size > transcriptionUploadLimit(route)) throw new GatewayError('This audio file exceeds the upload limit.');
   const options: Record<string, string | boolean> = {};
   if (settings.language?.trim()) options.language = settings.language.trim();
   if (provider === 'openai' && !model.includes('diarize') && settings.prompt?.trim()) options.prompt = settings.prompt.trim();
-  if ((provider === 'gladia' || provider === 'deepgram') && settings.diarization) options[provider === 'deepgram' ? 'diarize' : 'diarization'] = true;
+  if (provider === 'gladia' && route === '/api/transcriptions' && settings.diarization) options.diarization = true;
   if (route === '/v1/audio/transcriptions') {
     const body = new FormData();
     body.set('model', model);
@@ -73,19 +77,22 @@ export function object(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-function segments(value: unknown): TranscriptSegment[] {
+function segments(value: unknown, allowSpeaker: boolean): TranscriptSegment[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap(item => {
     const { text, startSecond, endSecond, start = startSecond, end = endSecond, speaker } = object(item);
     return typeof text === 'string' && typeof start === 'number' && typeof end === 'number' && Number.isFinite(start) && Number.isFinite(end)
-      ? [{ text, startSecond: start, endSecond: end, speaker: typeof speaker === 'string' || typeof speaker === 'number' ? String(speaker) : undefined }] : [];
+      ? [{ text, startSecond: start, endSecond: end, speaker: allowSpeaker && (typeof speaker === 'string' || typeof speaker === 'number') ? String(speaker) : undefined }] : [];
   });
 }
 
-export function readTranscript(payload: unknown): Transcript {
-  const { text, language, durationInSeconds, duration = durationInSeconds, segments: raw } = object(payload);
+export function readTranscript(payload: unknown, native = false): Transcript {
+  const { text, language, durationInSeconds, duration = durationInSeconds, segments: raw, providerMetadata } = object(payload);
   if (typeof text !== 'string') throw new GatewayError('The gateway returned an unreadable transcript.');
-  return { text, segments: segments(raw),
+  // Vercel segments are contract-locked. Speakers come only from native output or provider metadata.
+  const metadata = object(providerMetadata);
+  const providerSegments = native ? [] : segments(object(metadata.gladia).utterances ?? object(metadata.openai).segments, true);
+  return { text, segments: providerSegments.length ? providerSegments : segments(raw, native),
     durationInSeconds: typeof duration === 'number' ? duration : undefined, language: typeof language === 'string' ? language : undefined };
 }
 

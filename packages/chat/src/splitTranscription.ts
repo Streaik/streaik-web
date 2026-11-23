@@ -1,11 +1,11 @@
-import { GatewayError, maxTranscriptionFileBytes } from '@streaik/gateway';
+import { GatewayError } from '@streaik/gateway';
 import type { Transcript } from '@streaik/gateway';
 
 export const maxSplittableFileBytes = 100 * 1024 * 1024;
 type Part = { file: File; offset: number };
 type ChunkResult = { transcript: Transcript; offset: number };
 
-export async function* splitTranscription(file: File, overlap: number, signal: AbortSignal): AsyncGenerator<Part> {
+export async function* splitTranscription(file: File, maxBytes: number, overlap: number, signal: AbortSignal): AsyncGenerator<Part> {
   const rate = 16000;
   let decoded: AudioBuffer;
   try {
@@ -15,7 +15,7 @@ export async function* splitTranscription(file: File, overlap: number, signal: A
   signal.throwIfAborted();
   if (decoded.duration > 7200) throw new GatewayError('Split uploads are limited to two hours of audio.');
   const channels = Array.from({ length: decoded.numberOfChannels }, (_, i) => decoded.getChannelData(i));
-  const length = Math.floor((maxTranscriptionFileBytes - 44) / 2);
+  const length = Math.floor((maxBytes - 44) / 2);
   const step = length - Math.round(overlap * rate);
   for (let offset = 0; offset < decoded.length; offset += step) {
     signal.throwIfAborted();
@@ -44,7 +44,7 @@ export function mergeTranscriptionChunks(results: readonly ChunkResult[]): Trans
     const next = transcript.text.trim().split(/\s+/u);
     const normalize = (word: string) => word.toLowerCase().replace(/^\p{P}+|\p{P}+$/gu, '');
     let overlap = 0;
-    if (offset && transcript.text.trim()) {
+    if (offset && transcript.text.trim() && previous[0]) {
       for (let count = Math.min(60, previous.length, next.length); count >= 2; count--) {
         if (previous.slice(-count).every((word, i) => normalize(word) === normalize(next[i]))) { overlap = count; break; }
       }

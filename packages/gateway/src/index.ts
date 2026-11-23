@@ -7,7 +7,7 @@ import { imageRequestBody, isImageEndpoint, readImageResponse } from './images.t
 import type { GatewayImageEndpoint, ImageRequest, ImageResponse } from './images.ts';
 import { isLiveTranscriptionModel, isTranscriptionEndpoint, readLiveTranscriptionCredential, readTranscript, readTranscriptStream, supportsFileTranscription, transcriptionBody } from './transcriptions.ts';
 import type { GatewayTranscriptionEndpoint, TranscriptionOptions } from './transcriptions.ts';
-export { gatewayTranscriptionEndpoints, isLiveTranscriptionModel, isTranscriptionEndpoint, maxTranscriptionFileBytes, supportsFileTranscription, transcriptionFileAccept, transcriptionMediaType } from './transcriptions.ts';
+export { gatewayTranscriptionEndpoints, isLiveTranscriptionModel, isTranscriptionEndpoint, supportsFileTranscription, transcriptionFileAccept, transcriptionMediaType, transcriptionUploadLimit } from './transcriptions.ts';
 export type { GatewayTranscriptionEndpoint, Transcript, TranscriptSegment, TranscriptionOptions } from './transcriptions.ts';
 import { readTokenPricing } from './tokenPricing.ts';
 import type { TokenRates } from './tokenPricing.ts';
@@ -282,7 +282,7 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
         signal.throwIfAborted();
         throw new GatewayError('The gateway returned an unreadable transcript.');
       }
-      return readTranscript(payload);
+      return readTranscript(payload, endpoint === '/v1/audio/transcriptions');
     },
     async liveTranscriptionCredential(model: string, language: string | undefined, signal: AbortSignal) {
       if (!isLiveTranscriptionModel(model)) throw new GatewayError('Choose an OpenAI or Gladia microphone model.');

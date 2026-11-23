@@ -1,4 +1,4 @@
-import { GatewayError, isLiveTranscriptionModel, maxTranscriptionFileBytes, supportsFileTranscription, transcriptionFileAccept, transcriptionMediaType } from '@streaik/gateway';
+import { GatewayError, isLiveTranscriptionModel, supportsFileTranscription, transcriptionFileAccept, transcriptionMediaType, transcriptionUploadLimit } from '@streaik/gateway';
 import type { CatalogModel, Gateway, GatewayTranscriptionEndpoint, Transcript } from '@streaik/gateway';
 import { Button } from '@streaik/themes';
 import { useEffect, useId, useRef, useState } from 'react';
@@ -80,6 +80,7 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, cat
   const dragDepth = useRef(0);
   const operation = useRef<{ abort: AbortController; stop?: AbortController }>(null);
   const enabled = !status && !loading;
+  const fileLimit = transcriptionUploadLimit(route);
   const ASR = (catalog ?? []).filter(model => model.type === 'transcription');
   const models = ASR.filter(({ id }) => supportsFileTranscription(route, id));
   const fileModel = models.find(model => model.id === settings.fileModel) ??
@@ -107,7 +108,7 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, cat
     if (operation.current) return;
     setError('');
     let rejected = false;
-    const limit = settings.split ? maxSplittableFileBytes : maxTranscriptionFileBytes;
+    const limit = settings.split ? maxSplittableFileBytes : fileLimit;
     const next = Array.from(files).flatMap(file => {
       const type = transcriptionMediaType(file);
       if (!type || !file.size || file.size > limit) { rejected = true; return []; }
@@ -147,9 +148,9 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, cat
           const send = (part: File, before = '') => gateway.transcribe(route, fileModel.id, part, settings, signal,
             chunk => setPreview({ name: file.name, text: [before, chunk].filter(Boolean).join(' ') }));
           let transcript: Transcript;
-          if (file.size > maxTranscriptionFileBytes && settings.split) {
+          if (file.size > fileLimit && settings.split) {
             const results: { transcript: Transcript; offset: number }[] = [];
-            for await (const { file: part, offset } of splitTranscription(file, settings.overlap ?? 5, signal)) {
+            for await (const { file: part, offset } of splitTranscription(file, fileLimit, settings.overlap ?? 5, signal)) {
               results.push({ transcript: await send(part, mergeTranscriptionChunks(results).text), offset });
             }
             transcript = mergeTranscriptionChunks(results);
@@ -287,7 +288,7 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, cat
             <label htmlFor={`${id}-prompt`}>{t('Transcription prompt (optional)')}</label>
             <input id={`${id}-prompt`} maxLength={1000} value={settings.prompt ?? ''} onChange={event => change({ prompt: event.target.value })} />
           </>}
-          {(fileModel?.provider === 'gladia' || fileModel?.provider === 'deepgram') && <label>
+          {fileModel?.provider === 'gladia' && route === '/api/transcriptions' && <label>
             <input type="checkbox" checked={!!settings.diarization} onChange={event => change({ diarization: event.target.checked })} /> {t('Identify speakers')}
           </label>}
           <label><input type="checkbox" checked={!!settings.split} onChange={event => change({ split: event.target.checked })} /> {t('Split audio above the upload limit')}</label>
