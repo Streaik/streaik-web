@@ -1,4 +1,4 @@
-import { GatewayError, isLiveTranscriptionModel, openAITranscriptionSocket, supportsFileTranscription, transcriptionFileAccept, transcriptionMediaType, transcriptionUploadLimit } from '@streaik/gateway';
+import { GatewayError, isLiveTranscriptionModel, supportsFileTranscription, transcriptionFileAccept, transcriptionMediaType, transcriptionUploadLimit, usesTranscriptionWebSocket } from '@streaik/gateway';
 import type { CatalogModel, Gateway, GatewayTranscriptionEndpoint, Transcript } from '@streaik/gateway';
 import { Button } from '@streaik/themes';
 import { useEffect, useId, useRef, useState } from 'react';
@@ -104,7 +104,7 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, cat
   const dictating = phase === 'dictate-connecting' || phase === 'dictating' || phase === 'dictate-finishing';
   const canCapture = !!globalThis.navigator?.mediaDevices?.getUserMedia;
   const canRecord = canCapture && !!dictationFormat();
-  const liveSocket = liveModel && (liveModel.provider === 'gladia' || openAITranscriptionSocket(liveModel.id));
+  const liveSocket = liveModel && usesTranscriptionWebSocket(liveModel.id);
   const canLive = canCapture && (liveSocket ? typeof WebSocket !== 'undefined' && typeof AudioWorkletNode !== 'undefined' : typeof RTCPeerConnection !== 'undefined');
   const canSubmit = enabled && !busy && queue.some(item => item.dictation || fileModel);
 

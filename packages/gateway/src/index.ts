@@ -5,9 +5,9 @@ import { decisionChoiceBody, gatewayDecisionEndpoints, readDecisionChoice } from
 import type { DecisionChoice, GatewayDecisionEndpoint } from './decisionChoice.ts';
 import { imageRequestBody, isImageEndpoint, readImageResponse } from './images.ts';
 import type { GatewayImageEndpoint, ImageRequest, ImageResponse } from './images.ts';
-import { isLiveTranscriptionModel, isTranscriptionEndpoint, openAITranscriptionSession, openAITranscriptionSocket, readLiveTranscriptionCredential, readTranscript, readTranscriptStream, supportsFileTranscription, transcriptionBody } from './transcriptions.ts';
+import { googleLiveTranscriptionSetup, isTranscriptionEndpoint, liveTranscriptionProvider, openAITranscriptionSession, readLiveTranscriptionCredential, readTranscript, readTranscriptStream, supportsFileTranscription, transcriptionBody } from './transcriptions.ts';
 import type { GatewayTranscriptionEndpoint, TranscriptionOptions } from './transcriptions.ts';
-export { gatewayTranscriptionEndpoints, isLiveTranscriptionModel, isTranscriptionEndpoint, openAITranscriptionSocket, supportsFileTranscription, transcriptionFileAccept, transcriptionMediaType, transcriptionUploadLimit } from './transcriptions.ts';
+export { gatewayTranscriptionEndpoints, googleLiveTranscriptionSetup, isLiveTranscriptionModel, isTranscriptionEndpoint, openAITranscriptionSocket, supportsFileTranscription, transcriptionFileAccept, transcriptionMediaType, transcriptionUploadLimit, usesTranscriptionWebSocket } from './transcriptions.ts';
 export type { GatewayTranscriptionEndpoint, Transcript, TranscriptSegment, TranscriptionOptions } from './transcriptions.ts';
 import { readTokenPricing } from './tokenPricing.ts';
 import type { TokenRates } from './tokenPricing.ts';
@@ -285,13 +285,17 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
       return readTranscript(payload, endpoint === '/v1/audio/transcriptions');
     },
     async liveTranscriptionCredential(model: string, language: string | undefined, signal: AbortSignal) {
-      if (!isLiveTranscriptionModel(model)) throw new GatewayError('Choose an OpenAI or Gladia microphone model.');
-      const provider = model.startsWith('openai/') ? 'openai' : 'gladia';
-      const path = provider === 'openai' ? 'v1/realtime/client_secrets' : 'api/realtime/token/gladia/solaria-1';
-      const body = provider === 'openai' ? { session: openAITranscriptionSession(model, language) } : { sessionConfig: { providerOptions: { gladia: {
-        encoding: 'wav/pcm', sample_rate: 16000, channels: 1, bit_depth: 16,
-        ...(language ? { language_config: { languages: [language] } } : {}),
-      } } } };
+      const provider = liveTranscriptionProvider(model);
+      if (!provider) throw new GatewayError('Choose a compatible microphone transcription model.');
+      const path = provider === 'openai' ? 'v1/realtime/client_secrets' : `api/realtime/token/${model}`;
+      const body = provider === 'openai' ? { session: openAITranscriptionSession(model, language) }
+        : provider === 'google' ? { sessionConfig: { providerOptions: { google: {
+          uses: 1, bidiGenerateContentSetup: googleLiveTranscriptionSetup(model, language),
+        } } } }
+          : { sessionConfig: { providerOptions: { gladia: {
+            encoding: 'wav/pcm', sample_rate: 16000, channels: 1, bit_depth: 16,
+            ...(language ? { language_config: { languages: [language] } } : {}),
+          } } } };
       const response = await request(root && new URL(path, root).href, { kind: 'realtime', provider }, {
         method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json' }, body: JSON.stringify(body), signal,
       });

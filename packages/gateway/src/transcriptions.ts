@@ -8,7 +8,7 @@ export const isTranscriptionEndpoint = (value: unknown): value is GatewayTranscr
 export type TranscriptSegment = { text: string; startSecond: number; endSecond: number; speaker?: string };
 export type Transcript = { text: string; segments: TranscriptSegment[]; durationInSeconds?: number; language?: string };
 export type TranscriptionOptions = { language?: string; prompt?: string; diarization?: boolean };
-export type LiveTranscriptionCredential = { provider: 'openai'; secret: string } | { provider: 'gladia'; url: string };
+export type LiveTranscriptionCredential = { provider: 'openai'; secret: string } | { provider: 'gladia' | 'google'; url: string };
 
 const mediaTypes: Record<string, string> = {
   mp3: 'audio/mpeg', mpga: 'audio/mpeg', mpeg: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', mp4: 'audio/mp4',
@@ -31,9 +31,25 @@ export function transcriptionMediaType(file: File): string | undefined {
 const openAILive = /^openai\/gpt-live-transcribe(?:-\d{4}-\d{2}-\d{2})?$/;
 const openAIWhisper = /^openai\/gpt-realtime-whisper(?:-\d{4}-\d{2}-\d{2})?$/;
 const openAILegacyLive = /^openai\/gpt-realtime(?:-[\w-]+)?-transcribe(?:-|$)/;
+const googleLiveSocket = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained';
+
+function googleLiveTranscription(model: string) {
+  return model === 'google/gemini-3.5-transcribe-live';
+}
 
 export function isLiveTranscriptionModel(model: string) {
-  return openAILive.test(model) || openAIWhisper.test(model) || openAILegacyLive.test(model) || model === 'gladia/solaria-1';
+  return !!liveTranscriptionProvider(model);
+}
+
+export function liveTranscriptionProvider(model: string) {
+  if (openAILive.test(model) || openAIWhisper.test(model) || openAILegacyLive.test(model)) return 'openai';
+  if (model === 'gladia/solaria-1') return 'gladia';
+  if (googleLiveTranscription(model)) return 'google';
+}
+
+export function usesTranscriptionWebSocket(model: string) {
+  const provider = liveTranscriptionProvider(model);
+  return provider === 'gladia' || provider === 'google' || openAITranscriptionSocket(model);
 }
 
 export function openAITranscriptionSocket(model: string) {
@@ -49,8 +65,14 @@ export function openAITranscriptionSession(model: string, language?: string) {
   } } };
 }
 
+export function googleLiveTranscriptionSetup(model: string, language?: string) {
+  // Default to verbatim and automatic language detection. Accept the shared language hint when provided.
+  return { model: `models/${model.slice('google/'.length)}`, generationConfig: { responseModalities: ['TEXT'] },
+    inputAudioTranscription: { languageCodes: language ? [language] : [], mode: 'VERBATIM' } };
+}
+
 export function supportsFileTranscription(route: GatewayTranscriptionEndpoint, model: string) {
-  if (!/^(openai|openrouter|google|gladia|deepgram)\//.test(model) ||
+  if (googleLiveTranscription(model) || !/^(openai|openrouter|google|gladia|deepgram)\//.test(model) ||
       (model.startsWith('openai/') && (isLiveTranscriptionModel(model) || /^openai\/gpt-(?:4o-)?realtime/.test(model)))) return false;
   return route !== '/api/transcriptions/stream' || /^openai\/gpt-(?:4o(?:-mini)?-)?transcribe(?:$|-(?!diarize))/.test(model) || model.startsWith('deepgram/');
 }
@@ -151,10 +173,16 @@ export async function readTranscriptStream(response: Response, preview: (text: s
   } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
 }
 
-export function readLiveTranscriptionCredential(provider: 'openai' | 'gladia', payload: unknown): LiveTranscriptionCredential {
-  const { value, url, expires_at, expiresAt = expires_at } = object(payload);
+export function readLiveTranscriptionCredential(provider: LiveTranscriptionCredential['provider'], payload: unknown): LiveTranscriptionCredential {
+  const { value, url, token, expires_at, expiresAt = expires_at } = object(payload);
   if (typeof expiresAt === 'number' && expiresAt * 1000 <= Date.now()) throw new GatewayError('The microphone session credential expired. Start again.');
   if (provider === 'openai' && typeof value === 'string' && value.trim()) return { provider, secret: value };
+  if (provider === 'google' && url === googleLiveSocket && typeof token === 'string' && /^\S{1,4096}$/.test(token) &&
+      typeof expiresAt === 'number' && Number.isFinite(expiresAt)) {
+    const target = new URL(googleLiveSocket);
+    target.searchParams.set('access_token', token);
+    return { provider, url: target.href };
+  }
   if (provider === 'gladia' && typeof url === 'string') {
     let target: URL | undefined;
     try { target = new URL(url); } catch { /* Use the generic error below. */ }

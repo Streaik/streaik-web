@@ -1,4 +1,4 @@
-import { GatewayError, openAITranscriptionSocket } from '@streaik/gateway';
+import { GatewayError, googleLiveTranscriptionSetup, openAITranscriptionSocket } from '@streaik/gateway';
 import type { Gateway, Transcript, TranscriptSegment } from '@streaik/gateway';
 import { getMicrophone, stopTracks } from './microphone';
 
@@ -31,6 +31,10 @@ function untilStop(stop: AbortSignal, signal: AbortSignal) {
   return wait(stop, 'abort', signal, () => stop.aborted);
 }
 
+function pcmBase64(bytes: ArrayBuffer) {
+  return btoa(String.fromCharCode(...new Uint8Array(bytes)));
+}
+
 export async function runMicrophone(gateway: Gateway, model: string, language: string | undefined, events: Stop) {
   const stream = await getMicrophone(events.signal);
   const release = () => stopTracks(stream);
@@ -42,8 +46,9 @@ export async function runMicrophone(gateway: Gateway, model: string, language: s
     if (credential.provider === 'openai') {
       if (openAITranscriptionSocket(model)) await openAISocket(stream, credential.secret, events);
       else await openAI(stream, credential.secret, events);
-    }
-    else await gladia(stream, credential.url, events);
+    } else if (credential.provider === 'google') {
+      await google(stream, credential.url, googleLiveTranscriptionSetup(model, language), events);
+    } else await gladia(stream, credential.url, events);
   } finally { events.signal.removeEventListener('abort', release); release(); }
 }
 
@@ -111,7 +116,7 @@ async function openAISocket(stream: MediaStream, secret: string, events: Stop) {
   const close = () => socket.close();
   const sendAudio = (bytes: ArrayBuffer) => {
     if (socket.readyState !== WebSocket.OPEN || socket.bufferedAmount > 128_000) { fail(); return; }
-    socket.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: btoa(String.fromCharCode(...new Uint8Array(bytes))) }));
+    socket.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: pcmBase64(bytes) }));
     bytesSent += bytes.byteLength;
   };
   const message = (event: MessageEvent) => {
@@ -265,6 +270,85 @@ async function openAI(stream: MediaStream, secret: string, events: Stop) {
     channel.removeEventListener('close', fail);
     channel.removeEventListener('error', fail);
     pc.removeEventListener('connectionstatechange', connectionState);
+    close();
+  }
+}
+
+async function google(stream: MediaStream, url: string, setup: ReturnType<typeof googleLiveTranscriptionSetup>, events: Stop) {
+  const failure = new AbortController();
+  const signal = AbortSignal.any([events.signal, failure.signal]);
+  const startup = AbortSignal.any([signal, AbortSignal.timeout(25_000)]);
+  const fail = () => failure.abort(new GatewayError('Google microphone transcription disconnected or failed.'));
+  const ws = new WebSocket(url);
+  ws.binaryType = 'arraybuffer';
+  const changes = new EventTarget();
+  const decoder = new TextDecoder();
+  const confirmed: string[] = [];
+  let partial = '', setupReady = false, sentAudio = false, stopping = false, closedCleanly = false;
+  let capture: Awaited<ReturnType<typeof capturePcm>> | undefined;
+  const close = () => ws.close();
+  const closed = (event: CloseEvent) => {
+    if (stopping && event.wasClean && event.code === 1000) {
+      closedCleanly = true;
+      changes.dispatchEvent(new Event('finished'));
+    } else fail();
+  };
+  const message = (event: MessageEvent) => {
+    const part = readEvent(event.data instanceof ArrayBuffer ? decoder.decode(event.data) : event.data);
+    if (part.error) { fail(); return; }
+    if (part.setupComplete && !setupReady) {
+      setupReady = true;
+      changes.dispatchEvent(new Event('setup'));
+    }
+    if (!setupReady || signal.aborted) return;
+    const content = record(part.serverContent);
+    const final = record(content.inputTranscription).text;
+    const interim = record(content.interimInputTranscription).text;
+    // VERBATIM finals are new segments, not replacements of the full transcript.
+    // Never consume modelTurn or outputTranscription as microphone input.
+    if (typeof final === 'string') {
+      if (final.trim()) confirmed.push(final.trim());
+      partial = '';
+    }
+    if (typeof interim === 'string') partial = interim.trim();
+    if (typeof final === 'string' || typeof interim === 'string') events.update({ text: confirmed.join(' '), segments: [] }, partial);
+  };
+  events.signal.addEventListener('abort', close, { once: true });
+  ws.addEventListener('message', message);
+  ws.addEventListener('close', closed);
+  ws.addEventListener('error', fail);
+  try {
+    await wait(ws, 'open', startup, () => ws.readyState === WebSocket.OPEN);
+    ws.send(JSON.stringify({ setup }));
+    await wait(changes, 'setup', startup, () => setupReady);
+    capture = await capturePcm(stream, 16000, signal, startup, bytes => {
+      if (ws.readyState !== WebSocket.OPEN || ws.bufferedAmount > 128_000) { fail(); return; }
+      ws.send(JSON.stringify({ realtimeInput: { audio: { data: pcmBase64(bytes), mimeType: 'audio/pcm;rate=16000' } } }));
+      sentAudio = true;
+    });
+    startup.throwIfAborted();
+    events.ready();
+    await untilStop(events.stop, signal);
+    await capture.flush();
+    capture.close();
+    capture = undefined;
+    stopTracks(stream);
+    if (!sentAudio) return;
+    signal.throwIfAborted();
+    stopping = true;
+    ws.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
+    // Input transcripts can arrive independently of turnComplete. Allow a bounded drain even if a turn already ended.
+    const drain = AbortSignal.timeout(2500);
+    await wait(changes, 'finished', AbortSignal.any([signal, drain]), () => closedCleanly).catch(error => {
+      if (!drain.aborted || signal.aborted) throw error;
+    });
+    if (partial) throw new GatewayError('Google did not finish the last microphone segment.');
+  } finally {
+    capture?.close();
+    events.signal.removeEventListener('abort', close);
+    ws.removeEventListener('message', message);
+    ws.removeEventListener('close', closed);
+    ws.removeEventListener('error', fail);
     close();
   }
 }
