@@ -125,14 +125,13 @@ test('all file routes, drag and drop, interrupted SSE, and scoped finished cards
 });
 
 test('the icon-only Stop button cancels a file transcription and keeps the audio queued', async ({ page }) => {
-  page.on('pageerror', error => console.error(error));
   await page.addInitScript(() => {
     const original = window.fetch.bind(window);
     window.fetch = (input, init) => {
       if (!String(input).endsWith('/gateway/api/transcriptions')) return original(input, init);
       const { dataset } = document.documentElement;
       const signal = init?.signal;
-      dataset.transcriptionUpload = signal ? 'pending' : 'no signal';
+      dataset.transcriptionUpload = 'pending';
       return new Promise<Response>((_, reject) => {
         signal?.addEventListener('abort', () => {
           dataset.transcriptionUpload = 'aborted';
@@ -154,7 +153,6 @@ test('the icon-only Stop button cancels a file transcription and keeps the audio
   await stopUpload.hover();
   await expect(page.getByRole('tooltip', { name: 'Stop', exact: true })).toBeVisible();
   await stopUpload.click();
-  console.log(await page.evaluate(() => ({ path: location.href, main: document.querySelector('main')?.innerText })));
   await expect(page.locator('html')).toHaveAttribute('data-transcription-upload', 'aborted');
   await expect(send).toBeEnabled();
   await expect(composer.getByRole('list', { name: 'Audio attachments' })).toContainText(file.name);
