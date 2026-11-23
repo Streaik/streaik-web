@@ -52,7 +52,8 @@ test('all file routes, drag and drop, interrupted SSE, and scoped finished cards
     expect(request.postDataJSON()).toMatchObject({ model: batchModel, audio: file.buffer.toString('base64') });
     if (path === '/api/transcriptions') {
       expect(request.postDataJSON().mediaType).toBe('audio/wav');
-      return route.fulfill({ json: { text: 'JSON transcript', segments: [{ text: 'JSON transcript', startSecond: 0, endSecond: 1, speaker: 'A' }] } });
+      return route.fulfill({ json: { text: 'JSON transcript', segments: [{ text: 'JSON transcript', startSecond: 0, endSecond: 1 }],
+        providerMetadata: { openai: { segments: [{ text: 'JSON transcript', start: 0, end: 1, speaker: 'A' }] } } } });
     }
     expect(request.postDataJSON().inputAudioFormat).toEqual({ type: 'audio/wav' });
     return route.fulfill({ contentType: 'text/event-stream', body: 'data: {"type":"transcript-delta","delta":"Incoming transcript"}\r\n\r\n' +
