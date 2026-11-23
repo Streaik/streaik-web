@@ -1,6 +1,7 @@
+import * as Menu from '@radix-ui/react-dropdown-menu';
 import { GatewayError, isLiveTranscriptionModel, supportsFileTranscription, transcriptionFileAccept, transcriptionMediaType, transcriptionUploadLimit, usesTranscriptionWebSocket } from '@streaik/gateway';
 import type { CatalogModel, Gateway, GatewayTranscriptionEndpoint, Transcript } from '@streaik/gateway';
-import { Button } from '@streaik/themes';
+import { Button, Tooltip } from '@streaik/themes';
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChatIcon } from './ChatIcon';
@@ -28,7 +29,9 @@ function selectFileModel(models: readonly CatalogModel[], id?: string) {
     ?? models.find(model => model.provider === 'openai') ?? models[0];
 }
 
-function TranscriptCard({ item, remove, onError }: { item: SavedTranscript; remove: () => void; onError: () => void }) {
+function TranscriptCard({ item, menuContainer, remove, onError }: {
+  item: SavedTranscript; menuContainer: HTMLDivElement | null; remove: () => void; onError: () => void;
+}) {
   const { t } = useAppTranslation();
   const [source, setSource] = useState('');
   useEffect(() => {
@@ -38,6 +41,9 @@ function TranscriptCard({ item, remove, onError }: { item: SavedTranscript; remo
     return () => URL.revokeObjectURL(url);
   }, [item.audio]);
   const { transcript, name, model } = item;
+  const copyLabel = t('Copy');
+  const downloadLabel = t('Download');
+  const deleteLabel = t('Delete');
   function download() {
     const url = URL.createObjectURL(new Blob([transcript.text], { type: 'text/plain;charset=utf-8' }));
     const link = document.createElement('a');
@@ -47,7 +53,20 @@ function TranscriptCard({ item, remove, onError }: { item: SavedTranscript; remo
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   return <article className="transcription-card">
-    <h2>{name}</h2>
+    <header className="transcription-card-header">
+      <h2>{name}</h2>
+      <Menu.Root modal={false}>
+        <Tooltip content={t('More actions')}><Menu.Trigger type="button" className="chat-row-button"
+          aria-label={t('More actions for {{title}}', { title: name })}><ChatIcon name="more" /></Menu.Trigger></Tooltip>
+        {menuContainer && <Menu.Portal container={menuContainer}>
+          <Menu.Content className="chat-menu transcription-card-menu" align="end" sideOffset={4} collisionPadding={8} hideWhenDetached>
+            <Menu.Item className="chat-menu-item" data-danger aria-label={deleteLabel} title={deleteLabel} textValue={deleteLabel} onSelect={remove}>
+              <ChatIcon name="trash" />
+            </Menu.Item>
+          </Menu.Content>
+        </Menu.Portal>}
+      </Menu.Root>
+    </header>
     <p className="transcription-meta">{[model, transcript.language, transcript.durationInSeconds !== undefined ? `${Math.round(transcript.durationInSeconds)} s` : undefined].filter(Boolean).join(' · ')}</p>
     {source && <audio controls preload="none" src={source} aria-label={t('Play source audio')} />}
     <div className="transcription-copy" tabIndex={0}>{transcript.text || t('No speech detected.')}</div>
@@ -57,19 +76,20 @@ function TranscriptCard({ item, remove, onError }: { item: SavedTranscript; remo
       </li>)}
     </ol></details>}
     <div className="transcription-card-actions">
-      <Button type="button" variant="subtle" onClick={() => {
+      <button type="button" className="chat-row-button" aria-label={copyLabel} title={copyLabel} onClick={() => {
         if (!navigator.clipboard) { onError(); return; }
         void navigator.clipboard.writeText(transcript.text).catch(onError);
-      }}>{t('Copy')}</Button>
-      <Button type="button" variant="subtle" onClick={download}>{t('Download')}</Button>
-      <Button type="button" variant="subtle" onClick={remove}>{t('Delete')}</Button>
+      }}><ChatIcon name="copy" /></button>
+      <button type="button" className="chat-row-button" aria-label={downloadLabel} title={downloadLabel} onClick={download}>
+        <ChatIcon name="download" />
+      </button>
     </div>
   </article>;
 }
 
-export default function TranscriptionsView({ gateway, scope, route, toolbar, catalog, loading, status }: {
+export default function TranscriptionsView({ gateway, scope, route, toolbar, menuContainer, catalog, loading, status }: {
   gateway: Gateway; scope?: string; route: GatewayTranscriptionEndpoint; toolbar: HTMLDivElement | null;
-  catalog?: readonly CatalogModel[]; loading: boolean; status?: string;
+  menuContainer: HTMLDivElement | null; catalog?: readonly CatalogModel[]; loading: boolean; status?: string;
 }) {
   const { t } = useAppTranslation();
   const id = useId();
@@ -270,6 +290,8 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, cat
     : phase === 'finishing' ? 'Finishing microphone transcription…' : phase === 'upload' ? 'Transcribing audio…'
     : phase === 'dictate-connecting' ? 'Connecting microphone…' : phase === 'dictating' ? 'Recording dictation…'
     : phase === 'dictate-finishing' ? 'Finishing dictation…' : '';
+  const dictateLabel = t(dictating ? 'Stop Dictate' : 'Dictate');
+  const liveLabel = t(live ? 'Stop Real-time' : 'Real-time');
   const options = ['finished', 'streaming'] as const;
   return <main className="catalog-main images-main" aria-labelledby={`${id}-heading`}>
     {toolbar && createPortal(<ModelPicker models={models} selected={fileModel ? [fileModel] : []} multiple={false} loading={loading}
@@ -299,13 +321,15 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, cat
           <Button className="chat-composer-icon" type="button" variant="subtle" aria-label={t('Transcription settings')} title={t('Transcription settings')}
             aria-haspopup="dialog" onClick={() => dialog.current?.showModal()} disabled={busy}><ChatIcon name="settings" /></Button>
           <div className="transcription-submit">
-            <Button type="button" aria-pressed={dictating} variant={dictating ? 'primary' : 'subtle'}
+            <Button className="chat-composer-icon" type="button" aria-label={dictateLabel} title={dictateLabel}
+              aria-pressed={dictating} variant={dictating ? 'primary' : 'subtle'}
               disabled={dictating ? phase === 'dictate-finishing' : busy || !enabled || !dictateModel || !canRecord} onClick={dictate}>
-              <ChatIcon name="mic" /> {t(dictating ? 'Stop Dictate' : 'Dictate')}
+              <ChatIcon name={dictating ? 'stop' : 'mic'} />
             </Button>
-            <Button type="button" aria-pressed={live} variant={live ? 'primary' : 'subtle'} title={liveModel?.name}
+            <Button className="chat-composer-icon" type="button" aria-label={liveLabel}
+              title={liveModel ? `${liveLabel} · ${liveModel.name}` : liveLabel} aria-pressed={live} variant={live ? 'primary' : 'subtle'}
               disabled={live ? phase === 'finishing' : busy || !enabled || !liveModel || !canLive} onClick={() => void microphone()}>
-              <ChatIcon name="speed" /> {t(live ? 'Stop Real-time' : 'Real-time')}
+              <ChatIcon name={live ? 'stop' : 'speed'} />
             </Button>
             {phase === 'upload' ? <Button type="button" onClick={() => operation.current?.abort.abort()}>{t('Stop')}</Button>
               : <Button type="submit" className="chat-send" variant="primary" aria-label={t('Send')} title={t('Send')}
@@ -333,7 +357,8 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, cat
         </div>
         <section role="tabpanel" id={`${id}-finished-panel`} aria-labelledby={`${id}-finished`} hidden={tab !== 'finished'}>
           {items.length ? <div className="transcription-grid">{[...items].sort((a, b) => b.timestamp - a.timestamp).map(item =>
-            <TranscriptCard key={item.id} item={item} remove={() => void remove(item.id)} onError={() => setError('Could not copy the transcript.')} />)}</div>
+            <TranscriptCard key={item.id} item={item} menuContainer={menuContainer} remove={() => void remove(item.id)}
+              onError={() => setError('Could not copy the transcript.')} />)}</div>
             : <p>{t('No finished transcriptions yet.')}</p>}
         </section>
         <section role="tabpanel" id={`${id}-streaming-panel`} aria-labelledby={`${id}-streaming`} hidden={tab !== 'streaming'}>

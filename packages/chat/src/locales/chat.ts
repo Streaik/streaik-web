@@ -56,6 +56,7 @@ export const chatMessages = {
   'Split audio above the upload limit': ['Audio boven de uploadlimiet splitsen', 'Dividir el audio que supere el límite de carga'],
   'Chunk overlap (seconds)': ['Overlap tussen delen (seconden)', 'Solapamiento entre fragmentos (segundos)'],
   'Finished': ['Voltooid', 'Finalizadas'],
+  'Download': ['Downloaden', 'Descargar'],
   'Streaming transcript': ['Live transcriptie', 'Transcripción en directo'],
   'No finished transcriptions yet.': ['Nog geen voltooide transcripties.', 'Aún no hay transcripciones finalizadas.'],
   'No incoming transcription.': ['Geen inkomende transcriptie.', 'No hay ninguna transcripción en curso.'],

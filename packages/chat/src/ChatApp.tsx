@@ -699,7 +699,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
           loading={hasGateway && connection.ready && !mediaModels} ready={hasGateway && connection.ready} status={mediaStatus} />
       </Suspense> : view === 'transcriptions' ? <Suspense fallback={<main className="catalog-main"><p role="status">{t('Loading transcriptions…')}</p></main>}>
         <TranscriptionsView gateway={gateway} scope={scope} route={transcriptions.selected} toolbar={mediaToolbar} catalog={mediaModels?.catalog}
-          loading={hasGateway && connection.ready && !mediaModels} status={mediaStatus} />
+          menuContainer={menuContainer} loading={hasGateway && connection.ready && !mediaModels} status={mediaStatus} />
       </Suspense> : view !== 'chat' && <main className="catalog-main">
         {view === 'models' ? <ModelsView models={result?.error ? undefined : result?.catalog}
           status={!connection.ready ? connection.emptyMessage : !result ? t('Loading models…') : result.error}

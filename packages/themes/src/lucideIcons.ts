@@ -1,5 +1,5 @@
 import {
-  ArrowLeft, ArrowUp, BookOpen, Bot, Boxes, Brain, Check, ChevronDown, CircleDollarSign, Code, Copy, Ellipsis, Gauge, Globe, Info, KeyRound, LogOut,
+  ArrowLeft, ArrowUp, BookOpen, Bot, Boxes, Brain, Check, ChevronDown, CircleDollarSign, Code, Copy, Download, Ellipsis, Gauge, Globe, Info, KeyRound, LogOut, Square,
   Images, Link, Mic, Palette, PanelLeft, Paperclip, Pencil, Pin, PinOff, Plug, Plus, Scale, Search, Settings, Shield, SquarePen, Terminal, Timer, Trash2, UserRound, Video, Wrench, X,
 } from 'lucide-react';
 import type { IconSet } from './contract';
@@ -38,11 +38,13 @@ export const lucideIcons: IconSet = {
   unpin: PinOff,
   trash: Trash2,
   copy: Copy,
+  download: Download,
   check: Check,
   tokens: Code,
   cost: CircleDollarSign,
   timer: Timer,
   speed: Gauge,
+  stop: Square,
   send: ArrowUp,
   search: Search,
   chevronDown: ChevronDown,

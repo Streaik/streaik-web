@@ -59,7 +59,11 @@ export type CatalogModel = ChatModel & {
 };
 
 export class GatewayError extends Error {
-  constructor(message: string, readonly httpStatus?: number) { super(message); }
+  readonly httpStatus?: number;
+  constructor(message?: string, httpStatus?: number) {
+    super(message);
+    this.httpStatus = httpStatus;
+  }
 }
 
 export function normalizeGatewayBase(value: string, appUrl: string): URL {
