@@ -196,10 +196,10 @@ export function ChatNavigation({ appName, expanded, history, active, busy, accou
         .filter(([key]) => key !== 'agents' || agentsEnabled).map(([key, label]) =>
         <Tooltip key={key} content={t(label)}><button type="button" className="chat-rail-button" aria-label={t(label)} aria-current={view === key ? 'page' : undefined}
           onClick={() => onView(key)}><ChatIcon name={key === 'skills' ? 'docs' : key === 'transcriptions' ? 'mic' : key} /></button></Tooltip>)}
+      <MorePagesMenu view={view} pinnedViews={pinnedViews} onView={onView} onToggleViewPin={onToggleViewPin} container={container} />
       {pinnableViews.filter(key => pinnedViews.includes(key)).map(key =>
         <Tooltip key={key} content={t(pinnableLabels[key])}><button type="button" className="chat-rail-button" aria-label={t(pinnableLabels[key])}
           aria-current={view === key ? 'page' : undefined} onClick={() => onView(key)}><ChatIcon name={key} /></button></Tooltip>)}
-      <MorePagesMenu view={view} pinnedViews={pinnedViews} onView={onView} onToggleViewPin={onToggleViewPin} container={container} />
       <AccountMenu account={account} onSettings={onSettings} container={container} routes={routes} />
     </nav>
     <aside id={panelId} className="chat-history-panel" aria-label={t('Chat history')} hidden={!expanded}>

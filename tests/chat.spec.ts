@@ -1573,7 +1573,9 @@ test('sidebar catalog pins are opt-in, independent of navigation, and saved acro
   await rail.getByRole('button', { name: 'New chat', exact: true }).click();
   await expect(models).toBeVisible();
   await page.reload();
-  await expect(providers).toBeVisible();
+  const catalogShortcuts = rail.getByRole('button', { name: /^(More pages|Models|Providers)$/ });
+  await expect(catalogShortcuts).toHaveCount(3);
+  await expect(catalogShortcuts.first()).toHaveAccessibleName('More pages');
   await models.click();
   await more.click();
   await modelsItem.hover();
