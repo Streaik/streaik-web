@@ -330,7 +330,8 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
               disabled={live ? phase === 'finishing' : busy || !enabled || !liveModel || !canLive} onClick={() => void microphone()}>
               <ChatIcon name={live ? 'stop' : 'speed'} />
             </Button>
-            {phase === 'upload' ? <Button type="button" onClick={() => operation.current?.abort.abort()}>{t('Stop')}</Button>
+            {phase === 'upload' ? <Button type="button" className="chat-send" aria-label={t('Stop')} title={t('Stop')}
+                onClick={() => operation.current?.abort.abort()}><ChatIcon name="stop" /></Button>
               : <Button type="submit" className="chat-send" variant="primary" aria-label={t('Send')} title={t('Send')}
                 disabled={!canSubmit}><ChatIcon name="send" /></Button>}
           </div>

@@ -27,7 +27,7 @@ function AgentCardActions({ entry, container, onAction }: {
       onClick={(event) => onAction({ kind: 'edit', entry }, event.currentTarget)}><ChatIcon name="edit" /></button></Tooltip>
     <Menu.Root modal={false}>
       <Tooltip content={t('More actions')}><Menu.Trigger ref={trigger} type="button" className="chat-row-button"
-        aria-label={t('More actions for {{title}}', { title: definition.name })}><ChatIcon name="more" /></Menu.Trigger></Tooltip>
+        aria-label={t('More actions for {{title}}', { title: definition.name })}><ChatIcon name="moreVertical" /></Menu.Trigger></Tooltip>
       {container && <Menu.Portal container={container}>
         <Menu.Content className="chat-menu" align="end" sideOffset={4} collisionPadding={8} hideWhenDetached
           onCloseAutoFocus={(event) => {

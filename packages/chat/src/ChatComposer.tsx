@@ -192,7 +192,8 @@ export function ChatComposer(props: ComposerProps) {
           <Button className="chat-composer-icon" type="button" variant="subtle" aria-label={t('View context')}
             title={t('View context')} aria-haspopup="dialog" onClick={props.onViewContext}><ChatIcon name="info" /></Button>
         </>}
-        {busy && onStop ? <Button key="stop" type="button" onClick={onStop}>{t('Stop')}</Button>
+        {busy && onStop ? <Button key="stop" className="chat-send" type="button" aria-label={t('Stop')} title={t('Stop')}
+            onClick={onStop}><ChatIcon name="stop" /></Button>
           : <Button key="send" className="chat-send" type="submit" variant="primary" aria-label={t('Send')} title={t('Send')}
             disabled={busy || !canSend || preparing || (!draft.trim() && (media || !attachments.length))}><ChatIcon name="send" /></Button>}
       </div>

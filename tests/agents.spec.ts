@@ -231,6 +231,7 @@ test('a sample can be duplicated from the keyboard-accessible card menu', async 
   await agents(page).click();
   const trigger = actions(page, welcome);
   await expect(card(page, welcome).locator('header').getByRole('button', { name: `More actions for ${welcome}`, exact: true })).toHaveText('');
+  await expect(trigger.locator('svg.lucide-ellipsis-vertical')).toBeVisible();
   await expect(card(page, welcome).getByRole('button', { name: 'Duplicate', exact: true })).toHaveCount(0);
   await trigger.press('ArrowDown');
   const menu = page.getByRole('menu');

@@ -988,7 +988,10 @@ test('Images clears shimmers on stop and on gateway failure while retaining the 
   await send.click();
   await expect(shimmers).toHaveCount(1);
   expect(await shimmers.evaluate(tile => getComputedStyle(tile, '::after').animationName)).toBe('none');
-  await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  const stop = page.getByRole('button', { name: 'Stop', exact: true });
+  await expect(stop).toHaveText('');
+  await expect(stop.locator('svg.lucide-square')).toBeVisible();
+  await stop.click();
   await expect(shimmers).toHaveCount(0);
   await expect(prompt).toHaveValue('Stop this one');
   await prompt.fill('Fail this one');
@@ -1968,7 +1971,11 @@ test('errors are recoverable and Stop aborts the in-flight request', async ({ pa
   await closeSettings(page);
   await expect.poll(() => count).toBe(2);
   await expect(page.locator('html')).not.toHaveAttribute('data-chat-aborted', 'true');
-  await page.getByRole('button', { name: 'Stop' }).click();
+  const stop = page.getByRole('button', { name: 'Stop', exact: true });
+  await expect(stop).toHaveText('');
+  await expect(stop).toHaveAttribute('title', 'Stop');
+  await expect(stop.locator('svg.lucide-square')).toBeVisible();
+  await stop.click();
   await expect(page.locator('html')).toHaveAttribute('data-chat-aborted', 'true');
   await expect(page.getByRole('button', { name: /Send/ })).toBeVisible();
   await expect(page.getByText('private-upstream-details')).toHaveCount(0);

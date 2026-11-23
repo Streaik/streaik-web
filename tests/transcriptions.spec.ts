@@ -104,6 +104,7 @@ test('all file routes, drag and drop, interrupted SSE, and scoped finished cards
   const more = card.locator('header').getByRole('button', { name: 'More actions for interview.wav', exact: true });
   const deleteAction = page.getByRole('menuitem', { name: 'Delete', exact: true });
   for (const control of [copy, download, more]) await expectIconOnly(control);
+  await expect(more.locator('svg.lucide-ellipsis-vertical')).toBeVisible();
 
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await copy.click();
@@ -121,6 +122,43 @@ test('all file routes, drag and drop, interrupted SSE, and scoped finished cards
   await deleteAction.press('Enter');
   await expect(card).toHaveCount(0);
   await expect(cards).toHaveCount(2);
+});
+
+test('the icon-only Stop button cancels a file transcription and keeps the audio queued', async ({ page }) => {
+  page.on('pageerror', error => console.error(error));
+  await page.addInitScript(() => {
+    const original = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      if (!String(input).endsWith('/gateway/api/transcriptions')) return original(input, init);
+      const { dataset } = document.documentElement;
+      const signal = init?.signal;
+      dataset.transcriptionUpload = signal ? 'pending' : 'no signal';
+      return new Promise<Response>((_, reject) => {
+        signal?.addEventListener('abort', () => {
+          dataset.transcriptionUpload = 'aborted';
+          reject(signal.reason);
+        }, { once: true });
+      });
+    };
+  });
+  await openTranscriptions(page);
+  const composer = page.getByRole('form', { name: 'Transcription composer' });
+  const send = composer.getByRole('button', { name: 'Send', exact: true });
+  const stopUpload = composer.getByRole('button', { name: 'Stop', exact: true });
+  await composer.locator('input[type=file]').setInputFiles(file);
+  await send.click();
+  await expect(page.locator('html')).toHaveAttribute('data-transcription-upload', 'pending');
+  await expect(stopUpload).toHaveText('');
+  await expect(stopUpload.locator('svg.lucide-square')).toBeVisible();
+  await page.mouse.move(0, 0); // Leave the Send/Stop slot before hovering the new control.
+  await stopUpload.hover();
+  await expect(page.getByRole('tooltip', { name: 'Stop', exact: true })).toBeVisible();
+  await stopUpload.click();
+  console.log(await page.evaluate(() => ({ path: location.href, main: document.querySelector('main')?.innerText })));
+  await expect(page.locator('html')).toHaveAttribute('data-transcription-upload', 'aborted');
+  await expect(send).toBeEnabled();
+  await expect(composer.getByRole('list', { name: 'Audio attachments' })).toContainText(file.name);
+  await expect(composer.getByRole('alert')).toHaveCount(0);
 });
 
 async function mockAudio(page: Page) {
