@@ -3,6 +3,8 @@ import type { Page } from '@playwright/test';
 
 const batchModel = 'openai/gpt-4o-transcribe';
 const liveModel = 'openai/gpt-realtime-transcribe';
+const googleModel = 'google/gemini-3.5-transcribe-live';
+const googleSocket = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained';
 const file = { name: 'interview.wav', mimeType: 'audio/wav', buffer: Buffer.from('audio fixture') };
 const start = (page: Page) => page.getByRole('button', { name: 'Real-time', exact: true });
 const stop = (page: Page) => page.getByRole('button', { name: 'Stop Real-time', exact: true });
@@ -271,6 +273,95 @@ test('GPT Live Transcribe stays enabled with no file model and uses ephemeral We
   await expect(preview(page)).toContainText('Final live transcript');
   await page.getByRole('tab', { name: 'Finished', exact: true }).click();
   await expect(page.getByRole('article').filter({ hasText: 'Final live transcript' })).toHaveCount(1);
+});
+
+test('Google Live Transcribe waits for setup, streams PCM, and saves only finalized microphone input', async ({ page }) => {
+  await mockAudio(page);
+  const setup = { model: 'models/gemini-3.5-transcribe-live', generationConfig: { responseModalities: ['TEXT'] },
+    inputAudioTranscription: { languageCodes: ['nl-NL'], mode: 'VERBATIM' } };
+  const token = 'auth_tokens/temporary-google-token';
+  await page.route(`**/gateway/api/realtime/token/${googleModel}`, async route => {
+    expect(await route.request().headerValue('x-google-key')).toBe('fixture-provider-key');
+    expect(route.request().postDataJSON()).toEqual({ sessionConfig: { providerOptions: { google: { uses: 1, bidiGenerateContentSetup: setup } } } });
+    await route.fulfill({ json: { token, url: googleSocket, expiresAt: Math.floor(Date.now() / 1000) + 60 } });
+  });
+  let acknowledge: (() => void) | undefined, frames = 0, ended = false, closed = false;
+  await page.routeWebSocket(`${googleSocket}?access_token=${encodeURIComponent(token)}`, socket => {
+    socket.onClose(() => { closed = true; });
+    const send = (serverContent: object) => socket.send(JSON.stringify({ serverContent }));
+    socket.onMessage(raw => {
+      const message = JSON.parse(String(raw));
+      if (message.setup) {
+        expect(message.setup).toEqual(setup);
+        acknowledge = () => socket.send(Buffer.from('{"setupComplete":{}}'));
+      } else if (message.realtimeInput?.audio) {
+        expect(message.realtimeInput.audio.mimeType).toBe('audio/pcm;rate=16000');
+        expect(Buffer.from(message.realtimeInput.audio.data, 'base64').length).toBeGreaterThan(0);
+        if (++frames === 1) {
+          send({ inputTranscription: { text: 'Eerste zin.' } });
+          send({ interimInputTranscription: { text: 'Concept' }, outputTranscription: { text: 'Not the microphone' },
+            modelTurn: { parts: [{ text: 'Not a transcript' }] } });
+        }
+      } else if (message.realtimeInput?.audioStreamEnd) {
+        ended = true;
+        send({ turnComplete: true }); // Google can deliver the final input transcript after this event.
+        send({ inputTranscription: { text: 'Tweede zin.' } });
+      } else throw new Error('Unexpected message in transcription-only session.');
+    });
+  });
+  await openTranscriptions(page, 'Google', [
+    { id: 'google/gemini-2.5-flash-native-audio-preview', type: 'audio', tags: ['realtime'] },
+    { id: googleModel, type: 'transcription', tags: ['realtime'] },
+  ]);
+  await expect(start(page)).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Dictate', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Transcription settings' }).click();
+  await expect(page.getByLabel('Real-time model')).toHaveValue(googleModel);
+  await expect(page.getByLabel('Real-time model').locator('option')).toHaveCount(1);
+  await page.getByLabel('Audio language (optional)').fill('nl-NL');
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await start(page).click();
+  await expect.poll(() => !!acknowledge).toBe(true);
+  await expect(page.getByText('Connecting microphone…', { exact: true })).toBeVisible();
+  expect(frames).toBe(0);
+  acknowledge?.();
+  await expect(preview(page)).toContainText('Eerste zin. Concept');
+  await expect(preview(page)).not.toContainText('Not the microphone');
+  await stop(page).click();
+  await expect(page.locator('html')).toHaveAttribute('data-track', 'stopped');
+  await expect(preview(page)).toContainText('Eerste zin. Tweede zin.');
+  await expect.poll(() => ended && closed).toBe(true);
+  await page.getByRole('tab', { name: 'Finished', exact: true }).click();
+  await expect(page.getByRole('tabpanel', { name: 'Finished' }).getByText('Eerste zin. Tweede zin.', { exact: true })).toBeVisible();
+});
+
+test('Google Live Transcribe rejects untrusted socket targets and releases the mic when setup is cancelled', async ({ page }) => {
+  await mockAudio(page);
+  let valid = false;
+  const token = 'auth_tokens/cancel-test';
+  await page.route(`**/gateway/api/realtime/token/${googleModel}`, route => route.fulfill({ json: {
+    token, expiresAt: Math.floor(Date.now() / 1000) + 60, url: valid ? googleSocket : `${googleSocket}?unexpected=true`,
+  } }));
+  let sockets = 0, closed = false;
+  await page.routeWebSocket(`${googleSocket}**`, socket => {
+    sockets++;
+    socket.onClose(() => { closed = true; });
+    // Never acknowledge: this verifies capture stays cancellable while setup is pending.
+  });
+  await openTranscriptions(page, 'Google', [{ id: googleModel, type: 'transcription' }]);
+  await start(page).click();
+  await expect(page.getByRole('alert')).toContainText('did not return a valid microphone session credential');
+  await expect(page.locator('html')).toHaveAttribute('data-track', 'stopped');
+  expect(sockets).toBe(0);
+
+  valid = true;
+  await start(page).click();
+  await expect.poll(() => sockets).toBe(1);
+  await stop(page).click();
+  await expect(page.locator('html')).toHaveAttribute('data-track', 'stopped');
+  await expect.poll(() => closed).toBe(true);
+  await expect(start(page)).toBeEnabled();
+  await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
 test('Dictate warns, records only on confirmation, submits on Stop, and keeps a failed recording for retry', async ({ page }) => {
