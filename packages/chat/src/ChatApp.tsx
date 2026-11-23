@@ -56,6 +56,7 @@ import { useImageRoute } from './imageRoute';
 import type { ImageRouteSetting } from './imageRoute';
 import { useTranscriptionRoute } from './transcriptionPreferences';
 import type { TranscriptionRouteSetting } from './transcriptionPreferences';
+import { useVideoJobs } from './useVideoJobs';
 export { localizationReady, useAppTranslation } from './i18n';
 export { default as providerDirectory } from './provider-directory.json';
 export type { AgentsConfig } from './agentCatalog';
@@ -63,6 +64,7 @@ export type { AgentDefinition } from './agentDefinition';
 
 const AssistantMarkdown = lazy(() => import('./AssistantMarkdown'));
 const ImagesView = lazy(() => import('./ImagesView'));
+const VideosView = lazy(() => import('./VideosView'));
 const TranscriptionsView = lazy(() => import('./TranscriptionsView'));
 
 type Connection = {
@@ -195,6 +197,7 @@ function HistoryChat({ appName, gateway, connection, scope, models, route, onRou
   const localSkills = useLocalSkills(scope);
   const remoteSkills = useRemoteSkills(gateway, connection.ready && gateway.historyScope !== 'direct', connection.modelRevision ?? 0);
   const view = selectedView === 'agents' && !agentsEnabled ? 'chat' : selectedView;
+  const videos = useVideoJobs(gateway, scope, view === 'videos');
   const [active, setActive] = useState(newConversation);
   const [history, setHistory] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(!!scope);
@@ -289,7 +292,7 @@ function HistoryChat({ appName, gateway, connection, scope, models, route, onRou
     }} toggleNav={() => setNav((open) => !open)} onPersist={persist}
     onNew={() => { setView('chat'); setActive(newConversation()); }}
     onSwitch={(item) => { setView('chat'); if (item.id !== active.id) setActive(item); }} onPin={togglePin} onDelete={remove}
-    models={models} route={route} onRoute={onRoute} decisions={decisions} images={images} transcriptions={transcriptions} scope={scope} onSettings={onSettings}
+    models={models} route={route} onRoute={onRoute} decisions={decisions} images={images} videos={videos} transcriptions={transcriptions} scope={scope} onSettings={onSettings}
     preferences={preferences} onPreferences={onPreferences}
     localSkills={localSkills} remoteSkills={remoteSkills} readHistory={scope ? () => latestHistory.current : undefined} />;
 }
@@ -301,7 +304,7 @@ type Turn = { model: string; route: ChatRoute; tools: ChatTool[]; context?: Requ
 const isApiChat = (route: ChatRoute | undefined) => !route || (route.mode === 'gateway' && route.endpoint === '/api/chat');
 const toolComplete = (part: Invocation) => part.state === 'output-available' || part.state === 'output-error' || part.state === 'approval-responded';
 
-function ChatSession({ appName, gateway, connection, conversation, history, storageIssue, nav, view, onView, toggleNav, onPersist, onNew, onSwitch, onPin, onDelete, models, route, onRoute, decisions, images, transcriptions, scope, onSettings, preferences, onPreferences, localSkills, remoteSkills, readHistory }: {
+function ChatSession({ appName, gateway, connection, conversation, history, storageIssue, nav, view, onView, toggleNav, onPersist, onNew, onSwitch, onPin, onDelete, models, route, onRoute, decisions, images, videos, transcriptions, scope, onSettings, preferences, onPreferences, localSkills, remoteSkills, readHistory }: {
   appName: string; gateway: Gateway; connection: Connection; conversation: Conversation; history: Conversation[]; storageIssue: string;
   nav: boolean; toggleNav: () => void; onPersist: (conversation: Conversation, nameRequest?: TextAppRequest) => void; onNew: () => void;
   view: ChatView; onView: (view: ChatView) => void;
@@ -310,6 +313,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
   route: ChatRoute; onRoute: (route: ChatRoute) => void;
   decisions: ReturnType<typeof useDecisionRoute>;
   images: ImageRouteSetting;
+  videos: ReturnType<typeof useVideoJobs>;
   transcriptions: TranscriptionRouteSetting;
   scope?: string;
   preferences: ChatPreferences; onPreferences: (preferences: ChatPreferences) => void;
@@ -329,12 +333,13 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
   const contextDialog = useRef<HTMLDialogElement>(null);
   const [menuContainer, setMenuContainer] = useState<HTMLDivElement | null>(null);
   const [agentToolbar, setAgentToolbar] = useState<HTMLDivElement | null>(null);
-  const [imageToolbar, setImageToolbar] = useState<HTMLDivElement | null>(null);
+  const [mediaToolbar, setMediaToolbar] = useState<HTMLDivElement | null>(null);
   const saved = useRef(conversation.messages);
   const nameRequest = useRef<TextAppRequest>(undefined);
   const direct = connection.direct;
   // Agents and media use the gateway catalog even when chat is routed directly.
-  const fetchGatewayModels = route.mode === 'direct' && (view === 'agents' || (view === 'images' || view === 'transcriptions') && gateway.historyScope !== 'direct');
+  const mediaView = view === 'images' || view === 'videos' || view === 'transcriptions';
+  const fetchGatewayModels = route.mode === 'direct' && (view === 'agents' || mediaView && gateway.historyScope !== 'direct');
   const gatewayModels = useModels(gateway, connection.ready && fetchGatewayModels, connection.modelRevision ?? 0, scope);
   const transport = useMemo<ReturnType<Gateway['chatTransport']>>(() => {
     const apiChat = gateway.chatTransport();
@@ -589,10 +594,10 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
   const catalog = result?.catalog ?? [];
   const agentModels = route.mode === 'direct' ? gatewayModels.result : result;
   const hasGateway = gateway.historyScope !== 'direct';
-  const imageModels = hasGateway ? agentModels : undefined;
-  const imageRouter = view === 'images' && imageModels ? modelDecisionRouter(agents, imageModels.catalog, decisions.selected) : undefined;
-  const imageStatus = !hasGateway ? t('No gateway is configured.') : !connection.ready ? connection.emptyMessage
-    : !imageModels ? t('Loading models…') : imageModels.error;
+  const mediaModels = hasGateway ? agentModels : undefined;
+  const imageRouter = view === 'images' && mediaModels ? modelDecisionRouter(agents, mediaModels.catalog, decisions.selected) : undefined;
+  const mediaStatus = !hasGateway ? t('No gateway is configured.') : !connection.ready ? connection.emptyMessage
+    : !mediaModels ? t('Loading models…') : mediaModels.error;
   const agentModelStatus = !connection.ready ? t('Connect to the gateway to browse models. You can still edit this agent.')
     : !agentModels ? t('Loading gateway models…') : agentModels.error;
   const compatible = route.mode === 'direct' ? catalog.filter(item => direct?.supports(item.provider, route.endpoint)) : pickChatCatalogModels(catalog);
@@ -641,10 +646,10 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
         account={connection.account} container={menuContainer} view={view} onView={onView}
         toggle={toggleNav} onNew={onNew} onOpen={onSwitch}
         onPin={onPin} onDelete={onDelete} onSettings={onSettings} routes={routeMenu} />
-      <header className="chat-toolbar" hidden={view !== 'chat' && view !== 'agents' && view !== 'skills' && view !== 'images' && view !== 'transcriptions' && !connection.signIn}>
+      <header className="chat-toolbar" hidden={view !== 'chat' && view !== 'agents' && view !== 'skills' && !mediaView && !connection.signIn}>
         {view === 'chat' && <ModelPicker models={compatible} selected={selected} multiple={!!router}
           loading={connection.ready && !result} disabled={routesLocked} onChange={setSelectedIds} />}
-        {(view === 'images' || view === 'transcriptions') && <div className="chat-image-toolbar" ref={setImageToolbar} />}
+        {mediaView && <div className="chat-image-toolbar" ref={setMediaToolbar} />}
         {connection.signIn && <div className="chat-account">{connection.signIn}</div>}
         {(view === 'agents' || view === 'skills') && <div ref={setAgentToolbar} />}
       </header>
@@ -687,11 +692,14 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
       {review && <ToolApprovalDialog key={review.id} review={review} onAnswer={answerTool} onStop={stopTurn} />}
       <footer className="chat-disclaimer" hidden={view !== 'chat'}>{t('{{appName}} can make mistakes. Check important information.', { appName })}</footer>
       {view === 'images' ? <Suspense fallback={<main className="catalog-main"><p role="status">{t('Loading images…')}</p></main>}>
-        <ImagesView gateway={gateway} scope={scope} route={images.selected} toolbar={imageToolbar} catalog={imageModels?.catalog}
-          loading={hasGateway && connection.ready && !imageModels} router={imageRouter} status={imageStatus} />
+        <ImagesView gateway={gateway} scope={scope} route={images.selected} toolbar={mediaToolbar} catalog={mediaModels?.catalog}
+          loading={hasGateway && connection.ready && !mediaModels} router={imageRouter} status={mediaStatus} />
+      </Suspense> : view === 'videos' ? <Suspense fallback={<main className="catalog-main"><p role="status">{t('Loading videos…')}</p></main>}>
+        <VideosView gateway={gateway} library={videos} toolbar={mediaToolbar} catalog={mediaModels?.catalog}
+          loading={hasGateway && connection.ready && !mediaModels} ready={hasGateway && connection.ready} status={mediaStatus} />
       </Suspense> : view === 'transcriptions' ? <Suspense fallback={<main className="catalog-main"><p role="status">{t('Loading transcriptions…')}</p></main>}>
-        <TranscriptionsView gateway={gateway} scope={scope} route={transcriptions.selected} toolbar={imageToolbar} catalog={imageModels?.catalog}
-          loading={hasGateway && connection.ready && !imageModels} status={imageStatus} />
+        <TranscriptionsView gateway={gateway} scope={scope} route={transcriptions.selected} toolbar={mediaToolbar} catalog={mediaModels?.catalog}
+          loading={hasGateway && connection.ready && !mediaModels} status={mediaStatus} />
       </Suspense> : view !== 'chat' && <main className="catalog-main">
         {view === 'models' ? <ModelsView models={result?.error ? undefined : result?.catalog}
           status={!connection.ready ? connection.emptyMessage : !result ? t('Loading models…') : result.error}

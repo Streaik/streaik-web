@@ -1,0 +1,6 @@
+.videos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr)); gap: .75rem; padding: 0; margin: 0; list-style: none; align-items: start; }
+.video-tile { display: grid; gap: .5rem; min-width: 0; padding: .65rem; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); }
+.video-tile p { margin: 0; overflow-wrap: anywhere; }
+.video-tile-prompt { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.video-preview { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; overflow: hidden; border-radius: var(--radius); }
+video.video-preview { background: #000; }

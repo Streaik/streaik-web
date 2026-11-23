@@ -1,6 +1,6 @@
 import {
   ArrowLeft, ArrowUp, BookOpen, Bot, Boxes, Brain, Check, ChevronDown, CircleDollarSign, Code, Copy, Ellipsis, Gauge, Globe, Info, KeyRound, LogOut,
-  Images, Link, Mic, Palette, PanelLeft, Paperclip, Pencil, Pin, PinOff, Plug, Plus, Scale, Search, Settings, Shield, SquarePen, Terminal, Timer, Trash2, UserRound, Wrench, X,
+  Images, Link, Mic, Palette, PanelLeft, Paperclip, Pencil, Pin, PinOff, Plug, Plus, Scale, Search, Settings, Shield, SquarePen, Terminal, Timer, Trash2, UserRound, Video, Wrench, X,
 } from 'lucide-react';
 import type { IconSet } from './contract';
 
@@ -15,6 +15,7 @@ export const lucideIcons: IconSet = {
   console: Terminal,
   models: Boxes,
   images: Images,
+  videos: Video,
   providers: Plug,
   agents: Bot,
   sidebar: PanelLeft,

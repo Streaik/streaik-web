@@ -14,7 +14,7 @@ export type ChatAccount = {
   onLogout?: () => void;
 };
 
-export type ChatView = 'chat' | 'images' | 'transcriptions' | 'models' | 'providers' | 'agents' | 'skills';
+export type ChatView = 'chat' | 'images' | 'videos' | 'transcriptions' | 'models' | 'providers' | 'agents' | 'skills';
 
 function initials(name: string) {
   const words = name.split('@')[0]?.match(/[\p{L}\p{N}]+/gu) ?? [];
@@ -158,7 +158,7 @@ export function ChatNavigation({ appName, expanded, history, active, busy, accou
       <Tooltip content={t('New chat')}><button type="button" className="chat-rail-button" aria-label={t('New chat')} disabled={busy} onClick={onNew}>
         <ChatIcon name="compose" />
       </button></Tooltip>
-      {([['images', 'Images'], ['transcriptions', 'Transcriptions'], ['models', 'Models'], ['providers', 'Providers'], ['agents', 'Agents'], ['skills', 'Skills']] as const)
+      {([['images', 'Images'], ['videos', 'Videos'], ['transcriptions', 'Transcriptions'], ['models', 'Models'], ['providers', 'Providers'], ['agents', 'Agents'], ['skills', 'Skills']] as const)
         .filter(([key]) => key !== 'agents' || agentsEnabled).map(([key, label]) =>
         <Tooltip key={key} content={t(label)}><button type="button" className="chat-rail-button" aria-label={t(label)} aria-current={view === key ? 'page' : undefined}
           onClick={() => onView(key)}><ChatIcon name={key === 'skills' ? 'docs' : key === 'transcriptions' ? 'mic' : key} /></button></Tooltip>)}

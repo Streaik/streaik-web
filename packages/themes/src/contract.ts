@@ -28,7 +28,7 @@ export type MultiSelectProps = Omit<SelectProps, 'multiple' | 'value' | 'onValue
 };
 export type TextareaProps = Omit<ComponentPropsWithoutRef<'textarea'>, 'value' | 'defaultValue'> & { value?: string; defaultValue?: string };
 export type ThemeSettingsProps = ThemeEnv & { onChange: (value: Preferences) => void; translate: (key: string) => string };
-export type IconName = 'images' | 'models' | 'providers' | 'agents' | 'sidebar' | 'compose' | 'user' | 'settings' | 'logout' | 'more' | 'pin' | 'unpin' | 'trash' |
+export type IconName = 'images' | 'videos' | 'models' | 'providers' | 'agents' | 'sidebar' | 'compose' | 'user' | 'settings' | 'logout' | 'more' | 'pin' | 'unpin' | 'trash' |
   'copy' | 'check' | 'tokens' | 'cost' | 'timer' | 'speed' | 'send' | 'search' | 'chevronDown' | 'key' | 'add' | 'edit' | 'palette' |
   'back' | 'close' | 'website' | 'docs' | 'pricing' | 'terms' | 'privacy' | 'console' | 'info' | 'brain' | 'tool' | 'attachment' | 'link' | 'mic';
 type IconGlyphProps = Pick<ComponentPropsWithoutRef<'svg'>, 'className' | 'width' | 'height' | 'aria-hidden' | 'focusable'>;

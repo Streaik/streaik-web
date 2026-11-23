@@ -3,7 +3,7 @@ import {
   Add24Regular, ArrowLeft24Regular, ArrowUp24Regular, BookOpen24Regular, Bot24Regular, Checkmark24Regular, ChevronDown24Regular, Code24Regular, Color24Regular, Compose24Regular,
   BrainCircuit24Regular, Copy24Regular, Cube24Regular, Delete24Regular, Dismiss24Regular, Document24Regular, Edit24Regular, Globe24Regular, Info24Regular, Key24Regular, Money24Regular, MoreHorizontal24Regular,
   Attach24Regular, ImageMultiple24Regular, Link24Regular, Mic24Regular, PanelLeft24Regular, Person24Regular, Pin24Regular, PinOff24Regular, PlugConnected24Regular,
-  Search24Regular, Settings24Regular, Shield24Regular, SignOut24Regular, Timer24Regular, Toolbox24Regular, TopSpeed24Regular, WindowConsoleRegular,
+  Search24Regular, Settings24Regular, Shield24Regular, SignOut24Regular, Timer24Regular, Toolbox24Regular, TopSpeed24Regular, Video24Regular, WindowConsoleRegular,
 } from '@fluentui/react-icons';
 import { FluentProvider } from '@fluentui/react-provider';
 import { Select } from '@fluentui/react-select';
@@ -64,6 +64,7 @@ export const fluent: ThemeAdapter = {
     console: WindowConsoleRegular,
     models: Cube24Regular,
     images: ImageMultiple24Regular,
+    videos: Video24Regular,
     providers: PlugConnected24Regular,
     agents: Bot24Regular,
     sidebar: PanelLeft24Regular,
