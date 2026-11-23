@@ -107,7 +107,8 @@ export function ChatComposer(props: ComposerProps) {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if ((!draft.trim() && (media || !attachments.length)) || !canSend || busy || pending.current) return;
-    if (image || video) { setNotice(''); (image ?? video)?.onSend(); return; }
+    const mediaComposer = image ?? video;
+    if (mediaComposer) { setNotice(''); mediaComposer.onSend(); return; }
     pending.current = true;
     setPreparing(true);
     setNotice('');

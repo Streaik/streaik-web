@@ -90,7 +90,7 @@ export default function VideosView({ gateway, library, toolbar, catalog, loading
   }
 
   return <main className="catalog-main videos-main" aria-labelledby={heading}>
-    {toolbar && createPortal(<ModelPicker models={models} selected={selected} loading={loadingModels}
+    {toolbar && createPortal(<ModelPicker models={models} selected={selected} multiple={false} loading={loadingModels}
       disabled={library.busy} onChange={setSelectedIds} />, toolbar)}
     <div className="images-content">
       <h1 id={heading}>{t('Videos')}</h1>
