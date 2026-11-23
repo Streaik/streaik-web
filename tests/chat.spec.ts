@@ -790,7 +790,8 @@ async function openRoute(page: Page, group?: 'Gateway' | 'Direct' | 'Decisions')
 test('Images uses explicit routes and persists compatible records only for the current profile', async ({ page }) => {
   const modelId = 'openai/gpt-image-1';
   const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a/l8AAAAASUVORK5CYII=';
-  const imageResponse = { images: [png], warnings: [], response: { modelId, timestamp: '2026-01-01T00:00:00.000Z' } };
+  const imageResponse = { images: [png], warnings: [{ type: 'other', message: 'The image was resized.' }],
+    response: { modelId, timestamp: '2026-01-01T00:00:00.000Z' } };
   const paths: string[] = [];
   await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: model }, { id: modelId, type: 'image' }] } }));
   await page.route('**/gateway/v1/skills?*', route => route.fulfill({ json: { data: [], has_more: false } }));
@@ -850,6 +851,7 @@ test('Images uses explicit routes and persists compatible records only for the c
   await expect(page.getByRole('textbox', { name: 'Image prompt' })).toHaveCount(1);
   await top.getByRole('button', { name: 'Send', exact: true }).click();
   await expect(generated).toHaveCount(1);
+  await expect(page.getByText('The image was resized.', { exact: true })).toBeVisible();
   await expect(top.getByRole('textbox', { name: 'Image prompt' })).toHaveValue('');
   await choose('/v1/images/generations');
   await top.getByRole('textbox', { name: 'Image prompt' }).fill('A harbor');
@@ -1083,13 +1085,22 @@ test('Images routes checked models through the shared agent and generates with t
   const imageSettings = page.getByRole('dialog', { name: 'Image settings' });
   await imageSettings.getByLabel('Number of images').fill('5');
   await imageSettings.getByLabel('Aspect ratio').fill('16:9');
-  await imageSettings.getByRole('combobox', { name: 'Image model', exact: true }).selectOption(gptImage2);
+  await expect(imageSettings.getByRole('combobox', { name: 'Image model', exact: true })).toHaveCount(0);
+  await imageSettings.getByRole('tab', { name: 'Google', exact: true }).click();
+  await imageSettings.getByRole('tabpanel', { name: 'Google', exact: true }).getByLabel('Output format').selectOption('jpeg');
   await imageSettings.getByRole('tab', { name: 'OpenAI', exact: true }).click();
   await imageSettings.getByLabel('Quality').selectOption('high');
   await imageSettings.getByRole('button', { name: 'Save image settings', exact: true }).click();
 
   await openRoute(page);
   await page.getByRole('menuitemradio', { name: '/v1/images/generations', exact: true }).click();
+  await composer.getByRole('button', { name: 'Image settings' }).click();
+  await expect(imageSettings.getByRole('tabpanel', { name: 'General', exact: true }).getByLabel('Quality')).toHaveValue('high');
+  await expect(imageSettings.getByRole('tab', { name: 'OpenAI', exact: true })).toHaveCount(0);
+  await expect(imageSettings.getByLabel('Edit mask')).toHaveCount(0);
+  await imageSettings.getByRole('tab', { name: 'Google', exact: true }).click();
+  await expect(imageSettings.getByRole('tabpanel', { name: 'Google', exact: true }).getByLabel('Output format')).toHaveValue('jpeg');
+  await imageSettings.getByRole('button', { name: 'Cancel', exact: true }).click();
   await send('A blue bird', 5);
   await openRoute(page, 'Decisions');
   await page.getByRole('menuitemradio', { name: '/api/decisions', exact: true }).click();
@@ -1120,6 +1131,35 @@ test('Images routes checked models through the shared agent and generates with t
   await openCatalog(page, 'Models');
   await page.getByRole('button', { name: 'Account menu', exact: true }).click();
   await expect(page.getByRole('menuitem', { name: 'Route', exact: true })).toHaveCount(0);
+});
+
+test('edit masks stay visible for Google and warn instead of silently losing the mask', async ({ page }) => {
+  const gemini = 'google/gemini-2.5-flash-image';
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: model }, { id: gemini, type: 'image' }] } }));
+  await page.route('**/gateway/v1/skills?*', route => route.fulfill({ json: { data: [], has_more: false } }));
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await page.getByRole('button', { name: 'Images', exact: true }).click();
+  const composer = page.getByRole('form', { name: 'Image composer' });
+  await composer.getByRole('textbox', { name: 'Image prompt' }).fill('Make it brighter');
+  await composer.getByRole('button', { name: 'Image settings' }).click();
+  const settings = page.getByRole('dialog', { name: 'Image settings' });
+  const mask = settings.getByLabel('Edit mask');
+  await expect(mask).toBeVisible();
+  await mask.setInputFiles({ name: 'mask.png', mimeType: 'image/png', buffer: Buffer.from(imagePng, 'base64') });
+  const warning = 'None of the selected models support image masks.';
+  await expect(settings.getByText(warning, { exact: true })).toBeVisible();
+  await settings.getByRole('button', { name: 'Save image settings', exact: true }).click();
+  await expect(page.getByText(warning, { exact: true })).toBeVisible();
+  const send = composer.getByRole('button', { name: 'Send', exact: true });
+  await expect(send).toBeDisabled();
+  await openRoute(page);
+  await page.getByRole('menuitemradio', { name: '/v1/images/generations', exact: true }).click();
+  await expect(page.getByText('Remove the mask or choose an image edit route.', { exact: true })).toBeVisible();
+  await composer.getByRole('button', { name: 'Image settings' }).click();
+  await settings.getByRole('button', { name: 'Remove mask.png', exact: true }).click();
+  await settings.getByRole('button', { name: 'Save image settings', exact: true }).click();
+  await expect(send).toBeEnabled();
 });
 
 test('Images retains its draft when the decision is invalid or stopped', async ({ page }) => {
