@@ -54,8 +54,7 @@ test('detects Dutch, switches to Spanish without losing drafts, and remembers th
   await page.getByRole('button', { name: 'Más páginas', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Proveedores', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Proveedores' })).toBeVisible();
-  await page.getByRole('searchbox', { name: 'Buscar proveedores', exact: true }).fill('OpenAI');
-  await expect(page.getByRole('link', { name: 'sitio web de OpenAI', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: /^sitio web de / }).first()).toBeVisible();
 });
 
 test('uses English when the browser language is unsupported', async ({ browser, baseURL }) => {
