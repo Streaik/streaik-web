@@ -39,14 +39,6 @@ The chat client supports:
 Documentation: https://ai.streaik.net/scalar  
 App: https://chat.streaik.com
 
-## Transcriptions
-
-Open **Transcriptions**, choose a model, attach or drop audio files, and select **Send**. Choose **Account → Route** for normalized JSON, native multipart, or streaming output from an uploaded file. For larger recordings, enable file splitting and set the overlap in **Transcription settings**. File support depends on the selected provider and route.
-
-The microphone button next to **Send** opens **Streaming**. OpenAI uses WebRTC with a short-lived client secret; Gladia uses the gateway-issued WebSocket session URL. Select the microphone model in **Transcription settings**. Microphone access requires HTTPS or localhost. The browser connects directly to the selected provider for live audio; deployments must allow those provider connections.
-
-Completed transcripts appear under **Finished** and are stored locally when a history profile is available. Uploaded audio is retained locally for playback. Microphone audio is not recorded to the local library, and session credentials are not stored.
-
 ## Local mode
 
 Use [local.streaik.com](https://local.streaik.com) with the standalone Windows runtimes:

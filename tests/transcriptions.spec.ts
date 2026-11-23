@@ -4,15 +4,15 @@ import type { Page } from '@playwright/test';
 const batchModel = 'openai/gpt-4o-transcribe';
 const liveModel = 'openai/gpt-realtime-transcribe';
 const file = { name: 'interview.wav', mimeType: 'audio/wav', buffer: Buffer.from('audio fixture') };
-const start = (page: Page) => page.getByRole('button', { name: 'Start microphone transcription' });
-const stop = (page: Page) => page.getByRole('button', { name: 'Stop microphone transcription' });
+const start = (page: Page) => page.getByRole('button', { name: 'Real-time', exact: true });
+const stop = (page: Page) => page.getByRole('button', { name: 'Stop Real-time', exact: true });
 const preview = (page: Page) => page.getByRole('article', { name: 'Streaming transcript' });
 
-async function openTranscriptions(page: Page, provider = 'OpenAI') {
-  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [
+async function openTranscriptions(page: Page, provider = 'OpenAI', models: { id: string; type: string; tags?: string[] }[] = [
     { id: batchModel, type: 'transcription' }, { id: liveModel, type: 'transcription', tags: ['realtime'] },
     { id: 'gladia/solaria-1', type: 'transcription', tags: ['realtime'] },
-  ] } }));
+  ]) {
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: models } }));
   await page.route('**/gateway/v1/skills?*', route => route.fulfill({ json: { data: [], has_more: false } }));
   await page.goto('/');
   await page.getByRole('button', { name: 'Account menu' }).click();
@@ -200,7 +200,7 @@ test('Gladia consumes the gateway session URL, streams PCM and drains the final 
   });
   await openTranscriptions(page, 'Gladia');
   await page.getByRole('button', { name: 'Transcription settings' }).click();
-  await page.getByLabel('Microphone model').selectOption('gladia/solaria-1');
+  await page.getByLabel('Real-time model').selectOption('gladia/solaria-1');
   await page.getByRole('button', { name: 'Done', exact: true }).click();
   await start(page).click();
   await expect(preview(page)).toContainText('Gladia draft');
@@ -219,4 +219,118 @@ test('Gladia consumes the gateway session URL, streams PCM and drains the final 
   await expect(page.getByText('Listening…', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Images', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('data-track', 'stopped');
+});
+
+test('GPT Live Transcribe stays enabled with no file model and uses ephemeral WebSocket transcription', async ({ page }) => {
+  const model = 'openai/gpt-live-transcribe';
+  await mockAudio(page);
+  await page.addInitScript(() => {
+    const NativeWebSocket = window.WebSocket;
+    window.WebSocket = class extends NativeWebSocket {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols);
+        if (String(url).startsWith('wss://api.openai.com')) {
+          document.documentElement.dataset.micAuth = JSON.stringify(protocols) === JSON.stringify(['realtime', 'openai-insecure-api-key.test-ephemeral-secret']) ? 'ephemeral' : 'invalid';
+        }
+      }
+    };
+  });
+  await page.route('**/gateway/v1/realtime/client_secrets', async route => {
+    expect(route.request().postDataJSON()).toEqual({ session: { type: 'transcription', audio: { input: {
+      format: { type: 'audio/pcm', rate: 24000 }, transcription: { model, languages: ['nl'] }, turn_detection: null,
+    } } } });
+    await route.fulfill({ json: { value: 'test-ephemeral-secret', expires_at: Math.floor(Date.now() / 1000) + 60 } });
+  });
+  let frames = 0;
+  await page.routeWebSocket('wss://api.openai.com/v1/realtime?intent=transcription', socket => {
+    socket.onMessage(raw => {
+      const message = JSON.parse(String(raw));
+      if (message.type === 'input_audio_buffer.append') {
+        expect(Buffer.from(message.audio, 'base64').length).toBeGreaterThan(0);
+        if (++frames === 1) socket.send(JSON.stringify({ type: 'conversation.item.input_audio_transcription.delta', item_id: 'live1', delta: 'Preview before stop' }));
+      } else if (message.type === 'input_audio_buffer.commit') {
+        socket.send(JSON.stringify({ type: 'input_audio_buffer.committed', item_id: 'live1' }));
+        socket.send(JSON.stringify({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'live1', transcript: 'Final live transcript' }));
+      }
+    });
+  });
+  await openTranscriptions(page, 'OpenAI', [{ id: model, type: 'transcription' }]);
+  await expect(start(page)).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Dictate', exact: true })).toBeDisabled();
+  await expect(page.getByText('Dictate needs a file transcription model.')).toBeVisible();
+  await page.getByRole('button', { name: 'Transcription settings' }).click();
+  await expect(page.getByLabel('Real-time model')).toHaveValue(model);
+  await page.getByLabel('Audio language (optional)').fill('nl');
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await start(page).click();
+  await expect(page.locator('html')).toHaveAttribute('data-mic-auth', 'ephemeral');
+  await expect(preview(page)).toContainText('Preview before stop');
+  await stop(page).click();
+  await expect(page.locator('html')).toHaveAttribute('data-track', 'stopped');
+  await expect(preview(page)).toContainText('Final live transcript');
+  await page.getByRole('tab', { name: 'Finished', exact: true }).click();
+  await expect(page.getByRole('article').filter({ hasText: 'Final live transcript' })).toHaveCount(1);
+});
+
+test('Dictate warns, records only on confirmation, submits on Stop, and keeps a failed recording for retry', async ({ page }) => {
+  await mockAudio(page);
+  await page.addInitScript(() => {
+    const start = MediaRecorder.prototype.start;
+    MediaRecorder.prototype.start = function (timeslice?: number) {
+      delete document.documentElement.dataset.audioRecorded;
+      this.addEventListener('dataavailable', event => {
+        if (event.data.size) document.documentElement.dataset.audioRecorded = 'yes';
+      });
+      return start.call(this, timeslice);
+    };
+  });
+  let uploads = 0;
+  await page.route('**/gateway/api/transcriptions', async route => {
+    expect(await route.request().headerValue('x-openai-key')).toBe('fixture-provider-key');
+    const request = route.request().postDataJSON();
+    expect(request.model).toBe(batchModel);
+    expect(request.mediaType).toMatch(/^audio\/(webm|mp4|ogg)$/);
+    expect(Buffer.from(request.audio, 'base64').length).toBeGreaterThan(0);
+    if (++uploads === 1) return route.fulfill({ status: 502 });
+    await route.fulfill({ json: { text: 'Finished dictation' } });
+  });
+  await openTranscriptions(page);
+  await chooseRoute(page, '/api/transcriptions/stream');
+  const dictate = page.getByRole('button', { name: 'Dictate', exact: true });
+  const warning = page.getByRole('dialog', { name: 'Dictate is for short messages' });
+  await dictate.click();
+  await expect(warning).toBeVisible();
+  await warning.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(warning).not.toBeVisible();
+  await expect(page.locator('html')).not.toHaveAttribute('data-track', 'active');
+  expect(uploads).toBe(0);
+
+  await dictate.click();
+  await warning.getByLabel('Do not show again').check();
+  await warning.getByRole('button', { name: 'Continue recording' }).click();
+  await expect(page.getByText('Recording dictation…', { exact: true })).toBeVisible();
+  await expect(start(page)).toBeDisabled();
+  await expect(page.locator('html')).toHaveAttribute('data-audio-recorded', 'yes');
+  expect(uploads).toBe(0);
+  await page.getByRole('button', { name: 'Stop Dictate' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-track', 'stopped');
+  await expect(page.getByRole('list', { name: 'Audio attachments' }).getByRole('alert')).toBeVisible();
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page.getByRole('tabpanel', { name: 'Finished' }).getByText('Finished dictation', { exact: true })).toBeVisible();
+  expect(uploads).toBe(2);
+
+  await page.getByRole('button', { name: 'Images', exact: true }).click();
+  await page.getByRole('button', { name: 'Transcriptions', exact: true }).click();
+  await page.evaluate(() => { document.documentElement.dataset.denyMic = 'true'; });
+  await dictate.click();
+  await expect(warning).not.toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('Allow microphone access');
+  expect(uploads).toBe(2);
+
+  await page.evaluate(() => { delete document.documentElement.dataset.denyMic; });
+  await dictate.click();
+  await expect(page.getByText('Recording dictation…', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Images', exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-track', 'stopped');
+  expect(uploads).toBe(2);
 });
