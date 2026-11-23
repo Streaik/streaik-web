@@ -93,6 +93,8 @@ export const chatMessages = {
   'Restore defaults': ['Standaardinstellingen herstellen', 'Restaurar valores predeterminados'],
   'Choose an image file up to 10 MB.': ['Kies een afbeeldingsbestand van maximaal 10 MB.', 'Elige un archivo de imagen de hasta 10 MB.'],
   'A mask requires a reference image.': ['Een masker vereist een referentieafbeelding.', 'Una máscara requiere una imagen de referencia.'],
+  'Remove the mask or choose an image edit route.': ['Verwijder het masker of kies een route voor beeldbewerking.', 'Quita la máscara o elige una ruta de edición de imágenes.'],
+  'None of the selected models support image masks.': ['Geen van de geselecteerde modellen ondersteunt beeldmaskers.', 'Ninguno de los modelos seleccionados admite máscaras de imagen.'],
   'This model does not support image editing.': ['Dit model ondersteunt geen beeldbewerking.', 'Este modelo no admite la edición de imágenes.'],
   'Use an image count between 1 and 20.': ['Kies tussen 1 en 20 afbeeldingen.', 'Elige entre 1 y 20 imágenes.'],
   'Check the image size, aspect ratio, or seed.': ['Controleer de afbeeldingsgrootte, beeldverhouding of seed.', 'Comprueba el tamaño, la relación de aspecto o la semilla.'],

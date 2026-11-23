@@ -1,11 +1,22 @@
 import { gatewayImageEndpoints, isImageEndpoint } from '@streaik/gateway';
-import type { GatewayImageEndpoint } from '@streaik/gateway';
+import type { ChatModel, GatewayImageEndpoint } from '@streaik/gateway';
 import { useState } from 'react';
 
 export type ImageRouteSetting = { selected: GatewayImageEndpoint; onSelect: (value: GatewayImageEndpoint) => void };
 
 export function canEditImage(route: GatewayImageEndpoint, model?: string) {
   return route !== '/v1/images/generations' && model !== 'openai/dall-e-3' && !/^google\/imagen-/.test(model ?? '');
+}
+
+export function canMaskImage(route: GatewayImageEndpoint, { id, provider }: ChatModel) {
+  return canEditImage(route, id) && provider !== 'google';
+}
+
+export function imageMaskIssue(route: GatewayImageEndpoint, models: readonly ChatModel[], references: number) {
+  if (route === '/v1/images/generations') return 'Remove the mask or choose an image edit route.';
+  if (models.length && !models.some(model => canMaskImage(route, model))) return 'None of the selected models support image masks.';
+  if (!references) return 'A mask requires a reference image.';
+  return '';
 }
 
 export function useImageRoute(scope?: string): ImageRouteSetting {

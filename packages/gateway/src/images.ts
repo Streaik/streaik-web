@@ -4,13 +4,17 @@ export const gatewayImageEndpoints = ['/api/images', '/v1/images/generations', '
 export type GatewayImageEndpoint = typeof gatewayImageEndpoints[number];
 export type ImageInput = { file: File; mediaType: string } | { url: string };
 export type ImageFileInput = Extract<ImageInput, { file: File }>;
-export type ImageProviderOptions = {
-  quality?: string; background?: string; moderation?: string; output_format?: string; output_compression?: number;
-  complexity?: string; frame_count?: number; frame_duration_ms?: number; input_fidelity?: string; style?: string;
-  svg?: { model?: string; reasoning?: { effort: string } };
+type ImageJsonValue = string | number | boolean | null | ImageJsonObject | readonly ImageJsonValue[];
+export type ImageJsonObject = { [key: string]: ImageJsonValue | undefined };
+export type ImageProviderOptions = Record<string, ImageJsonObject>;
+export type ImageOptions = { n?: number; size?: string; aspectRatio?: string; seed?: number };
+export type ImageRequest = ImageOptions & {
+  model: string; prompt: string; inputs: readonly ImageInput[]; mask?: ImageFileInput; markup?: ImageFileInput;
+  /** Raw provider-keyed JSON for /api/images. */
+  providerOptions?: ImageProviderOptions;
+  /** Extra top-level fields for the OpenAI-compatible request, not a nested body. */
+  body?: ImageJsonObject;
 };
-export type ImageOptions = { n?: number; size?: string; aspectRatio?: string; seed?: number; providerOptions?: ImageProviderOptions };
-export type ImageRequest = ImageOptions & { model: string; prompt: string; inputs: readonly ImageInput[]; mask?: ImageFileInput; markup?: ImageFileInput };
 
 export const maxImageCount = 20;
 
@@ -79,6 +83,18 @@ async function imageReference(input: ImageInput) {
   return { image_url: `data:${mediaType};base64,${data}` };
 }
 
+const reservedImageFields = new Set(['model', 'prompt', 'n', 'size', 'files', 'image', 'image[]', 'images', 'input_references',
+  'mask', 'mask[]', 'stream', 'response_format', 'partial_images', 'provideroptions', 'providermetadata']);
+const multipartIntegers = new Set(['n', 'seed', 'output_compression', 'frame_count', 'frame_duration_ms']);
+
+function imageFormValue(key: string, value: ImageJsonValue): string | undefined {
+  // Match the gateway's multipart binder. Use JSON when an extension would otherwise become a string.
+  if (multipartIntegers.has(key)) return typeof value === 'number' && Number.isInteger(value) && value >= -2147483648 && value <= 2147483647
+    ? String(value) : undefined;
+  if (key === 'svg' || key === 'markup') return value !== null && typeof value === 'object' && !Array.isArray(value) ? JSON.stringify(value) : undefined;
+  return typeof value === 'string' ? value : undefined;
+}
+
 export async function imageRequestBody(endpoint: GatewayImageEndpoint, request: ImageRequest): Promise<RequestInit> {
   const { model, inputs, mask, markup, size, aspectRatio, seed, n = 1 } = request;
   const prompt = request.prompt.trim();
@@ -92,40 +108,38 @@ export async function imageRequestBody(endpoint: GatewayImageEndpoint, request: 
   if ([...inputs, ...(mask ? [mask] : []), ...(markup ? [markup] : [])].some(input => 'file' in input && (!/^image\/[\w.+-]+$/.test(input.mediaType) || !input.file.size))) {
     throw new GatewayError('Choose an image file.');
   }
-  const edit = inputs.length > 0;
-  const allowed = ['quality', 'background', 'moderation', 'output_format', 'output_compression', 'complexity', 'frame_count', 'frame_duration_ms', 'svg', edit ? 'input_fidelity' : 'style'] as const;
-  const providerOptions: Record<string, unknown> = {};
-  for (const key of allowed) {
-    const value = request.providerOptions?.[key];
-    if (value !== undefined) providerOptions[key] = value;
-  }
-  if (edit && markup) providerOptions.markup = await imageReference(markup);
-  const options = {
-    model, prompt, n, size,
-    ...providerOptions,
-    aspect_ratio: aspectRatio, seed,
-  };
-  if (endpoint === '/v1/images/edits' && !markup && inputs.every(input => 'file' in input)) {
-    const body = new FormData();
-    for (const [key, value] of Object.entries(options))
-      if (value !== undefined) body.set(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
-    for (const { file, mediaType } of inputs) body.append('image[]', file.type === mediaType ? file : file.slice(0, file.size, mediaType), file.name);
-    if (mask) body.set('mask', mask.file.slice(0, mask.file.size, mask.mediaType), mask.file.name);
-    return { body, headers: { accept: 'application/json' } };
-  }
-
   let body: object;
   if (endpoint === '/api/images') {
+    const provider = model.split('/')[0];
+    const providerOptions = inputs.length && markup
+      ? { ...request.providerOptions, [provider]: { ...request.providerOptions?.[provider], markup: await imageReference(markup) } }
+      : request.providerOptions;
     body = { model, prompt, n, size, aspectRatio, seed,
-      ...(edit && { files: await Promise.all(inputs.map(input => 'url' in input ? { type: 'url', url: imageLink(input.url) } : imageFile(input))) }),
+      ...(inputs.length && { files: await Promise.all(inputs.map(input => 'url' in input ? { type: 'url', url: imageLink(input.url) } : imageFile(input))) }),
       ...(mask && { mask: await imageFile(mask) }),
-      ...(Object.keys(providerOptions).length && { providerOptions: { [model.split('/')[0]]: providerOptions } }),
+      ...(providerOptions && Object.keys(providerOptions).length && { providerOptions }),
     };
-  } else if (endpoint === '/v1/images/edits') {
-    body = { ...options, images: await Promise.all(inputs.map(imageReference)), ...(mask && { mask: await imageReference(mask) }) };
   } else {
-    // GPT Image models already return base64 and do not support response_format.
-    body = { ...options, ...(/^openai\/dall-e-(?:2|3)$/.test(model) && { response_format: 'b64_json' }) };
+    const extra = Object.fromEntries(Object.entries(request.body ?? {}).filter(([key]) => !reservedImageFields.has(key.toLowerCase())));
+    const options = { ...extra, model, prompt, n, size,
+      ...(aspectRatio !== undefined && { aspect_ratio: aspectRatio }), ...(seed !== undefined && { seed }) };
+    if (endpoint === '/v1/images/edits') {
+      if (!markup && inputs.every(input => 'file' in input)) {
+        const fields = Object.entries(options).flatMap(([key, value]) => value === undefined ? [] : [[key, imageFormValue(key, value)] as const]);
+        if (fields.every((field): field is readonly [string, string] => field[1] !== undefined)) {
+          const form = new FormData();
+          for (const [key, value] of fields) form.set(key, value);
+          for (const { file, mediaType } of inputs) form.append('image[]', file.type === mediaType ? file : file.slice(0, file.size, mediaType), file.name);
+          if (mask) form.set('mask', mask.file.slice(0, mask.file.size, mask.mediaType), mask.file.name);
+          return { body: form, headers: { accept: 'application/json' } };
+        }
+      }
+      body = { ...options, images: await Promise.all(inputs.map(imageReference)), ...(mask && { mask: await imageReference(mask) }),
+        ...(markup && { markup: await imageReference(markup) }) };
+    } else {
+      // GPT Image models already return base64 and do not support response_format.
+      body = { ...options, ...(/^openai\/dall-e-(?:2|3)$/.test(model) && { response_format: 'b64_json' }) };
+    }
   }
   return { body: JSON.stringify(body), headers: { 'content-type': 'application/json', accept: 'application/json' } };
 }

@@ -18,7 +18,7 @@ export type { DirectChat } from './directChat.ts';
 export { gatewayDecisionEndpoints } from './decisionChoice.ts';
 export type { DecisionChoice, GatewayDecisionEndpoint } from './decisionChoice.ts';
 export { gatewayImageEndpoints, imageBatchSizes, imageSource, isImageEndpoint, maxImageCount } from './images.ts';
-export type { GatewayImageEndpoint, ImageFileInput, ImageInput, ImageOptions, ImageProviderOptions, ImageRequest, ImageResponse } from './images.ts';
+export type { GatewayImageEndpoint, ImageFileInput, ImageInput, ImageJsonObject, ImageOptions, ImageProviderOptions, ImageRequest, ImageResponse } from './images.ts';
 export type { VideoAsset, VideoRequest, VideoStatus } from './videos.ts';
 export type { TokenRates } from './tokenPricing.ts';
 

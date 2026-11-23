@@ -6,12 +6,20 @@ import { ChatComposer } from './ChatComposer';
 import type { DraftAttachment } from './chatAttachments';
 import { listImages, saveImage } from './imageLibrary';
 import type { ImageItem } from './imageLibrary';
-import { canEditImage } from './imageRoute';
-import { ImageSettingsDialog, imageSettingSupport, readImagePreferences, writeImagePreferences } from './ImageSettingsDialog';
+import { imageOptionsForModel, readImagePreferences, writeImagePreferences } from './imagePreferences';
+import { canEditImage, canMaskImage, imageMaskIssue } from './imageRoute';
+import { ImageSettingsDialog } from './ImageSettingsDialog';
 import { ModelPicker, resolveModelSelection } from './ModelPicker';
 import type { ModelRouter } from './modelDecisions';
 import { useAppTranslation } from './i18n';
 import './images.css';
+
+function imageWarningMessage(warning: unknown) {
+  if (typeof warning === 'string') return warning.trim();
+  if (!warning || typeof warning !== 'object') return '';
+  const { message, details } = warning as { message?: unknown; details?: unknown };
+  return typeof message === 'string' ? message.trim() : typeof details === 'string' ? details.trim() : '';
+}
 
 export default function ImagesView({ gateway, scope, route, toolbar, catalog, loading: loadingModels, router, status }: {
   gateway: Gateway; scope?: string; route: GatewayImageEndpoint; toolbar: HTMLDivElement | null;
@@ -29,19 +37,18 @@ export default function ImagesView({ gateway, scope, route, toolbar, catalog, lo
   const [loading, setLoading] = useState(!!scope);
   const [historyError, setHistoryError] = useState(false);
   const [error, setError] = useState('');
+  const [warnings, setWarnings] = useState<string[]>([]);
   const running = useRef<AbortController>(null);
   const models = catalog?.filter(({ type }) => type === 'image') ?? [];
   const { selected } = resolveModelSelection(models, selectedIds, !!router);
   const references = draft.attachments.length;
-  const edit = route === '/v1/images/edits' || references > 0;
+  const edit = route === '/v1/images/edits' || references > 0 || !!settings.mask;
   const eligible = edit ? selected.filter(({ id }) => canEditImage(route, id)) : selected;
-  const maskCandidates = settings.mask ? eligible.filter(({ id, provider }) => canEditImage(route, id) && imageSettingSupport(provider, id).mask) : [];
-  // If a mask applies to this selection, don't route the request to a model that would drop it.
-  const candidates = maskCandidates.length ? maskCandidates : eligible;
+  const candidates = settings.mask ? eligible.filter(model => canMaskImage(route, model)) : eligible;
+  const maskIssue = settings.mask ? imageMaskIssue(route, selected, references) : '';
   const routeIssue = route === '/v1/images/generations' && references ? 'Remove attachments or choose an image edit route.'
-    : edit && selected.length && !eligible.length ? 'This model does not support image editing.'
-    : route === '/v1/images/edits' && !references ? 'Add a reference image to edit.'
-    : maskCandidates.length && !references ? 'A mask requires a reference image.' : '';
+    : maskIssue || (edit && selected.length && !eligible.length ? 'This model does not support image editing.'
+    : route === '/v1/images/edits' && !references ? 'Add a reference image to edit.' : '');
   const busy = !!phase;
   const canSend = candidates.length > 0 && !routeIssue && !status;
 
@@ -67,12 +74,13 @@ export default function ImagesView({ gateway, scope, route, toolbar, catalog, lo
     running.current = controller;
     setPhase(decision ? 'choosing' : 'generating');
     setError('');
+    setWarnings([]);
     try {
       let model = candidates[0];
       if (decision) {
         const { endpoint, ...agent } = decision;
         // Route on the prompt and request shape, not reference URLs or file contents.
-        const input = JSON.stringify({ prompt, operation: edit ? 'edit' : 'generate', route, references, mask: maskCandidates.length > 0,
+        const input = JSON.stringify({ prompt, operation: edit ? 'edit' : 'generate', route, references, mask: !!settings.mask,
           size: settings.size, aspectRatio: settings.aspectRatio, count: settings.n ?? 1 });
         const choices = candidates.map(({ id, name, provider, description, tags }) => ({ value: id,
           description: JSON.stringify({ name, provider, description, tags, supportsEditing: canEditImage(route, id) }) }));
@@ -83,22 +91,9 @@ export default function ImagesView({ gateway, scope, route, toolbar, catalog, lo
         model = chosen;
         setPhase('generating');
       }
-      const provider = model.provider;
-      const support = imageSettingSupport(provider, model.id);
-      const canEdit = canEditImage(route, model.id);
-      const mask = canEdit && support.mask ? settings.mask : undefined;
       const count = settings.n ?? 1;
       const batches = imageBatchSizes(model.id, count, settings.maxImagesPerCall ?? maxImageCount);
-      const saved = settings.byProvider[provider] ?? {};
-      const providerOptions = support.legacy ? {
-        quality: model.id === 'openai/dall-e-3' && ['standard', 'hd'].includes(saved.quality ?? '') ? saved.quality : undefined,
-        style: model.id === 'openai/dall-e-3' ? saved.style : undefined,
-      } : { ...saved, quality: ['standard', 'hd'].includes(saved.quality ?? '') ? undefined : saved.quality, style: undefined,
-        output_compression: ['jpeg', 'webp'].includes(saved.output_format ?? '') ? saved.output_compression : undefined };
-      const request = { model: model.id, prompt, inputs: draft.attachments, mask,
-        markup: canEdit && provider === 'openai' && !support.legacy ? settings.markup : undefined,
-        size: settings.size, aspectRatio: support.aspectRatio ? settings.aspectRatio : undefined,
-        seed: support.seed ? settings.seed : undefined, providerOptions };
+      const request = { ...imageOptionsForModel(route, model, settings, edit), model: model.id, prompt, inputs: draft.attachments, mask: settings.mask };
       setPendingImages(count);
       // Process sequentially so providers with a one-image limit don't receive a burst of requests.
       // Save each completed batch, even if a later batch is stopped or fails.
@@ -106,6 +101,8 @@ export default function ImagesView({ gateway, scope, route, toolbar, catalog, lo
         controller.signal.throwIfAborted();
         const imageResponse = await gateway.generateImages(route, { ...request, n }, controller.signal);
         controller.signal.throwIfAborted();
+        const messages = imageResponse.warnings.map(imageWarningMessage).filter(Boolean);
+        if (messages.length) setWarnings(current => [...new Set([...current, ...messages])]);
         const item = { id: crypto.randomUUID(), imageResponse };
         setItems(current => [item, ...current]);
         setPendingImages(pending => pending - n);
@@ -138,6 +135,7 @@ export default function ImagesView({ gateway, scope, route, toolbar, catalog, lo
       {!status && routeIssue && !busy && <p className="chat-attachment-notice" role="status">{t(routeIssue)}</p>}
       {phase && <span className="images-progress" role="status">{t(phase === 'choosing' ? 'Choosing a model…' : 'Generating images…')}</span>}
       {error && <p className="chat-attachment-notice" role="alert">{t(error)}</p>}
+      {warnings.map(message => <p key={message} className="chat-attachment-notice" role="status">{message}</p>)}
       <section className="images-library" aria-labelledby={`${heading}-library`}>
         <h2 id={`${heading}-library`}>{t('My images')}</h2>
         {loading && <p className="chat-attachment-notice" role="status">{t('Loading images…')}</p>}
@@ -150,7 +148,7 @@ export default function ImagesView({ gateway, scope, route, toolbar, catalog, lo
         </ul>}
       </section>
     </div>
-    {showSettings && <ImageSettingsDialog initial={settings} models={selected} route={route}
+    {showSettings && <ImageSettingsDialog initial={settings} models={selected} route={route} references={references}
       onSave={next => { setSettings(next); writeImagePreferences(scope, next); }} onClose={() => setShowSettings(false)} />}
   </main>;
 }
