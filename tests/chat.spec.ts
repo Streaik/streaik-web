@@ -1629,12 +1629,16 @@ test.describe('Dutch regional settings with English interface', () => {
     const results = page.getByRole('tabpanel');
     const card = (name: string) => results.getByRole('article').filter({ has: page.getByRole('heading', { name, exact: true }) });
     for (const [, name] of types) {
-      const tabIcon = tabs.getByRole('tab', { name: `${name} (${name === 'Other' ? '1.224' : '1'})`, exact: true }).locator('svg');
+      const tab = tabs.getByRole('tab', { name: `${name} (${name === 'Other' ? '1.224' : '1'})`, exact: true });
+      await tab.click();
       const badgeIcon = card(name).locator('.catalog-type-badge svg[aria-hidden=true]');
       await expect(badgeIcon).toBeVisible();
-      expect(await badgeIcon.innerHTML()).toBe(await tabIcon.innerHTML());
+      expect(await badgeIcon.innerHTML()).toBe(await tab.locator('svg').innerHTML());
     }
 
+    await tabs.getByRole('tab', { name: 'Image (1)', exact: true }).click();
+    await expect(card('Image').locator('.catalog-token-badge')).toHaveCount(0);
+    await tabs.getByRole('tab', { name: 'Language (1)', exact: true }).click();
     const contextLabel = 'Context window: 128.000 tokens';
     const outputLabel = 'Maximum output: 4.096 tokens';
     const contextBadge = card('Language').getByRole('img', { name: contextLabel, exact: true });
@@ -1642,7 +1646,6 @@ test.describe('Dutch regional settings with English interface', () => {
     await expect(contextBadge).toHaveText('128.000');
     await expect(outputBadge).toHaveText('4.096');
     expect(await contextBadge.locator('svg').innerHTML()).not.toBe(await outputBadge.locator('svg').innerHTML());
-    await expect(card('Image').locator('.catalog-token-badge')).toHaveCount(0);
     await contextBadge.focus();
     await expect(page.getByRole('tooltip', { name: contextLabel, exact: true })).toBeVisible();
     await page.keyboard.press('Escape');

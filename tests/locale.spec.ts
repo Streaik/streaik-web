@@ -18,8 +18,9 @@ test('uses Dutch skills headings and single-word composer menu labels', async ({
 
 test('detects Dutch, switches to Spanish without losing drafts, and remembers the language', async ({ page }) => {
   await page.goto('/');
+  const appName = await page.title();
   await expect(page.locator('html')).toHaveAttribute('lang', 'nl');
-  await expect(page.getByRole('contentinfo')).toContainText('Streak kan fouten maken.');
+  await expect(page.getByRole('contentinfo')).toContainText(`${appName} kan fouten maken.`);
   const agents = page.getByRole('button', { name: 'Agents', exact: true });
   await expect(agents).toBeVisible();
   await page.getByRole('textbox', { name: 'Bericht', exact: true }).fill('Keep this draft');
@@ -46,12 +47,14 @@ test('detects Dutch, switches to Spanish without losing drafts, and remembers th
 
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('lang', 'es');
-  await expect(page).toHaveTitle('Streak');
-  await expect(page.getByRole('contentinfo')).toContainText('Streak puede cometer errores.');
+  await expect(page).toHaveTitle(appName);
+  await expect(page.getByRole('contentinfo')).toContainText(`${appName} puede cometer errores.`);
   await agents.click();
   await expect(page.getByRole('heading', { name: 'Agents', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Proveedores', exact: true }).click();
+  await page.getByRole('button', { name: 'Más páginas', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Proveedores', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Proveedores' })).toBeVisible();
+  await page.getByRole('searchbox', { name: 'Buscar proveedores', exact: true }).fill('OpenAI');
   await expect(page.getByRole('link', { name: 'sitio web de OpenAI', exact: true })).toBeVisible();
 });
 
