@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 const batchModel = 'openai/gpt-4o-transcribe';
 const liveModel = 'openai/gpt-realtime-transcribe';
@@ -9,6 +9,11 @@ const file = { name: 'interview.wav', mimeType: 'audio/wav', buffer: Buffer.from
 const start = (page: Page) => page.getByRole('button', { name: 'Real-time', exact: true });
 const stop = (page: Page) => page.getByRole('button', { name: 'Stop Real-time', exact: true });
 const preview = (page: Page) => page.getByRole('article', { name: 'Streaming transcript' });
+
+async function expectIconOnly(control: Locator) {
+  await expect(control).toHaveText('');
+  await expect(control.locator('svg')).toBeVisible();
+}
 
 async function openTranscriptions(page: Page, provider = 'OpenAI', models: { id: string; type: string; tags?: string[] }[] = [
     { id: batchModel, type: 'transcription' }, { id: liveModel, type: 'transcription', tags: ['realtime'] },
@@ -63,6 +68,8 @@ test('all file routes, drag and drop, interrupted SSE, and scoped finished cards
   });
   await openTranscriptions(page);
   const composer = page.getByRole('form', { name: 'Transcription composer' });
+  await expectIconOnly(composer.getByRole('button', { name: 'Dictate', exact: true }));
+  await expectIconOnly(start(page));
   const send = composer.getByRole('button', { name: 'Send' });
   const upload = async () => { await composer.locator('input[type=file]').setInputFiles(file); await send.click(); };
   await upload();
@@ -89,9 +96,30 @@ test('all file routes, drag and drop, interrupted SSE, and scoped finished cards
   expect(paths).toEqual(['/api/transcriptions', '/v1/audio/transcriptions', '/api/transcriptions/stream', '/api/transcriptions/stream']);
   await page.reload();
   await page.getByRole('button', { name: 'Transcriptions', exact: true }).click();
-  await expect(page.getByRole('tabpanel', { name: 'Finished' }).getByRole('article')).toHaveCount(3);
-  await page.getByRole('article').filter({ hasText: 'Final stream transcript' }).getByRole('button', { name: 'Delete' }).click();
-  await expect(page.getByRole('tabpanel', { name: 'Finished' }).getByRole('article')).toHaveCount(2);
+  const cards = page.getByRole('tabpanel', { name: 'Finished' }).getByRole('article');
+  await expect(cards).toHaveCount(3);
+  const card = cards.filter({ hasText: 'Final stream transcript' });
+  const copy = card.getByRole('button', { name: 'Copy', exact: true });
+  const download = card.getByRole('button', { name: 'Download', exact: true });
+  const more = card.locator('header').getByRole('button', { name: 'More actions for interview.wav', exact: true });
+  const deleteAction = page.getByRole('menuitem', { name: 'Delete', exact: true });
+  for (const control of [copy, download, more]) await expectIconOnly(control);
+
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await copy.click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('Final stream transcript');
+  const downloaded = page.waitForEvent('download');
+  await download.click();
+  expect((await downloaded).suggestedFilename()).toBe('interview.txt');
+
+  await expect(card.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
+  await expect(deleteAction).toBeHidden();
+  await more.press('Enter');
+  await expectIconOnly(deleteAction);
+  await expect(deleteAction).toBeFocused();
+  await deleteAction.press('Enter');
+  await expect(card).toHaveCount(0);
+  await expect(cards).toHaveCount(2);
 });
 
 async function mockAudio(page: Page) {
@@ -162,6 +190,7 @@ test('OpenAI microphone uses only the ephemeral secret, saves confirmed turns an
   await event('conversation.item.input_audio_transcription.delta', { item_id: 'one', delta: 'Draft words' });
   await expect(preview(page)).toContainText('Draft words');
   await event('conversation.item.input_audio_transcription.completed', { item_id: 'one', transcript: 'Confirmed words' });
+  await expectIconOnly(stop(page));
   await stop(page).click();
   await expect(page.locator('html')).toHaveAttribute('data-track', 'stopped');
   await expect(page.locator('html')).toHaveAttribute('data-peer', 'closed');
