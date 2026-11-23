@@ -28,7 +28,7 @@ function MorePagesMenu({ view, pinnedViews, onView, onToggleViewPin, container }
   const label = t('More pages');
   const hasCurrentPage = pinnableViews.some(key => view === key && !pinnedViews.includes(key));
   return <Menu.Root modal={false}>
-    <Tooltip content={label}><Menu.Trigger type="button" className="chat-rail-button chat-overflow-trigger"
+    <Tooltip content={label} side="right"><Menu.Trigger type="button" className="chat-rail-button chat-overflow-trigger"
       aria-label={label} data-current={hasCurrentPage || undefined}><ChatIcon name="more" /></Menu.Trigger></Tooltip>
     {container && <Menu.Portal container={container}>
       <Menu.Content className="chat-menu" side="right" align="start" sideOffset={8} collisionPadding={8} hideWhenDetached>

@@ -47,7 +47,7 @@ function Select({ label, id, className = '', value, options, onValueChange, disa
   </RadixSelect.Root>;
 }
 
-function Tooltip({ children, content }: TooltipProps) {
+function Tooltip({ children, content, side }: TooltipProps) {
   const [container, setContainer] = useState<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
   const attach = useCallback((node: HTMLElement | null) => {
@@ -57,7 +57,7 @@ function Tooltip({ children, content }: TooltipProps) {
     <RadixTooltip.Root open={!!content && open} onOpenChange={(value) => setOpen(!!content && value)}>
       <RadixTooltip.Trigger asChild ref={attach}>{children}</RadixTooltip.Trigger>
       {container && <RadixTooltip.Portal container={container}>
-        <RadixTooltip.Content className="shadcn-tooltip" sideOffset={5}>{content}</RadixTooltip.Content>
+        <RadixTooltip.Content className="shadcn-tooltip" side={side} sideOffset={5}>{content}</RadixTooltip.Content>
       </RadixTooltip.Portal>}
     </RadixTooltip.Root>
   </RadixTooltip.Provider>;

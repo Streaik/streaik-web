@@ -36,10 +36,16 @@ test('tools are opt-in, scoped, and Gateway-only; Direct and Gateway keep existi
   assert.equal(activeChatTools(gateway, selected, true, [mcp]).length, 9);
   assert.deepEqual(activeChatTools(direct, selected, true, [mcp]), [{ source: 'mcp', tool: mcp, definition: mcp }]);
   assert.deepEqual(normalizeChatPreferences({ delay: 496, plugins: [...selected, selected[0], 'unregistered'] }),
-    { delay: 500, plugins: selected, remoteSkillIds: [], convertAttachmentsToText: false });
+    { delay: 500, plugins: selected, remoteSkillIds: [], convertAttachmentsToText: false, pinnedViews: [] });
   assert.deepEqual(normalizeChatPreferences({ delay: -1, plugins: null, convertAttachmentsToText: true,
     remoteSkillIds: ['openai/skill_1', false, '  ', 'openai/skill_1', 'anthropic/skill_2'] }),
-    { delay: 0, plugins: [], remoteSkillIds: ['openai/skill_1', 'anthropic/skill_2'], convertAttachmentsToText: true });
+    { delay: 0, plugins: [], remoteSkillIds: ['openai/skill_1', 'anthropic/skill_2'], convertAttachmentsToText: true, pinnedViews: [] });
+});
+
+test('preferences only restore supported sidebar pins', () => {
+  assert.deepEqual(normalizeChatPreferences({ pinnedViews: ['providers', 'chat', 'providers', 'models', 'skills', false] }).pinnedViews,
+    ['models', 'providers']);
+  assert.deepEqual(normalizeChatPreferences({ pinnedViews: 'models' }).pinnedViews, []);
 });
 
 test('catalog handlers expose Gateway providers and capabilities, and reject invalid calls', () => {

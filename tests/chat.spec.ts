@@ -28,6 +28,12 @@ async function showSettings(page: Page, tab?: string) {
   return dialog;
 }
 async function closeSettings(page: Page) { await page.getByRole('button', { name: 'Close', exact: true }).click(); }
+const railMore = (page: Page) => page.getByRole('button', { name: 'More pages', exact: true });
+const pagesMenu = (page: Page) => page.getByRole('menu', { name: 'More pages', exact: true });
+async function openCatalog(page: Page, name: 'Models' | 'Providers') {
+  await railMore(page).click();
+  await pagesMenu(page).getByRole('menuitem', { name, exact: true }).click();
+}
 async function showChatSkills(page: Page) {
   await page.getByRole('button', { name: 'Chat settings', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Chat settings', exact: true });
@@ -615,7 +621,7 @@ test('model picker groups and searches compatible models on a narrow screen, wit
   await composer.press('Enter');
   await expect(page.getByText('Selected model reply', { exact: true })).toBeVisible();
   await picker.click();
-  await page.getByRole('button', { name: 'Providers', exact: true }).click();
+  await openCatalog(page, 'Providers');
   await expect(popup).toBeHidden();
   await expect(page.getByRole('button', { name: 'Back to chat', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'New chat', exact: true }).click();
@@ -1104,7 +1110,7 @@ test('Images routes checked models through the shared agent and generates with t
   expect(requests.at(-1)).toMatchObject({ model: gptImage1 });
   expect(calls).toEqual(['/v1/decisions', '/api/decisions']);
 
-  await page.getByRole('button', { name: 'Models', exact: true }).click();
+  await openCatalog(page, 'Models');
   await page.getByRole('button', { name: 'Account menu', exact: true }).click();
   await expect(page.getByRole('menuitem', { name: 'Route', exact: true })).toHaveCount(0);
 });
@@ -1481,6 +1487,9 @@ test('model tabs browse the shared catalog without changing the chat picker, dra
   const history = page.getByRole('complementary', { name: 'Chat history' });
   const conversation = history.getByRole('button', { name: 'A chat to reopen', exact: true });
   await expect(history.getByRole('button', { name: /^(Models|Providers)$/ })).toHaveCount(0);
+  await railMore(page).click();
+  await pagesMenu(page).getByRole('menuitem', { name: 'Models', exact: true }).hover();
+  await pagesMenu(page).getByRole('menuitem', { name: 'Pin Models', exact: true }).click();
   await models.click();
   await expect(page.getByRole('button', { name: 'Back to chat', exact: true })).toHaveCount(0);
   await expect(models).toHaveAttribute('aria-current', 'page');
@@ -1516,6 +1525,81 @@ test('model tabs browse the shared catalog without changing the chat picker, dra
   await expect(page.getByText('Reply across views')).toBeVisible();
 });
 
+test('sidebar catalog pins are opt-in, independent of navigation, and saved across reloads', async ({ page }) => {
+  await mockModels(page);
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  const rail = page.getByRole('navigation', { name: 'Chat navigation' });
+  const models = rail.getByRole('button', { name: 'Models', exact: true });
+  const providers = rail.getByRole('button', { name: 'Providers', exact: true });
+  for (const name of ['New chat', 'Images', 'Videos', 'Transcriptions', 'Agents', 'Skills']) {
+    await expect(rail.getByRole('button', { name, exact: true })).toBeVisible();
+  }
+  await expect(models).toHaveCount(0);
+  await expect(providers).toHaveCount(0);
+
+  const more = railMore(page);
+  const menu = pagesMenu(page);
+  const modelsItem = menu.getByRole('menuitem', { name: 'Models', exact: true });
+  const pinModels = menu.getByRole('menuitem', { name: 'Pin Models', exact: true });
+  const pinProviders = menu.getByRole('menuitem', { name: 'Pin Providers', exact: true });
+  await more.click();
+  await expect(menu.getByRole('menuitem')).toHaveCount(4);
+  await expect(pinModels).toHaveCSS('opacity', '0');
+  await modelsItem.hover();
+  await expect(pinModels).toHaveCSS('opacity', '1');
+  await expect(pinProviders).toHaveCSS('opacity', '0');
+  await modelsItem.click();
+  const heading = page.getByRole('heading', { name: 'Models', exact: true });
+  await expect(heading).toBeVisible();
+  await expect(models).toHaveCount(0);
+
+  await more.press('ArrowDown');
+  await expect(modelsItem).toBeFocused();
+  await expect(modelsItem).toHaveAttribute('aria-current', 'page');
+  await page.keyboard.press('End');
+  await expect(pinProviders).toBeFocused();
+  await expect(pinProviders).toHaveCSS('opacity', '1');
+  await page.keyboard.press('Enter');
+  await expect(more).toBeFocused();
+  await expect(heading).toBeVisible();
+  await expect(providers).toBeVisible();
+  await expect(models).toHaveCount(0);
+
+  await more.click();
+  await modelsItem.hover();
+  await pinModels.click();
+  await expect(models).toHaveAttribute('aria-current', 'page');
+  await rail.getByRole('button', { name: 'New chat', exact: true }).click();
+  await expect(models).toBeVisible();
+  await page.reload();
+  await expect(providers).toBeVisible();
+  await models.click();
+  await more.click();
+  await modelsItem.hover();
+  await menu.getByRole('menuitem', { name: 'Unpin Models', exact: true }).click();
+  await expect(heading).toBeVisible();
+  await expect(models).toHaveCount(0);
+  await expect(providers).toBeVisible();
+  await page.reload();
+  await expect(providers).toBeVisible();
+  await expect(models).toHaveCount(0);
+});
+
+test.describe('touch sidebar', () => {
+  test.use({ hasTouch: true, viewport: { width: 390, height: 844 } });
+
+  test('catalog pins can be tapped without hovering', async ({ page }) => {
+    await page.goto('/');
+    await railMore(page).tap();
+    const pin = pagesMenu(page).getByRole('menuitem', { name: 'Pin Providers', exact: true });
+    await expect(pin).toHaveCSS('opacity', '1');
+    await pin.tap();
+    await expect(page.getByRole('navigation', { name: 'Chat navigation' }).getByRole('button', { name: 'Providers', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Providers', exact: true })).toHaveCount(0);
+  });
+});
+
 for (const [host, url] of [['BYOK', '/'], ['Entra', 'http://localhost:15174']] as const) {
   test(`${host} provider directory is read-only and browsable without a connection`, async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
@@ -1527,7 +1611,7 @@ for (const [host, url] of [['BYOK', '/'], ['Entra', 'http://localhost:15174']] a
     await expect(page.getByRole('contentinfo')).toContainText(`${appName} can make mistakes.`);
     const rail = page.getByRole('navigation', { name: 'Chat navigation' });
     await rail.getByRole('button', { name: 'Toggle navigation' }).click();
-    await rail.getByRole('button', { name: 'Providers', exact: true }).click();
+    await openCatalog(page, 'Providers');
     await expect(page.getByRole('heading', { name: 'Providers', exact: true })).toBeVisible();
     await expect(page.getByRole('complementary', { name: 'Chat history' })).toBeHidden();
     const cards = page.getByRole('main').getByRole('article');
@@ -2094,8 +2178,7 @@ test('signed-in Entra has only gateway routes, can browse live models, and clear
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   await composer.fill('Entra native question'); await composer.press('Enter');
   await expect(page.getByText('Entra native reply', { exact: true })).toBeVisible();
-  const modelsPage = page.getByRole('navigation', { name: 'Chat navigation' }).getByRole('button', { name: 'Models', exact: true });
-  await modelsPage.click();
+  await openCatalog(page, 'Models');
   await page.getByRole('tab', { name: 'Realtime (1)' }).click();
   await expect(page.getByRole('heading', { name: 'gpt-realtime-mini', exact: true })).toBeVisible();
   const avatar = page.getByRole('button', { name: 'Account menu' });
@@ -2107,7 +2190,7 @@ test('signed-in Entra has only gateway routes, can browse live models, and clear
   await expect(page.locator('html')).toHaveAttribute('data-logged-out', 'true');
   await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
   await expect(modelPicker(page)).toBeDisabled();
-  await modelsPage.click();
+  await openCatalog(page, 'Models');
   await expect(page.getByRole('heading', { name: 'Models', exact: true })).toBeVisible();
   await expect(page.getByRole('tablist', { name: 'Model capabilities' })).toHaveCount(0);
 });

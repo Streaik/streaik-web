@@ -37,14 +37,16 @@ const FluentSelect: ThemeAdapter['Select'] = ({ scheme, preferences, label, id, 
     {nativeSelectOptions(options)}
   </Select></Frame>;
 
-const FluentTooltip: ThemeAdapter['Tooltip'] = ({ scheme, preferences, children, content, visualOnly }) => {
+const tooltipPositions = { top: 'above', right: 'after', bottom: 'below', left: 'before' } as const;
+
+const FluentTooltip: ThemeAdapter['Tooltip'] = ({ scheme, preferences, children, content, visualOnly, side = 'top' }) => {
   const [frame, setFrame] = useState<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
   return <FluentProvider theme={tokens({ scheme, preferences })} ref={setFrame} style={{ display: 'contents' }}>
     <Tooltip content={{ children: content ?? '', style: { maxWidth: 'min(22rem, calc(100vw - 1rem))', overflowWrap: 'anywhere', zIndex: 40 } }}
       relationship={visualOnly || !content ? 'inaccessible' : 'description'}
       visible={!!content && open} onVisibleChange={(_event, { visible }) => setOpen(!!content && visible)}
-      mountNode={frame?.closest('dialog') ? frame : undefined} positioning={{ position: 'above', strategy: 'fixed' }}>
+      mountNode={frame?.closest('dialog') ? frame : undefined} positioning={{ position: tooltipPositions[side], strategy: 'fixed' }}>
       {children}
     </Tooltip>
   </FluentProvider>;
