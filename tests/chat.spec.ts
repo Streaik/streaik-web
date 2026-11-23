@@ -121,7 +121,9 @@ test('local Skills tabs persist versions and chat progressively discloses approv
   await edit.getByLabel('Instructions (Markdown)').fill('Second revision.');
   await edit.getByRole('button', { name: 'Save new version' }).click();
   await expect(card).toContainText('v2');
-  await card.getByRole('button', { name: 'More actions for weekly-digest' }).click();
+  const localCardMenu = card.getByRole('button', { name: 'More actions for weekly-digest', exact: true });
+  await expect(localCardMenu.locator('svg.lucide-ellipsis-vertical')).toBeVisible();
+  await localCardMenu.click();
   await page.getByRole('menuitem', { name: 'Details', exact: true }).click();
   const details = page.getByRole('dialog', { name: 'weekly-digest' });
   await details.getByRole('tab', { name: 'Versions' }).click();
@@ -344,7 +346,9 @@ test('a pinned remote skill can be downloaded, saved locally, and uploaded using
   await expect(page.getByRole('article', { name: 'second-brief', exact: true })).toBeVisible();
   expect(cursors).toEqual([null, skill.id]);
   await expect(card.getByRole('button', { name: 'Details and download' })).toHaveCount(0);
-  await card.getByRole('button', { name: 'More actions for meeting-brief' }).click();
+  const providerCardMenu = card.getByRole('button', { name: 'More actions for meeting-brief', exact: true });
+  await expect(providerCardMenu.locator('svg.lucide-ellipsis-vertical')).toBeVisible();
+  await providerCardMenu.click();
   await page.getByRole('menuitem', { name: 'Details and download', exact: true }).click();
   const details = page.getByRole('dialog', { name: 'meeting-brief' });
   await details.getByRole('tab', { name: 'Versions' }).click();

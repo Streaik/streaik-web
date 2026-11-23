@@ -26,7 +26,7 @@ function SkillCardMenu({ name, container, actions, onAction }: {
   const pending = useRef<Action | undefined>(undefined);
   return <Menu.Root modal={false}>
     <Tooltip content={t('More actions')}><Menu.Trigger ref={trigger} type="button" className="chat-row-button"
-      aria-label={t('More actions for {{title}}', { title: name })}><ChatIcon name="more" /></Menu.Trigger></Tooltip>
+      aria-label={t('More actions for {{title}}', { title: name })}><ChatIcon name="moreVertical" /></Menu.Trigger></Tooltip>
     {container && <Menu.Portal container={container}><Menu.Content className="chat-menu" align="end" sideOffset={4} collisionPadding={8}
       onCloseAutoFocus={event => {
         if (!pending.current || !trigger.current) return;
