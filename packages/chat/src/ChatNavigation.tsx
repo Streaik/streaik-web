@@ -3,6 +3,8 @@ import { Button, Tooltip } from '@streaik/themes';
 import { useId, useLayoutEffect, useRef } from 'react';
 import { useAgents } from './AgentsProvider';
 import { ChatIcon } from './ChatIcon';
+import { pinnableViews } from './chatPreferences';
+import type { PinnableView } from './chatPreferences';
 import { useAppTranslation } from './i18n';
 import type { RouteMenu } from './routeMenu';
 import { conversationTitle, newestFirst } from './conversations';
@@ -14,7 +16,38 @@ export type ChatAccount = {
   onLogout?: () => void;
 };
 
-export type ChatView = 'chat' | 'images' | 'videos' | 'transcriptions' | 'models' | 'providers' | 'agents' | 'skills';
+export type ChatView = 'chat' | 'images' | 'videos' | 'transcriptions' | 'agents' | 'skills' | PinnableView;
+
+const pinnableLabels = { models: 'Models', providers: 'Providers' } as const satisfies Record<PinnableView, string>;
+
+function MorePagesMenu({ view, pinnedViews, onView, onToggleViewPin, container }: {
+  view: ChatView; pinnedViews: readonly PinnableView[]; onView: (view: ChatView) => void;
+  onToggleViewPin: (view: PinnableView) => void; container: HTMLDivElement | null;
+}) {
+  const { t } = useAppTranslation();
+  const label = t('More pages');
+  const hasCurrentPage = pinnableViews.some(key => view === key && !pinnedViews.includes(key));
+  return <Menu.Root modal={false}>
+    <Tooltip content={label}><Menu.Trigger type="button" className="chat-rail-button chat-overflow-trigger"
+      aria-label={label} data-current={hasCurrentPage || undefined}><ChatIcon name="more" /></Menu.Trigger></Tooltip>
+    {container && <Menu.Portal container={container}>
+      <Menu.Content className="chat-menu" side="right" align="start" sideOffset={8} collisionPadding={8} hideWhenDetached>
+        {pinnableViews.map(key => {
+          const title = t(pinnableLabels[key]);
+          const pinned = pinnedViews.includes(key);
+          const pinLabel = t(pinned ? 'Unpin {{title}}' : 'Pin {{title}}', { title });
+          return <div key={key} className="chat-overflow-row" role="none">
+            <Menu.Item className="chat-menu-item chat-overflow-page" aria-current={view === key ? 'page' : undefined} onSelect={() => onView(key)}>
+              <ChatIcon name={key} /> {title}
+            </Menu.Item>
+            <Menu.Item className="chat-row-button chat-overflow-pin" aria-label={pinLabel} title={pinLabel} textValue={pinLabel}
+              onSelect={() => onToggleViewPin(key)}><ChatIcon name={pinned ? 'unpin' : 'pin'} /></Menu.Item>
+          </div>;
+        })}
+      </Menu.Content>
+    </Menu.Portal>}
+  </Menu.Root>;
+}
 
 function initials(name: string) {
   const words = name.split('@')[0]?.match(/[\p{L}\p{N}]+/gu) ?? [];
@@ -114,9 +147,10 @@ function HistoryRow({ item, active, busy, container, pinButtonId, onOpen, onPin,
   </li>;
 }
 
-export function ChatNavigation({ appName, expanded, history, active, busy, account, container, view, onView, toggle, onNew, onOpen, onPin, onDelete, onSettings, routes }: {
+export function ChatNavigation({ appName, expanded, history, active, busy, account, container, view, onView, pinnedViews, onToggleViewPin, toggle, onNew, onOpen, onPin, onDelete, onSettings, routes }: {
   appName: string; expanded: boolean; history: Conversation[]; active: string; busy: boolean; account?: ChatAccount; container: HTMLDivElement | null;
   view: ChatView; onView: (view: ChatView) => void;
+  pinnedViews: readonly PinnableView[]; onToggleViewPin: (view: PinnableView) => void;
   toggle: () => void; onNew: () => void; onOpen: (item: Conversation) => void; onPin: (id: string) => void;
   onDelete: (id: string) => void; onSettings: () => void; routes?: RouteMenu;
 }) {
@@ -158,10 +192,14 @@ export function ChatNavigation({ appName, expanded, history, active, busy, accou
       <Tooltip content={t('New chat')}><button type="button" className="chat-rail-button" aria-label={t('New chat')} disabled={busy} onClick={onNew}>
         <ChatIcon name="compose" />
       </button></Tooltip>
-      {([['images', 'Images'], ['videos', 'Videos'], ['transcriptions', 'Transcriptions'], ['models', 'Models'], ['providers', 'Providers'], ['agents', 'Agents'], ['skills', 'Skills']] as const)
+      {([['images', 'Images'], ['videos', 'Videos'], ['transcriptions', 'Transcriptions'], ['agents', 'Agents'], ['skills', 'Skills']] as const)
         .filter(([key]) => key !== 'agents' || agentsEnabled).map(([key, label]) =>
         <Tooltip key={key} content={t(label)}><button type="button" className="chat-rail-button" aria-label={t(label)} aria-current={view === key ? 'page' : undefined}
           onClick={() => onView(key)}><ChatIcon name={key === 'skills' ? 'docs' : key === 'transcriptions' ? 'mic' : key} /></button></Tooltip>)}
+      {pinnableViews.filter(key => pinnedViews.includes(key)).map(key =>
+        <Tooltip key={key} content={t(pinnableLabels[key])}><button type="button" className="chat-rail-button" aria-label={t(pinnableLabels[key])}
+          aria-current={view === key ? 'page' : undefined} onClick={() => onView(key)}><ChatIcon name={key} /></button></Tooltip>)}
+      <MorePagesMenu view={view} pinnedViews={pinnedViews} onView={onView} onToggleViewPin={onToggleViewPin} container={container} />
       <AccountMenu account={account} onSettings={onSettings} container={container} routes={routes} />
     </nav>
     <aside id={panelId} className="chat-history-panel" aria-label={t('Chat history')} hidden={!expanded}>

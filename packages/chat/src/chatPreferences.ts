@@ -1,17 +1,28 @@
 import { localPlugins } from './localPlugins.ts';
 import type { LocalPluginId } from './localPlugins.ts';
 
-export type ChatPreferences = { delay: number; plugins: LocalPluginId[]; remoteSkillIds: string[]; convertAttachmentsToText: boolean };
-export const defaultChatPreferences: ChatPreferences = { delay: 40, plugins: [], remoteSkillIds: [], convertAttachmentsToText: false };
+export const pinnableViews = ['models', 'providers'] as const;
+export type PinnableView = (typeof pinnableViews)[number];
+
+export type ChatPreferences = {
+  delay: number;
+  plugins: LocalPluginId[];
+  remoteSkillIds: string[];
+  convertAttachmentsToText: boolean;
+  pinnedViews: PinnableView[];
+};
+export const defaultChatPreferences: ChatPreferences = { delay: 40, plugins: [], remoteSkillIds: [], convertAttachmentsToText: false, pinnedViews: [] };
 
 export function normalizeChatPreferences(value: Partial<ChatPreferences> | null | undefined): ChatPreferences {
   const delay = value?.delay;
   const plugins = value?.plugins;
+  const pinned = value?.pinnedViews;
   return {
     delay: typeof delay === 'number' && Number.isFinite(delay) ? Math.round(Math.max(0, Math.min(1000, delay)) / 10) * 10 : 40,
     plugins: localPlugins.filter(({ id }) => Array.isArray(plugins) && plugins.includes(id)).map(({ id }) => id),
     remoteSkillIds: Array.isArray(value?.remoteSkillIds) ? [...new Set(value.remoteSkillIds.filter(id => typeof id === 'string' && id.trim()))] : [],
     convertAttachmentsToText: value?.convertAttachmentsToText === true,
+    pinnedViews: pinnableViews.filter(view => Array.isArray(pinned) && pinned.includes(view)),
   };
 }
 

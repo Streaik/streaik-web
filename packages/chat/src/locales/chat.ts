@@ -257,6 +257,7 @@ export const chatMessages = {
   'Hide chat history': ['Chatgeschiedenis verbergen', 'Ocultar historial de chats'],
   'Show chat history': ['Chatgeschiedenis tonen', 'Mostrar historial de chats'],
   'New chat': ['Nieuw gesprek', 'Nuevo chat'],
+  'More pages': ['Meer pagina’s', 'Más páginas'],
   'Providers': ['Providers', 'Proveedores'],
   'Agents': ['Agents', 'Agents'],
   'Chat history': ['Chatgeschiedenis', 'Historial de chats'],

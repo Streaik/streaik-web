@@ -117,7 +117,7 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hasHistor
     </div>
     <footer className="chat-tool-footer">
       <Button variant="subtle" disabled={locked} onClick={() => onChange({ ...defaultChatPreferences,
-        convertAttachmentsToText: value.convertAttachmentsToText })}>{t('Defaults')}</Button>
+        convertAttachmentsToText: value.convertAttachmentsToText, pinnedViews: value.pinnedViews })}>{t('Defaults')}</Button>
       <Button onClick={() => dialog.current?.close()}>{t('Close')}</Button>
     </footer>
   </dialog>;

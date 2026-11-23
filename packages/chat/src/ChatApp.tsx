@@ -644,6 +644,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
   return <div ref={setMenuContainer} className="chat-shell" data-nav={nav ? 'expanded' : 'collapsed'} data-view={view}>
       <ChatNavigation appName={appName} expanded={nav} history={history} active={view === 'chat' ? conversation.id : ''} busy={busy || toolBusy}
         account={connection.account} container={menuContainer} view={view} onView={onView}
+        pinnedViews={preferences.pinnedViews} onToggleViewPin={(key) => onPreferences({ ...preferences,
+          pinnedViews: preferences.pinnedViews.includes(key) ? preferences.pinnedViews.filter(view => view !== key) : [...preferences.pinnedViews, key] })}
         toggle={toggleNav} onNew={onNew} onOpen={onSwitch}
         onPin={onPin} onDelete={onDelete} onSettings={onSettings} routes={routeMenu} />
       <header className="chat-toolbar" hidden={view !== 'chat' && view !== 'agents' && view !== 'skills' && !mediaView && !connection.signIn}>
