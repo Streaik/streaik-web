@@ -162,6 +162,7 @@ function Transcript({ messages }: { messages: ChatMessage[] }) {
 
 export function ChatApp({ appName = 'Streaik', gateway, connection, agents }: { appName?: string; gateway: Gateway; connection: Connection; agents?: AgentsConfig }) {
   const scope = connection.historyProfile ? JSON.stringify([gateway.historyScope, connection.historyProfile]) : undefined;
+  const mcpSession = connection.mcpSession ?? (!connection.signIn || connection.ready);
   const settings = useRef<HTMLDialogElement>(null);
   const [route, setRoute] = useState<ChatRoute>({ mode: 'gateway', endpoint: '/api/chat' });
   const [profile, setProfile] = useState(() => ({ scope, preferences: loadChatPreferences(scope) }));
@@ -181,7 +182,7 @@ export function ChatApp({ appName = 'Streaik', gateway, connection, agents }: { 
   }
   return <ThemeRoot>
     <AgentsProvider config={agents} scope={scope}>
-      <HistoryChat key={scope ?? ''} appName={appName} gateway={gateway} connection={connection} scope={scope} models={models}
+      <HistoryChat key={JSON.stringify([scope, mcpSession])} appName={appName} gateway={gateway} connection={connection} scope={scope} models={models} mcpSession={mcpSession}
         route={route} onRoute={setRoute} decisions={decisions} images={images} transcriptions={transcriptions} onSettings={() => settings.current?.showModal()}
         preferences={preferences} onPreferences={updatePreferences} />
       <SettingsDialog dialog={settings} apiKeySettings={connection.apiKeySettings} accountSettings={connection.settings} images={gateway.historyScope !== 'direct' ? images : undefined}
@@ -192,8 +193,9 @@ export function ChatApp({ appName = 'Streaik', gateway, connection, agents }: { 
   </ThemeRoot>;
 }
 
-function HistoryChat({ appName, gateway, connection, scope, models, route, onRoute, decisions, images, transcriptions, onSettings, preferences, onPreferences }: {
+function HistoryChat({ appName, gateway, connection, scope, models, route, onRoute, decisions, images, transcriptions, onSettings, preferences, onPreferences, mcpSession }: {
   appName: string; gateway: Gateway; connection: Connection; scope?: string; models: ReturnType<typeof useModels>; onSettings: () => void;
+  mcpSession: boolean;
   route: ChatRoute; onRoute: (route: ChatRoute) => void;
   decisions: ReturnType<typeof useDecisionRoute>;
   images: ImageRouteSetting;
@@ -208,7 +210,7 @@ function HistoryChat({ appName, gateway, connection, scope, models, route, onRou
   const [nav, setNav] = useState(false);
   const agentsEnabled = !!useAgents();
   const localSkills = useLocalSkills(scope);
-  const mcpServers = useMcpServers(scope, connection.mcp, connection.mcpSession ?? (!connection.signIn || connection.ready));
+  const mcpServers = useMcpServers(scope, connection.mcp, mcpSession);
   const remoteSkills = useRemoteSkills(gateway, connection.ready && gateway.historyScope !== 'direct', connection.modelRevision ?? 0);
   const view = target.kind === 'page' && (target.view !== 'agents' || agentsEnabled) ? target.view : 'chat';
   const videos = useVideoJobs(gateway, scope, view === 'videos');

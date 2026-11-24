@@ -12,16 +12,17 @@ import './mcpServers.css';
 
 export type McpEditorTarget = { record?: McpServerRecord; installing?: boolean };
 
-function McpDialog({ title, close, children }: { title: string; close: () => void; children: ReactNode }) {
+function McpDialog({ title, close, children }: { title: string; close: () => void; children: (closeDialog: () => void) => ReactNode }) {
   const { t } = useAppTranslation();
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null);
+  const closeDialog = () => dialog.current?.close();
   useEffect(() => { if (dialog.current && !dialog.current.open) dialog.current.showModal(); }, []);
   return <dialog ref={dialog} className="chat-settings mcp-dialog" aria-labelledby={id} onClose={close}>
     <header className="chat-settings-header"><h2 id={id}>{title}</h2>
-      <Button type="button" variant="subtle" className="chat-close" aria-label={t('Close')} onClick={() => dialog.current?.close()}><ChatIcon name="close" /></Button>
+      <Button type="button" variant="subtle" className="chat-close" aria-label={t('Close')} onClick={closeDialog}><ChatIcon name="close" /></Button>
     </header>
-    {children}
+    {children(closeDialog)}
   </dialog>;
 }
 
@@ -40,12 +41,13 @@ export function McpServerEditor({ target, options, store, close }: { target: Mcp
   const endpoint = mcpEndpoint(url);
   const id = useId();
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  function submit(event: FormEvent<HTMLFormElement>, closeDialog: () => void) {
     event.preventDefault();
     try {
       if (!endpoint) throw new Error('Enter an HTTPS MCP URL, or an HTTP URL on localhost, without credentials, a query, or a fragment.');
       const extra = rows.filter(row => row.name.trim() || row.value).map(row => ({ ...row, name: row.name.trim() }));
-      const savedFields = new Map([...fields].filter(([key, value]) => value !== mcpHeaderFields(declarations, new Map()).find(field => field.id === key)?.value));
+      const defaults = new Map(mcpHeaderFields(declarations, new Map()).map(field => [field.id, field.value]));
+      const savedFields = new Map([...fields].filter(([key, value]) => defaults.has(key) && value !== defaults.get(key)));
       if (auth === 'manual') resolveMcpHeaders(declarations, savedFields, extra);
       else if (!appAuth?.ready) throw new Error('App credentials are unavailable. Choose manual headers or update your app credentials.');
       const needsSession = auth === 'manual' && (savedFields.size > 0 || extra.length > 0);
@@ -53,7 +55,7 @@ export function McpServerEditor({ target, options, store, close }: { target: Mcp
         endpoint, source: record?.source ?? 'manual', auth, declarations,
         extraNames: auth === 'manual' ? extra.map(row => row.name) : [], needsSession },
       needsSession ? { fields: savedFields, rows: extra } : undefined);
-      close();
+      closeDialog();
     } catch (error) { setError(error instanceof Error ? error.message : 'Could not save the MCP server.'); }
   }
 
@@ -61,8 +63,8 @@ export function McpServerEditor({ target, options, store, close }: { target: Mcp
     setRows(rows.map((row, rowIndex) => rowIndex === index ? { ...row, [key]: value } : row));
   }
 
-  return <McpDialog title={t(installing ? 'Install MCP server' : record ? 'Configure MCP server' : 'Add MCP server')} close={close}>
-    <form className="chat-settings-section mcp-form" onSubmit={submit} autoComplete="off">
+  return <McpDialog title={t(installing ? 'Install MCP server' : record ? 'Configure MCP server' : 'Add MCP server')} close={close}>{closeDialog =>
+    <form className="chat-settings-section mcp-form" onSubmit={event => submit(event, closeDialog)} autoComplete="off">
       <label>{t('Server name')}<input value={title} onChange={event => setTitle(event.target.value)} maxLength={160} /></label>
       <label>{t('Server URL')}<input type="url" required value={url} readOnly={!!record} onChange={event => setUrl(event.target.value)} maxLength={2048} /></label>
       {endpoint && <p>{t('Headers are sent only to {{host}} at this server URL.', { host: new URL(endpoint).host })}</p>}
@@ -94,10 +96,10 @@ export function McpServerEditor({ target, options, store, close }: { target: Mcp
         </Button>
       </fieldset>}
       {error && <p role="alert" className="chat-error">{t(error)}</p>}
-      <div className="mcp-actions"><Button type="button" onClick={close}>{t('Cancel')}</Button>
+      <div className="mcp-actions"><Button type="button" onClick={closeDialog}>{t('Cancel')}</Button>
         <Button type="submit" variant="primary" disabled={auth === 'app' && !appAuth?.ready}>{t(installing ? 'Install server' : 'Save server')}</Button>
       </div>
-    </form>
+    </form>}
   </McpDialog>;
 }
 
@@ -113,25 +115,25 @@ export function McpServerPicker({ store, selection, locked, onConfigure, onBrows
 }) {
   const { t } = useAppTranslation();
   const id = useId();
-  return <McpDialog title={t('MCP servers for this chat')} close={close}>
+  return <McpDialog title={t('MCP servers for this chat')} close={close}>{closeDialog =>
     <div className="chat-settings-section">
       {store.records.length ? <ul className="mcp-list">{store.records.map(record => {
         const entry = selection.entries.find(entry => entry.record === record);
         const ready = !!store.connection(record);
-        const status = !ready ? 'Credentials needed' : entry?.state === 'loading' ? 'Loading tools…'
-          : entry?.state === 'error' ? 'Could not connect. Turn the server off and back on to retry.'
-          : entry?.state === 'ready' ? entry.tools?.length ? `${entry.tools.length}` : 'No compatible tools' : undefined;
+        const status = !ready ? t('Credentials needed') : entry?.state === 'loading' ? t('Loading tools…')
+          : entry?.state === 'error' ? t('Could not connect. Turn the server off and back on to retry.')
+          : entry?.state === 'ready' ? entry.tools?.length ? t('{{count, number}} tools available', { count: entry.tools.length })
+            : t('No compatible tools') : undefined;
         const description = `${id}-${record.id}`;
         return <li className="mcp-row" key={record.id}>
           <label className="mcp-toggle"><input type="checkbox" role="switch" checked={!!entry} aria-describedby={status ? description : undefined}
             disabled={!ready || locked} onChange={event => selection.set(record, event.target.checked)} /><span>{record.title}</span></label>
           <Configure record={record} disabled={locked} onConfigure={() => onConfigure(record)} />
-          {status && <small id={description} role="status">{entry?.state === 'ready' && entry.tools?.length
-            ? t('{{count, number}} tools available', { count: entry.tools.length }) : t(status)}</small>}
+          {status && <small id={description} role="status">{status}</small>}
         </li>;
       })}</ul> : <p>{t('No MCP servers installed yet.')}</p>}
-      <div className="mcp-actions"><Button type="button" onClick={onBrowse}>{t('Manage MCP servers')}</Button></div>
-    </div>
+      <div className="mcp-actions"><Button type="button" onClick={() => { closeDialog(); onBrowse(); }}>{t('Manage MCP servers')}</Button></div>
+    </div>}
   </McpDialog>;
 }
 
