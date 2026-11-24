@@ -34,3 +34,10 @@
   .mcp-toggle input { appearance: auto; width: auto; height: auto; }
   .mcp-toggle input::before { display: none; }
 }
+.mcp-resource-result {
+  max-block-size: 45vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}

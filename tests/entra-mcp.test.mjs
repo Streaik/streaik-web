@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createEntraMcpHeaders } from '../samples/entra/src/mcpAuth.ts';
 import { readMcpScopes } from '../samples/entra/src/auth.ts';
-import { preferredMcpRemote } from '../packages/chat/src/mcp.ts';
+import { discoverMcpCapabilities, expandMcpResource, filterMcpCatalog, preferredMcpRemote, readMcpCapability } from '../packages/chat/src/mcp.ts';
+import { byokRegistryRemote } from '../samples/shared/mcpConfig.ts';
 
 const base = new URL('https://mcp.example.test/team/entra/');
 const endpoint = new URL('google-images', base).href;
@@ -25,6 +26,16 @@ test('the registry prefers the Entra remote over the BYOK remote when the Entra 
   assert.equal(preferredMcpRemote([byok, managed], { base: new URL('https://mcp.example.test/team/byok/') }), byok);
 });
 
+test('BYOK sees only header remotes for bundled servers in a shared registry', () => {
+  const byok = { endpoint: 'https://mcp.example.test/team/byok/google-images', declarations: [{ name: 'x-goog-api-key' }] };
+  const managed = { endpoint, declarations: [] };
+  const graph = { endpoint: new URL('microsoft-onenote', base).href, declarations: [] };
+  const google = { name: 'io.github.streaik/Google-Images', title: 'Google Images', remotes: [byok, managed] };
+  const oneNote = { name: 'io.github.streaik/Microsoft-OneNote', title: 'OneNote', remotes: [graph] };
+  const thirdParty = { name: 'test.example/public', title: 'Public server', remotes: [{ endpoint: 'https://test.example/public', declarations: [] }] };
+  assert.deepEqual(filterMcpCatalog([google, oneNote, thirdParty], byokRegistryRemote), [{ ...google, remotes: [byok] }, thirdParty]);
+});
+
 function mockAuth() {
   const calls = [];
   let revision = 0;
@@ -43,7 +54,7 @@ function mockFetch(t, override = () => undefined) {
     requests.push([url, init]);
     assert.equal(init.redirect, 'error');
     assert.equal(init.credentials, 'omit');
-    const custom = override(url, init);
+    const custom = await override(url, init);
     if (custom) return custom;
     if (url === resourceDocument) return Response.json({ resource: endpoint, authorization_servers: [issuer], scopes_supported: [scope] });
     if (url === issuerDocument) return Response.json({ issuer, token_endpoint: `${issuer}/token`, grant_types_supported: [grant] });
@@ -93,4 +104,39 @@ test('does not return a wrapped bearer if the signed-in account changes during e
     return Response.json({ token_type: 'Bearer', access_token: 'mcp1.stale', expires_in: 120, issued_token_type: accessTokenType });
   });
   await assert.rejects(createEntraMcpHeaders(base, auth, 'spa-client-id')(endpoint), /sign-in changed/);
+});
+
+test('the web MCP client lists and reads delegated data with the resource-bound bearer, not the Entra assertion', async t => {
+  // Reuse the named-profile OAuth fixture; mock the MCP transport independently of the token issuer.
+  const template = { name: 'my-calendar', uriTemplate: 'https://graph.microsoft.com/beta/me/calendarView?startDateTime={startDateTime}' };
+  const resource = expandMcpResource(template.uriTemplate, { startDateTime: '2026-11-24T09:00:00+01:00' });
+  assert.equal(resource, 'https://graph.microsoft.com/beta/me/calendarView?startDateTime=2026-11-24T09%3A00%3A00%2B01%3A00');
+  const methods = [];
+  mockFetch(t, async (request, init) => {
+    if (!(request instanceof Request)) return;
+    assert.equal(request.url, endpoint);
+    assert.equal(init.headers.get('Authorization'), 'Bearer mcp1.entra-0');
+    assert.equal(init.headers.get('Mcp-Protocol-Version'), '2026-07-28');
+    const { id, method, params } = await request.json();
+    methods.push(method);
+    const reply = { jsonrpc: '2.0', id };
+    const complete = { resultType: 'complete', ttlMs: 0, cacheScope: 'private' };
+    switch (method) {
+      case 'server/discover': return Response.json({ ...reply, result: { supportedVersions: ['2026-07-28'], capabilities: { resources: {} } } });
+      case 'resources/list': return Response.json({ ...reply, result: { ...complete, resources: [] } });
+      case 'resources/templates/list': return Response.json({ ...reply, result: { ...complete, resourceTemplates: [template] } });
+      case 'resources/read':
+        assert.equal(params.uri, resource);
+        return Response.json({ ...reply, result: { ...complete, contents: [{ uri: resource, text: 'calendar data' }] } });
+      default: assert.fail(`Unexpected MCP method ${method}`);
+    }
+  });
+  const { auth, calls } = mockAuth();
+  const headers = createEntraMcpHeaders(base, auth, 'spa-client-id');
+  const server = { id: 'calendar', title: 'Calendar', endpoint, requestHeaders: signal => headers(endpoint, signal) };
+  const signal = new AbortController().signal;
+  assert.deepEqual(await discoverMcpCapabilities(server, signal), { resources: [], resourceTemplates: [template], prompts: [] });
+  assert.equal(await readMcpCapability(server, { uri: resource }, signal), 'calendar data');
+  assert.deepEqual(calls, ['images']);
+  assert.deepEqual(methods, ['server/discover', 'resources/list', 'resources/templates/list', 'server/discover', 'resources/read']);
 });

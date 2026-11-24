@@ -4,8 +4,9 @@ import type { FormEvent, ReactNode } from 'react';
 import { ChatIcon } from './ChatIcon';
 import { DialogTabs } from './ChatToolsDialogs';
 import { useAppTranslation } from './i18n';
-import { fetchMcpCatalog, mcpAppAuth, preferredMcpRemote } from './mcp';
-import type { McpCatalogServer, McpOptions } from './mcp';
+import { McpCapabilities } from './McpCapabilities';
+import { fetchMcpCatalog, filterMcpCatalog, mcpAppAuth, preferredMcpRemote } from './mcp';
+import type { McpCatalogServer, McpOptions, McpServer } from './mcp';
 import { mcpEndpoint, mcpHeaderFields, resolveMcpHeaders } from './mcpConfiguration';
 import type { McpHeaderRow, McpServerRecord } from './mcpConfiguration';
 import type { McpSelection, McpServers } from './useMcpServers';
@@ -113,10 +114,11 @@ function Configure({ record, disabled, onConfigure }: { record: McpServerRecord;
 
 type ServerSectionsProps = { store: McpServers; options?: McpOptions; locked: boolean; onEdit: (target: McpEditorTarget) => void };
 
-function InstalledServers({ store, selection, locked, onEdit }: ServerSectionsProps & { selection?: McpSelection }) {
+function InstalledServers({ store, options, selection, locked, onEdit }: ServerSectionsProps & { selection?: McpSelection }) {
   const { t } = useAppTranslation();
   const id = useId();
   const [error, setError] = useState(false);
+  const [browse, setBrowse] = useState<McpServer>();
   const disabled = locked || !store.available;
   return <section aria-label={t('Installed servers')}>
     <div className="mcp-section-heading"><h2>{t('Installed servers')}</h2><Button type="button" disabled={disabled} onClick={() => onEdit({})}>
@@ -126,7 +128,8 @@ function InstalledServers({ store, selection, locked, onEdit }: ServerSectionsPr
     {error && <p role="alert" className="chat-error">{t('Could not remove this MCP server.')}</p>}
       {store.records.length ? <ul className="mcp-list">{store.records.map(record => {
         const entry = selection?.entries.find(entry => entry.record === record);
-        const ready = !!store.connection(record);
+         const connection = store.connection(record);
+         const ready = !!connection;
         const status = !ready ? t('Credentials needed') : entry?.state === 'loading' ? t('Loading tools…')
           : entry?.state === 'error' ? t('Could not connect. Turn the server off and back on to retry.')
           : entry?.state === 'ready' ? entry.tools?.length ? t('{{count, number}} tools available', { count: entry.tools.length })
@@ -137,6 +140,8 @@ function InstalledServers({ store, selection, locked, onEdit }: ServerSectionsPr
             disabled={!ready || disabled} onChange={event => selection.set(record, event.target.checked)} /><span>{record.title}</span></label>
             : <strong>{record.title}</strong>}
           <div className="mcp-actions">
+            {options?.browseCapabilities && record.auth === 'app' && connection && <Button type="button" disabled={disabled}
+              aria-label={t('Browse resources for {{name}}', { name: record.title })} onClick={() => setBrowse(connection)}>{t('Resources and prompts')}</Button>}
             <Configure record={record} disabled={disabled} onConfigure={() => onEdit({ record })} />
             <Tooltip content={t('Remove {{name}}', { name: record.title })}><Button className="chat-composer-icon" variant="subtle" type="button" disabled={disabled}
               aria-label={t('Remove {{name}}', { name: record.title })} onClick={() => {
@@ -148,6 +153,7 @@ function InstalledServers({ store, selection, locked, onEdit }: ServerSectionsPr
           {status && <small id={description} role="status">{status}</small>}
         </li>;
       })}</ul> : <p>{t('No MCP servers installed yet.')}</p>}
+    {browse && <McpDialog title={browse.title} close={() => setBrowse(undefined)} wide>{() => <McpCapabilities server={browse} />}</McpDialog>}
   </section>;
 }
 
@@ -196,7 +202,8 @@ function McpRegistry({ store, options, locked, onEdit }: ServerSectionsProps) {
 
   const installed = new Set(store.records.map(record => record.endpoint));
   const term = query.trim().toLowerCase();
-  const results = catalog.filter(item => `${item.title} ${item.name} ${item.description ?? ''}`.toLowerCase().includes(term));
+  const results = filterMcpCatalog(catalog, options?.filterRegistryRemote)
+    .filter(item => `${item.title} ${item.name} ${item.description ?? ''}`.toLowerCase().includes(term));
   const disabled = locked || !store.available;
 
   function install(item: McpCatalogServer, remote: McpCatalogServer['remotes'][number]) {

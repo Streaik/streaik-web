@@ -10,6 +10,8 @@ export type McpAppAuth = { ready: boolean; headers: RequestHeaders };
 export type McpOptions = {
   base?: URL;
   registryUrl?: URL;
+  browseCapabilities?: boolean;
+  filterRegistryRemote?: (name: string, remote: McpCatalogServer['remotes'][number]) => boolean;
   headersForRemote?: (headers: readonly McpRemoteHeader[], endpoint: string) => McpAppAuth | undefined;
 };
 export type McpServer = Pick<McpServerRecord, 'id' | 'title' | 'endpoint'> & {
@@ -40,6 +42,14 @@ export function mcpAppAuth(options: McpOptions | undefined, server: Pick<McpServ
 export function preferredMcpRemote(remotes: McpCatalogServer['remotes'], options: McpOptions | undefined) {
   return remotes.find(remote => mcpAppAuth(options, { ...remote, source: 'registry' })?.ready) ??
     remotes.find(remote => isMcpRuntime(remote.endpoint, options?.base)) ?? remotes[0];
+}
+
+export function filterMcpCatalog(servers: McpCatalogServer[], filter: McpOptions['filterRegistryRemote']): McpCatalogServer[] {
+  return filter ? servers.flatMap(server => {
+    if (!server.remotes.length) return [server];
+    const remotes = server.remotes.filter(remote => filter(server.name, remote));
+    return remotes.length ? [{ ...server, remotes }] : [];
+  }) : servers;
 }
 
 export async function fetchMcpCatalog(registryUrl: URL, signal: AbortSignal, cursor?: string) {
@@ -118,6 +128,7 @@ async function withClient<T>(server: McpServer, signal: AbortSignal, action: (cl
 export async function discoverMcpTools(server: McpServer, signal: AbortSignal): Promise<McpTool[]> {
   const bounded = AbortSignal.any([signal, AbortSignal.timeout(20_000)]);
   return withClient(server, bounded, async client => {
+    if (!client.getServerCapabilities()?.tools) return [];
     const result = new Map<string, McpTool>();
     let cursor: string | undefined;
     for (let page = 0; page < 4; page++) {
@@ -133,6 +144,49 @@ export async function discoverMcpTools(server: McpServer, signal: AbortSignal): 
       cursor = nextCursor;
     }
     return [...result.values()];
+  });
+}
+
+export function discoverMcpCapabilities(server: McpServer, signal: AbortSignal) {
+  const bounded = AbortSignal.any([signal, AbortSignal.timeout(25_000)]);
+  return withClient(server, bounded, async client => {
+    const caps = client.getServerCapabilities();
+    const options = { signal: bounded };
+    const [{ resources }, { resourceTemplates }, { prompts }] = await Promise.all([
+      caps?.resources ? client.listResources(undefined, options) : { resources: [] },
+      caps?.resources ? client.listResourceTemplates(undefined, options) : { resourceTemplates: [] },
+      caps?.prompts ? client.listPrompts(undefined, options) : { prompts: [] },
+    ]);
+    return { resources: resources.slice(0, 64), resourceTemplates: resourceTemplates.slice(0, 64), prompts: prompts.slice(0, 64) };
+  });
+}
+
+export function mcpTemplateSlots(template: string): string[] | undefined {
+  const slot = /\{([A-Za-z0-9_-]+)\}/g;
+  if (/[{}]/.test(template.replace(slot, ''))) return;
+  return [...new Set([...template.matchAll(slot)].map(match => match[1]))];
+}
+
+export function expandMcpResource(template: string, values: Record<string, string>): string {
+  if (!mcpTemplateSlots(template)) throw new Error('This URI template is not supported.');
+  const uri = template.replace(/\{([A-Za-z0-9_-]+)\}/g, (_, name: string) => {
+    const value = Object.hasOwn(values, name) && values[name];
+    if (!value || value.length > 2048) throw new Error('Fill in the resource template values.');
+    return encodeURIComponent(value).replace(/[!'()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+  });
+  if (uri.length > 8192) throw new Error('The resource URI is too long.');
+  return uri;
+}
+
+export function readMcpCapability(server: McpServer, item: { uri: string } | { name: string; arguments: Record<string, string> }, signal: AbortSignal) {
+  const bounded = AbortSignal.any([signal, AbortSignal.timeout(45_000)]);
+  return withClient(server, bounded, async client => {
+    if ('uri' in item) {
+      const { contents } = await client.readResource(item, { signal: bounded });
+      return contents.flatMap(content => 'text' in content && typeof content.text === 'string' ? [content.text] : []).join('\n\n').slice(0, 256 * 1024);
+    }
+    const { messages } = await client.getPrompt(item, { signal: bounded });
+    return messages.flatMap(message => message.content.type === 'text' ? [message.content.text] : []).join('\n\n').slice(0, 256 * 1024);
   });
 }
 

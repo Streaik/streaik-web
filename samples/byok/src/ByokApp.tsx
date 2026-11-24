@@ -4,7 +4,7 @@ import { createDirectChat, createGateway, GatewayError } from '@streaik/gateway'
 import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { appAgents } from '../../shared/appAgents';
-import { byokMcpProvider } from '../../shared/mcpConfig';
+import { byokMcpProvider, byokRegistryRemote } from '../../shared/mcpConfig';
 import type { McpConfig } from '../../shared/mcpConfig';
 import { ProviderKeySettings } from './ProviderKeySettings';
 import { providerHeaders, providerIds, providers, validProviderKey } from './providerKeys.ts';
@@ -34,7 +34,7 @@ export function ByokApp({ appName, base, mcpConfig }: { appName: string; base?: 
   }));
   const [direct] = useState(() => createDirectChat(providerDirectory.providers, (provider) =>
     Object.hasOwn(providers, provider) ? keys.current[provider as ProviderId] : undefined));
-  const [mcp] = useState<McpOptions | undefined>(() => mcpConfig && ({ ...mcpConfig, headersForRemote: (declarations) => {
+  const [mcp] = useState<McpOptions | undefined>(() => mcpConfig && ({ ...mcpConfig, filterRegistryRemote: byokRegistryRemote, headersForRemote: (declarations) => {
     const provider = byokMcpProvider(declarations);
     if (!provider) return;
     return { ready: !!keys.current[provider], headers: () => {
