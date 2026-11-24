@@ -1,0 +1,93 @@
+name: Web CI and Azure Storage deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout web monorepo
+        uses: actions/checkout@v4
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Typecheck and build workspaces
+        env:
+          VITE_APP_NAME: Streaik
+          # Needed in the compiled browser code; STREAIK_GATEWAY_TARGET only configures Vite's dev proxy.
+          VITE_GATEWAY_BASE: https://ai.streaik.net
+        run: npm run build
+
+      - name: Verify sample outputs
+        run: |
+          test -s samples/byok/dist/index.html
+
+      - name: Upload BYOK website
+        uses: actions/upload-artifact@v4
+        with:
+          name: streaik-web-byok
+          path: samples/byok/dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: streaik-production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download Streaik website
+        uses: actions/download-artifact@v4
+        with:
+          name: streaik-web-byok
+          path: ./dist
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Upload website to $web container
+        shell: bash
+        run: |
+          az storage blob upload-batch \
+            --account-name '${{ vars.AZURE_STORAGE_ACCOUNT }}' \
+            --auth-mode login \
+            --destination '$web' \
+            --source ./dist \
+            --overwrite true
+
+      - name: Disable HTML caching
+        shell: bash
+        run: |
+          az storage blob upload \
+            --account-name '${{ vars.AZURE_STORAGE_ACCOUNT }}' \
+            --auth-mode login \
+            --container-name '$web' \
+            --name index.html \
+            --file ./dist/index.html \
+            --content-cache-control 'no-cache, no-store, must-revalidate' \
+            --overwrite true
