@@ -23,7 +23,8 @@ for (const path of ['/', ...Object.values(pagePaths), conversationPath('00000000
 
 for (const path of ['/assets/__spa-rewrite-check__.js', '/api/__spa-rewrite-check__', '/auth-redirect.html']) {
   const response = await request(path);
-  const ok = !isAppDocument(response, await response.text());
-  console.log(`${ok ? 'PASS' : 'FAIL'} ${response.status} ${response.url} (not the SPA entry)`);
+  // The storage origin can return the app HTML as its error document; it is still not a successful rewrite.
+  const ok = !response.ok || !isAppDocument(response, await response.text());
+  console.log(`${ok ? 'PASS' : 'FAIL'} ${response.status} ${response.url} (not a successful SPA route)`);
   if (!ok) process.exitCode = 1;
 }

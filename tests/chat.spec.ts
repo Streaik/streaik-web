@@ -166,6 +166,10 @@ test('conversation URLs survive reload, switch through browser history, and stay
     await expect(isolated).toHaveURL(first);
   } finally { await isolated.close(); }
 
+  await page.goto('/');
+  await expect(page).toHaveURL(second);
+  await expect(page.getByText('Route reply 2')).toBeVisible();
+  await page.goto(first);
   await page.getByRole('button', { name: 'Toggle navigation' }).click();
   await page.getByRole('button', { name: 'Second linked conversation', exact: true }).click();
   await expect(page).toHaveURL(second);
@@ -1066,6 +1070,7 @@ test('Images settings set the request count and show matching gallery shimmers b
   await expectChatModel(page);
   const chatPicker = await modelPicker(page).boundingBox();
   await page.getByRole('button', { name: 'Images', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Images', exact: true })).toBeVisible();
   const picker = modelPicker(page);
   await expect(picker).toBeEnabled();
   const imagePicker = await picker.boundingBox();
@@ -2453,9 +2458,11 @@ test('signed-in Entra has only gateway routes, can browse live models, and clear
   await page.route((url) => url.port === '15174' && url.pathname === '/src/auth.ts', (route) => route.fulfill({
     contentType: 'application/javascript',
     body: `export async function createEntraAuth() {
+      const account = { homeAccountId: 'test-account', environment: 'test', tenantId: 'test', name: 'Taylor Smith', username: 'taylor@example.test' };
       return {
-        getAccount: () => ({ homeAccountId: 'test-account', environment: 'test', tenantId: 'test', name: 'Taylor Smith', username: 'taylor@example.test' }),
+        getAccount: () => account,
         headers: () => new Headers({ Authorization: 'Bearer test-entra-token' }),
+        signIn: async () => account,
         signOut: async () => { document.documentElement.dataset.loggedOut = 'true'; },
       };
     }`,
@@ -2487,6 +2494,8 @@ test('signed-in Entra has only gateway routes, can browse live models, and clear
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   await composer.fill('Entra native question'); await composer.press('Enter');
   await expect(page.getByText('Entra native reply', { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/c\/[0-9a-f-]{36}$/);
+  const conversation = page.url();
   await openCatalog(page, 'Models');
   await page.getByRole('tab', { name: 'Realtime (1)' }).click();
   await expect(page.getByRole('heading', { name: 'gpt-realtime-mini', exact: true })).toBeVisible();
@@ -2497,11 +2506,18 @@ test('signed-in Entra has only gateway routes, can browse live models, and clear
   await expect(page.getByRole('menuitem', { name: 'Settings' })).toBeVisible();
   await page.getByRole('menuitem', { name: 'Log out' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-logged-out', 'true');
-  await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
-  await expect(modelPicker(page)).toBeDisabled();
-  await openCatalog(page, 'Models');
+  const signIn = page.getByRole('button', { name: 'Sign in', exact: true });
+  await expect(signIn).toBeVisible();
+  await expect(page).toHaveURL(/\/models$/);
   await expect(page.getByRole('heading', { name: 'Models', exact: true })).toBeVisible();
   await expect(page.getByRole('tablist', { name: 'Model capabilities' })).toHaveCount(0);
+  await page.goBack();
+  await expect(page).toHaveURL(conversation);
+  await expect(page.getByText('This conversation is not available in this browser or profile.')).toBeVisible();
+  await expect(page.getByText('Entra native question', { exact: true })).toHaveCount(0);
+  await signIn.click();
+  await expect(page).toHaveURL(conversation);
+  await expect(page.getByText('Entra native reply', { exact: true })).toBeVisible();
 });
 
 test('theme settings apply independently, are remembered on reload, and can be reset', async ({ page }) => {
