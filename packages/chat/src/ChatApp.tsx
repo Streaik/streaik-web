@@ -47,6 +47,7 @@ import { conversationOpeningText, deleteConversation, listConversations, newConv
 import type { Conversation } from './conversations';
 import { callMcpTool, discoverMcpTools } from './mcp';
 import type { McpOptions, McpTool } from './mcp';
+export type { McpOptions, McpRemoteHeader } from './mcp';
 import { chatDecisionInput, chatModelDecision, modelDecisionRouter, selectModelRoleId, useDecisionRoute } from './modelDecisions';
 import type { ModelDecision } from './modelDecisions';
 import { conversationNameRoleId, runTextAppAgent, welcomeRoleId } from './textAppAgents';

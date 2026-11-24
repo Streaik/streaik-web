@@ -1,9 +1,12 @@
 import { expect, test } from '@playwright/test';
 import type { APIRequestContext, APIResponse, Page } from '@playwright/test';
+import { discoverMcpTools } from '../packages/chat/src/mcp';
+import { acceptsEntraMcpToken, readMcpConfig } from '../samples/shared/mcpConfig';
 
 const model = 'openai/gpt-4.1-mini';
 const mcp = 'http://localhost:15281';
 const delegated = 'http://localhost:15282';
+const registryUrl = 'http://localhost:15283/v0.1/servers';
 const version = '2026-07-28';
 const auth = { openai: { Authorization: 'Bearer browser-openai' }, google: { 'x-goog-api-key': 'browser-google' },
   anthropic: { 'x-api-key': 'browser-anthropic' } };
@@ -128,6 +131,59 @@ async function exerciseChat(page: Page, approve: boolean) {
 
 test('browser executes once, previews the image in a review modal, and shares the approved result', async ({ page }) => exerciseChat(page, true));
 test('the assigned router runs once and its chosen model continues after an MCP denial', async ({ page }) => exerciseChat(page, false));
+
+test('the registry controls which servers appear in chat and receives no credentials', async ({ page }) => {
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: model }] } }));
+  let listings = 0;
+  await page.route(registryUrl, async route => {
+    listings++;
+    const headers = await route.request().allHeaders();
+    for (const header of ['authorization', 'x-api-key', 'x-goog-api-key', 'cookie']) expect(headers[header]).toBeUndefined();
+    const response = await route.fetch();
+    const result = await response.json();
+    const entry = result.servers.find(({ server }: { server: { name: string } }) => server.name.endsWith('/OpenAI-Images'));
+    entry.server.title = 'Images from the configured registry';
+    await route.fulfill({ response, json: { servers: [entry], metadata: { count: 1 } } });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Discover MCP tools' }).click();
+  const tools = page.getByText('3 MCP tools enabled');
+  await expect(tools).toBeVisible();
+  await tools.click();
+  await expect(page.getByText('Images from the configured registry: OpenAIImages_CreateImage', { exact: true })).toBeVisible();
+  expect(listings).toBe(1);
+});
+
+test('registry discovery is opt-in, and credentials are not resolved for remotes outside the trusted base', async () => {
+  const site = new URL('http://localhost:15273/');
+  expect(readMcpConfig(site, mcp)).toBeUndefined();
+  expect(readMcpConfig(site, undefined, registryUrl)).toBeUndefined();
+  expect(readMcpConfig(site, mcp, 'http://remote.example.test/v0.1/servers')).toBeUndefined();
+  expect(readMcpConfig(site, mcp, '/registry/v0.1/servers')?.registryUrl.href).toBe(`${site.origin}/registry/v0.1/servers`);
+
+  for (const base of [delegated, `${mcp}/other-runtime/`]) {
+    const options = readMcpConfig(site, base, registryUrl)!;
+    expect(await discoverMcpTools({ ...options, headersForRemote: () => {
+      throw new Error('Untrusted endpoints must not reach the credential policy.');
+    } }, new AbortController().signal)).toEqual([]);
+  }
+});
+
+test('the bundled header-auth registry is not compatible with the Entra chat credential policy', async () => {
+  const options = readMcpConfig(new URL('http://localhost:15274/'), mcp, registryUrl)!;
+  expect(await discoverMcpTools({ ...options, headersForRemote: (headers) => acceptsEntraMcpToken(headers) ? () => {
+    throw new Error('The Entra sample must not acquire a token for a provider-key listing.');
+  } : undefined }, new AbortController().signal)).toEqual([]);
+  expect(acceptsEntraMcpToken([])).toBe(true);
+  expect(acceptsEntraMcpToken([{ name: 'Authorization', value: 'Bearer {access_token}' }])).toBe(true);
+});
+
+test('the sample registry returns CORS headers only for configured origins', async ({ request }) => {
+  const allowed = await request.get(registryUrl, { headers: { Origin: 'http://localhost:15273' } });
+  const denied = await request.get(registryUrl, { headers: { Origin: 'https://unrelated.example.test' } });
+  expect(allowed.headers()['access-control-allow-origin']).toBe('http://localhost:15273');
+  expect(denied.headers()['access-control-allow-origin']).toBeUndefined();
+});
 
 async function rpc(request: APIRequestContext, host: string, path: string, method: string, params: object = {}, headers: Record<string, string> = {},
   headerVersion: string | null = version, bodyVersion = version) {

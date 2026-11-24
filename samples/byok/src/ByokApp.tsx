@@ -1,8 +1,11 @@
 import { ChatApp, providerDirectory, useAppTranslation } from '@streaik/chat';
+import type { McpOptions } from '@streaik/chat';
 import { createDirectChat, createGateway, GatewayError } from '@streaik/gateway';
 import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { appAgents } from '../../shared/appAgents';
+import { byokMcpProvider } from '../../shared/mcpConfig';
+import type { McpConfig } from '../../shared/mcpConfig';
 import { ProviderKeySettings } from './ProviderKeySettings';
 import { providerHeaders, providerIds, providers, validProviderKey } from './providerKeys.ts';
 import type { ProviderId, ProviderKeys } from './providerKeys.ts';
@@ -11,7 +14,7 @@ import { createVault, unlockVault } from './vault.ts';
 type Encrypter = Awaited<ReturnType<typeof createVault>>;
 type Vault = { state: 'session' } | { state: 'locked' } | { state: 'unlocked'; encrypt: Encrypter };
 
-export function ByokApp({ appName, base, mcpBase }: { appName: string; base?: URL; mcpBase?: URL }) {
+export function ByokApp({ appName, base, mcpConfig }: { appName: string; base?: URL; mcpConfig?: McpConfig }) {
   const { t } = useAppTranslation();
   const scope = base?.href ?? 'direct';
   const storageKey = `streaik.byok.vault:${scope}`;
@@ -31,12 +34,16 @@ export function ByokApp({ appName, base, mcpBase }: { appName: string; base?: UR
   }));
   const [direct] = useState(() => createDirectChat(providerDirectory.providers, (provider) =>
     Object.hasOwn(providers, provider) ? keys.current[provider as ProviderId] : undefined));
-  const [mcp] = useState(() => mcpBase && ({ base: mcpBase, headers: (provider: 'openai' | 'google' | 'anthropic') => {
-    const headers = new Headers();
-    const key = keys.current[provider];
-    if (key && provider === 'openai') headers.set('Authorization', `Bearer ${key}`);
-    else if (key) headers.set(provider === 'google' ? 'x-goog-api-key' : 'x-api-key', key);
-    return headers;
+  const [mcp] = useState<McpOptions | undefined>(() => mcpConfig && ({ ...mcpConfig, headersForRemote: (declarations) => {
+    const provider = byokMcpProvider(declarations);
+    if (!provider) return;
+    return () => {
+      const headers = new Headers();
+      const key = keys.current[provider];
+      if (key && provider === 'openai') headers.set('Authorization', `Bearer ${key}`);
+      else if (key) headers.set(provider === 'google' ? 'x-goog-api-key' : 'x-api-key', key);
+      return headers;
+    };
   } }));
 
   function updateKeys(next: ProviderKeys) {
