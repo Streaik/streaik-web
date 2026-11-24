@@ -1234,8 +1234,10 @@ test('Images uses explicit routes and persists compatible records only for the c
   await imagesPage.click();
   await expect(gallery).toBeVisible();
   await expect(generated).toHaveCount(0);
+  await openRoute(page);
+  await expect(page.getByRole('menuitemradio', { name: '/api/images', exact: true })).toHaveAttribute('aria-checked', 'true');
+  await page.keyboard.press('Escape');
   await showSettings(page);
-  await expect(imageRoute).toHaveValue('/api/images');
   await page.getByRole('tab', { name: 'API keys', exact: true }).click();
   await page.getByLabel('Vault passphrase').fill(passphrase);
   await page.getByRole('button', { name: 'Unlock vault' }).click();
@@ -1243,8 +1245,8 @@ test('Images uses explicit routes and persists compatible records only for the c
   await closeSettings(page);
   await imagesPage.click();
   await expect(generated).toHaveCount(3);
-  await showSettings(page);
-  await expect(imageRoute).toHaveValue('/v1/images/edits');
+  await openRoute(page);
+  await expect(page.getByRole('menuitemradio', { name: '/v1/images/edits', exact: true })).toHaveAttribute('aria-checked', 'true');
 });
 
 test('Images settings set the request count and show matching gallery shimmers beneath one composer', async ({ page }) => {
