@@ -80,7 +80,7 @@ export function mcpDeclarations(value: unknown): McpRemoteHeader[] | undefined {
       const definition = isObject(item.variables) && Object.hasOwn(item.variables, key) && isObject(item.variables[key]) ? item.variables[key] : {};
       return [key, input(definition, secret || definition.isSecret === true)];
     })) : undefined;
-    const manualOnly = item.manualOnly === true || (secret && (item.isSecret !== true || item.default !== undefined ||
+    const manualOnly = item.manualOnly === true || (secret && ((!safeTemplate && item.isSecret !== true) || item.default !== undefined ||
       (item.value !== undefined && !safeTemplate) || (item.variables !== undefined && !safeTemplate)));
     declarations.push({ name, ...input(item, secret), manualOnly,
       value: safeTemplate || (!secret && !keys.length && raw && !/[{}]/.test(raw) && headerValue(raw)) ? raw : undefined,
