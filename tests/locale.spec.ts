@@ -2,40 +2,79 @@ import { expect, test } from '@playwright/test';
 
 test.use({ locale: 'nl-NL' });
 
-test('localizes the Dutch MCP overview and keeps registry actions icon-only', async ({ page }) => {
+test('localizes the MCP overview tabs and uses matching cards for registry and installed servers', async ({ page }) => {
   const description = 'Published server description';
+  const endpoint = 'https://example.test/mcp';
+  const alternate = 'https://example.test/mcp-alternate';
   let requests = 0;
   await page.route('**/test-mcp-registry*', route => {
     requests++;
     return route.fulfill({ json: { servers: [{ server: { name: 'example/tools', title: 'Fixture Tools', version: '1.2.3', description,
-      remotes: [{ type: 'streamable-http', url: 'https://example.test/mcp' }] } }] } });
+      remotes: [endpoint, alternate].map(url => ({ type: 'streamable-http', url })) } }] } });
   });
   await page.goto('http://localhost:15175/mcp');
-  await expect(page.getByRole('heading', { name: 'MCP-servers', exact: true })).toBeVisible();
-  await expect(page.getByText(/^Installeer servers uit het register/)).toBeVisible();
-  await expect(page.getByText('Er zijn nog geen MCP-servers geïnstalleerd.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Model Context', exact: true })).toBeVisible();
+  await expect(page.getByText(/^Installeer servers uit het register/)).toHaveCount(0);
+  const tabs = page.getByRole('tablist', { name: 'Model Context' });
+  await expect(tabs.getByRole('tab')).toHaveText(['Geïnstalleerd', 'Register']);
+  const installedTab = tabs.getByRole('tab', { name: 'Geïnstalleerd', exact: true });
+  const registryTab = tabs.getByRole('tab', { name: 'Register', exact: true });
+  const installed = page.getByRole('tabpanel', { name: 'Geïnstalleerd', exact: true });
+  const registry = page.getByRole('tabpanel', { name: 'Register', exact: true });
+  const empty = installed.getByText('Er zijn nog geen MCP-servers geïnstalleerd.');
+  await expect(installedTab).toHaveAttribute('aria-selected', 'true');
+  await expect(empty).toBeVisible();
+  await expect(registry).toBeHidden();
+  expect(requests).toBe(0);
 
-  const registry = page.getByRole('region', { name: 'MCP-register' });
-  await expect(registry.getByRole('searchbox', { name: 'MCP-servers zoeken' })).toBeVisible();
-  const card = registry.getByRole('article').filter({ hasText: 'Fixture Tools' });
+  const add = installed.getByRole('button', { name: 'Toevoegen via URL' });
+  await expect(add).toHaveText('');
+  await expect(add.locator('svg')).toBeVisible();
+  await add.press('Enter');
+  const editor = page.getByRole('dialog', { name: 'MCP-server toevoegen' });
+  await expect(editor.getByLabel('Server-URL')).toBeVisible();
+  await editor.getByRole('button', { name: 'Annuleren' }).click();
+
+  await installedTab.press('ArrowRight');
+  await expect(registryTab).toBeFocused();
+  await expect(registryTab).toHaveAttribute('aria-selected', 'true');
+  await expect(installed).toBeHidden();
+  const search = registry.getByRole('searchbox', { name: 'MCP-servers zoeken' });
+  const card = registry.getByRole('article').filter({ has: page.getByRole('heading', { name: 'Fixture Tools' }) });
+  await expect(card).toHaveClass(/\bcatalog-card\b/);
   await expect(card.getByText(description, { exact: true })).toBeVisible();
   await expect(card.getByText('Versie 1.2.3', { exact: true })).toBeVisible();
-  const add = page.getByRole('button', { name: 'Toevoegen via URL' });
   const refresh = registry.getByRole('button', { name: 'Register vernieuwen' });
   const install = card.getByRole('button', { name: 'Fixture Tools installeren' });
-  for (const button of [add, refresh, install]) {
+  for (const button of [refresh, install]) {
     await expect(button).toHaveText('');
     await expect(button.locator('svg')).toBeVisible();
   }
   const beforeRefresh = requests;
   await refresh.press('Enter');
   await expect.poll(() => requests).toBeGreaterThan(beforeRefresh);
-  await add.press('Enter');
-  const editor = page.getByRole('dialog', { name: 'MCP-server toevoegen' });
-  await expect(editor.getByLabel('Server-URL')).toBeVisible();
-  await editor.getByRole('button', { name: 'Annuleren' }).click();
+  await expect(refresh).toBeEnabled();
+  await search.fill('Fixture');
+  const urls = card.getByRole('combobox', { name: 'Server-URL' });
+  await expect(urls).toHaveValue(endpoint);
+  await urls.selectOption(alternate);
+  await registryTab.press('Home');
+  await expect(empty).toBeVisible();
+  await installedTab.press('End');
+  await expect(search).toHaveValue('Fixture');
+  await expect(urls).toHaveValue(alternate);
   await install.press('Enter');
-  await expect(page.getByRole('region', { name: 'Geïnstalleerde servers' }).getByText('Fixture Tools', { exact: true })).toBeVisible();
+  await expect(card.getByText('Geïnstalleerd', { exact: true })).toBeVisible();
+
+  await installedTab.click();
+  const installedCard = installed.getByRole('article').filter({ has: page.getByRole('heading', { name: 'Fixture Tools' }) });
+  await expect(installedCard).toHaveClass(/\bcatalog-card\b/);
+  await expect(installedCard.getByText(alternate, { exact: true })).toBeVisible();
+  await expect(installedCard.getByRole('button', { name: 'Fixture Tools configureren' })).toBeVisible();
+  await installedCard.getByRole('button', { name: 'Fixture Tools verwijderen' }).click();
+  await expect(empty).toBeVisible();
+  await registryTab.click();
+  await expect(install).toBeVisible();
 });
 
 test('uses Dutch skills headings and single-word composer menu labels', async ({ page }) => {

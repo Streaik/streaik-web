@@ -310,7 +310,6 @@ export const chatMessages = {
   'MCP Servers': ['Model Context', 'Servidores MCP'],
   'Model Context': ['Model Context', 'Contexto del modelo'],
   'Installed': ['Geïnstalleerd', 'Instalados'],
-  'Install servers from the registry or add an MCP server by URL. Choose which installed servers to use in the chat composer.': ['Installeer servers uit het register of voeg een MCP-server toe via een URL. Kies bij het opstellen van een chatbericht welke geïnstalleerde servers je wilt gebruiken.', 'Instala servidores del registro o añade un servidor MCP por URL. Elige qué servidores instalados quieres usar en el cuadro de chat.'],
   'Sign in or unlock this profile to manage MCP servers.': ['Meld je aan of ontgrendel dit profiel om MCP-servers te beheren.', 'Inicia sesión o desbloquea este perfil para gestionar los servidores MCP.'],
   'No MCP servers installed yet.': ['Er zijn nog geen MCP-servers geïnstalleerd.', 'Todavía no hay servidores MCP instalados.'],
   'Registry': ['Register', 'Registro'],

@@ -127,8 +127,10 @@ async function exerciseChat(page: Page, approve: boolean, manual = false, reject
   if (manual) await addManualServer(page, 'Manual images', endpoint, authorization);
   else {
     await page.getByRole('button', { name: 'MCP Servers', exact: true }).click();
+    await page.getByRole('tab', { name: 'Registry', exact: true }).click();
     await page.getByRole('button', { name: 'Install OpenAI Images' }).click();
-    await expect(page.getByRole('region', { name: 'Installed servers' }).getByText('OpenAI Images', { exact: true })).toBeVisible();
+    await page.getByRole('tab', { name: 'Installed', exact: true }).click();
+    await expect(page.getByRole('tabpanel', { name: 'Installed' }).getByRole('heading', { name: 'OpenAI Images', exact: true })).toBeVisible();
   }
   await page.getByRole('button', { name: 'New chat', exact: true }).click();
   if (routed) {
@@ -289,7 +291,7 @@ test('manual headers are not persisted, and the disabled toggle has a separate c
   await addManualServer(page, 'Private MCP', `${mcp}/openai-images`);
   expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain(auth.openai.Authorization);
   await page.reload();
-  const installed = page.getByRole('region', { name: 'Installed servers' });
+  const installed = page.getByRole('tabpanel', { name: 'Installed' });
   await expect(installed.getByText('Credentials needed')).toBeVisible();
   await page.getByRole('button', { name: 'New chat' }).click();
   const picker = await openModelContext(page);
@@ -309,6 +311,7 @@ test('manual headers are not persisted, and the disabled toggle has a separate c
 
 test('registry install renders secret template fields when an app credential is unavailable', async ({ page }) => {
   await page.goto('/mcp');
+  await page.getByRole('tab', { name: 'Registry', exact: true }).click();
   await page.getByRole('button', { name: 'Install OpenAI Images' }).click();
   const editor = page.getByRole('dialog', { name: 'Install MCP server' });
   const key = editor.getByLabel(/openai_api_key/);
@@ -316,7 +319,8 @@ test('registry install renders secret template fields when an app credential is 
   await expect(key).toHaveAttribute('required', '');
   await key.fill('manual-test-key');
   await editor.getByRole('button', { name: 'Install server', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Installed servers' }).getByText('OpenAI Images', { exact: true })).toBeVisible();
+  await page.getByRole('tab', { name: 'Installed', exact: true }).click();
+  await expect(page.getByRole('tabpanel', { name: 'Installed' }).getByRole('heading', { name: 'OpenAI Images', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'New chat' }).click();
   const listed = page.waitForRequest(request => request.url() === `${mcp}/openai-images` && request.method() === 'POST');
   await selectServer(page, 'OpenAI Images', 3);

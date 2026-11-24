@@ -15,10 +15,10 @@ import type { RemoteSkills } from './useRemoteSkills';
 
 type DialogRef = RefObject<HTMLDialogElement | null>;
 
-export function DialogTabs<T extends string>({ id, label, tabs, value, onChange }: {
-  id: string; label: string; tabs: ReadonlyArray<readonly [T, string]>; value: T; onChange: (tab: T) => void;
+export function DialogTabs<T extends string>({ id, label, tabs, value, onChange, className = 'chat-tool-tabs' }: {
+  id: string; label: string; tabs: ReadonlyArray<readonly [T, string]>; value: T; onChange: (tab: T) => void; className?: string;
 }) {
-  return <div className="chat-tool-tabs" role="tablist" aria-label={label}>
+  return <div className={className} role="tablist" aria-label={label}>
     {tabs.map(([key, title], index) => <button key={key} id={`${id}-${key}-tab`} type="button" role="tab"
       aria-selected={value === key} aria-controls={`${id}-${key}-panel`} tabIndex={value === key ? 0 : -1}
       onClick={() => onChange(key)} onKeyDown={event => {
