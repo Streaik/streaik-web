@@ -64,6 +64,122 @@ async function mockModels(page: Page) {
   });
 }
 
+test('page URLs support direct loads, reload, and Back and Forward without losing the draft', async ({ page }) => {
+  await page.goto('/');
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('An unsent draft');
+  await openCatalog(page, 'Providers');
+  await expect(page).toHaveURL(/\/providers$/);
+  await openCatalog(page, 'Models');
+  await expect(page).toHaveURL(/\/models$/);
+  await openCatalog(page, 'Models');
+  await page.getByRole('button', { name: 'Images', exact: true }).click();
+  await expect(page).toHaveURL(/\/images$/);
+
+  for (const view of ['models', 'providers', 'chat']) {
+    await page.goBack();
+    await expect(page.locator('.chat-shell')).toHaveAttribute('data-view', view);
+  }
+  await expect(composer).toHaveValue('An unsent draft');
+  await page.goForward();
+  await expect(page).toHaveURL(/\/providers$/);
+  await page.reload();
+  await expect(page.locator('.chat-shell')).toHaveAttribute('data-view', 'providers');
+
+  for (const view of ['models', 'images', 'videos', 'transcriptions', 'agents', 'skills']) {
+    const response = await page.goto(`/${view}`);
+    expect(response?.status()).toBe(200);
+    await expect(page.locator('.chat-shell')).toHaveAttribute('data-view', view);
+  }
+  await page.goto('http://localhost:15174/providers');
+  await expect(page.locator('.chat-shell')).toHaveAttribute('data-view', 'providers');
+  await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
+  await page.goto('http://localhost:15174/c/locked');
+  await expect(page.getByText('This conversation is not available in this browser or profile.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/c\/locked$/);
+});
+
+test('conversation URLs survive reload, switch through browser history, and stay profile-local', async ({ page, browser }) => {
+  await mockModels(page);
+  let release!: () => void;
+  const firstReply = new Promise<void>(resolve => { release = resolve; });
+  let calls = 0;
+  await page.route('**/gateway/api/chat', async route => {
+    const current = ++calls;
+    if (current === 1) await firstReply;
+    const events = [
+      { type: 'start', messageId: `route-reply-${current}` },
+      { type: 'text-start', id: 't' },
+      { type: 'text-delta', id: 't', delta: `Route reply ${current}` },
+      { type: 'text-end', id: 't' },
+      { type: 'finish', finishReason: 'stop' },
+    ];
+    await route.fulfill({ headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' },
+      body: events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n' });
+  });
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await expectChatModel(page);
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('First linked conversation');
+  await composer.press('Enter');
+  const conversationUrl = /\/c\/[0-9a-f-]{36}$/;
+  await expect(page).toHaveURL(conversationUrl);
+  const first = page.url();
+  await page.getByRole('button', { name: 'Images', exact: true }).click();
+  await expect(page).toHaveURL(/\/images$/);
+  release();
+  await page.goBack();
+  await expect(page).toHaveURL(first);
+  await expect(page.getByText('Route reply 1')).toBeVisible();
+
+  const newChat = page.getByRole('button', { name: 'New chat', exact: true });
+  await newChat.click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByText('Route reply 1')).toHaveCount(0);
+  await composer.fill('Second linked conversation');
+  await composer.press('Enter');
+  await expect(page.getByText('Route reply 2')).toBeVisible();
+  await expect(page).toHaveURL(conversationUrl);
+  const second = page.url();
+  expect(second).not.toBe(first);
+  await page.goBack();
+  await expect(page).toHaveURL(first);
+  await expect(page.getByText('First linked conversation')).toBeVisible();
+  await page.goForward();
+  await expect(page).toHaveURL(second);
+  await expect(page.getByText('Second linked conversation')).toBeVisible();
+
+  const response = await page.goto(first);
+  expect(response?.status()).toBe(200);
+  await expect(page.getByText('First linked conversation')).toBeVisible();
+  await expect(page.getByText('Second linked conversation')).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByText('First linked conversation')).toBeVisible();
+
+  const isolated = await browser.newPage();
+  try {
+    await isolated.goto(first);
+    await expect(isolated.getByText('This conversation is not available in this browser or profile.')).toBeVisible();
+    await expect(isolated.getByText('First linked conversation')).toHaveCount(0);
+    await expect(isolated).toHaveURL(first);
+  } finally { await isolated.close(); }
+
+  await page.getByRole('button', { name: 'Toggle navigation' }).click();
+  await page.getByRole('button', { name: 'Second linked conversation', exact: true }).click();
+  await expect(page).toHaveURL(second);
+  await expect(page.getByText('Route reply 2')).toBeVisible();
+  const more = page.getByRole('button', { name: 'More actions for Second linked conversation' });
+  await more.press('ArrowDown');
+  await page.getByRole('menuitem', { name: 'Delete', exact: true }).press('Enter');
+  await expect(page).toHaveURL(/\/$/);
+  await expect(composer).toBeVisible();
+  await expect(page.getByText('Second linked conversation')).toHaveCount(0);
+  await page.goto(second);
+  await expect(page.getByText('This conversation is not available in this browser or profile.')).toBeVisible();
+});
+
 test('local Skills tabs persist versions and chat progressively discloses approved instructions and resources', async ({ page }) => {
   const marker = 'Prefer a concise five-line digest.';
   const resource = 'List the team’s three accomplishments.';
