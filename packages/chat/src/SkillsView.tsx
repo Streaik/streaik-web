@@ -155,7 +155,7 @@ export function SkillsView({ store, gateway, remote, toolbar, menuContainer }: {
     <SkillTabs label={t('Skill sources')} onChange={setSourceTab} tabs={[
       { title: t('Local'), panel: !store.ready ? <p role="status">{t('Loading local skills…')}</p> : localCards.length
         ? <div className="catalog-grid agent-grid">{localCards}</div> : <p role="status">{t(term ? 'No matching skills.' : 'No local skills yet.')}</p> },
-      { title: t('Providers'), panel: !online ? <p>{t('Connect to a gateway to browse provider skills.')}</p> : <>
+      { title: t('Central'), panel: !online ? <p>{t('Connect to a gateway to browse provider skills.')}</p> : <>
         {(needsLoad || remote.busy) && <p role="status">{t('Loading provider skills…')}</p>}
         {remote.error !== undefined && <p role="alert" className="chat-error">{t(remote.error || 'Could not load provider skills.')}</p>}
         {remoteCards.length ? <div className="catalog-grid agent-grid">{remoteCards}</div> : !needsLoad && !remote.busy && remote.error === undefined

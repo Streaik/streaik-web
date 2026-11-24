@@ -13,7 +13,43 @@ test('uses Dutch skills headings and single-word composer menu labels', async ({
   const settings = page.getByRole('dialog', { name: 'Chatinstellingen', exact: true });
   await settings.getByRole('tab', { name: 'Skills', exact: true }).click();
   await expect(settings.getByRole('region', { name: 'Lokale skills', exact: true })).toBeVisible();
-  await expect(settings.getByRole('region', { name: 'Gehoste skills', exact: true })).toBeVisible();
+  await expect(settings.getByRole('region', { name: 'Centrale skills', exact: true })).toBeVisible();
+});
+
+test('translates the Dutch Skills overview and shows a simplified skill editor', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Skills', exact: true }).click();
+  await expect(page.getByText('Maak Agent Skills in je browser of download ze bij providers en zet ze over.', { exact: true })).toBeVisible();
+  const sources = page.getByRole('tablist', { name: 'Bronnen van skills', exact: true });
+  await expect(sources.getByRole('tab')).toHaveText(['Lokaal', 'Centraal']);
+
+  await page.getByRole('button', { name: 'Skill toevoegen', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Nieuw', exact: true }).click();
+  const editor = page.getByRole('dialog', { name: 'Skill maken', exact: true });
+  const general = editor.getByRole('tabpanel', { name: 'Algemeen', exact: true });
+  await expect(general.getByRole('textbox')).toHaveCount(5);
+  await expect(general.locator('details')).toHaveCount(0);
+  for (const [name, placeholder] of [
+    ['Naam', 'bijv. weekoverzicht'],
+    ['Beschrijving', 'Beschrijf wat de skill doet en wanneer je die gebruikt'],
+    ['Licentie', 'bijv. MIT (optioneel)'],
+    ['Compatibiliteit', 'bijv. internettoegang vereist (optioneel)'],
+    ['Toegestane tools', 'bijv. Read Search (optioneel)'],
+  ]) {
+    const field = general.getByRole('textbox', { name, exact: true });
+    await expect(field).toBeVisible();
+    await expect(field).toHaveAttribute('placeholder', placeholder);
+  }
+
+  await editor.getByRole('tab', { name: 'SKILL.md', exact: true }).click();
+  const instructions = editor.getByRole('tabpanel', { name: 'SKILL.md', exact: true });
+  await expect(instructions.getByRole('textbox', { name: 'Instructies', exact: true })).toBeVisible();
+  await expect(instructions.locator('p')).toHaveCount(0);
+  await editor.getByRole('tab', { name: 'Bestanden', exact: true }).click();
+  const files = editor.getByRole('tabpanel', { name: 'Bestanden', exact: true });
+  await expect(files.getByRole('textbox', { name: 'Bestandspad', exact: true })).toBeVisible();
+  await expect(files.locator('p')).toHaveCount(0);
+  await expect(editor.getByRole('button', { name: 'Maken', exact: true })).toBeVisible();
 });
 
 test('detects Dutch, switches to Spanish without losing drafts, and remembers the language', async ({ page }) => {

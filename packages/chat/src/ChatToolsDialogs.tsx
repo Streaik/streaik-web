@@ -95,7 +95,7 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hasHistor
         {localSkills.notice && <p role="status">{t(localSkills.notice)}</p>}
       </section>
       <section className="chat-tool-card" aria-labelledby={`${id}-remote-skills`}>
-        <h3 id={`${id}-remote-skills`}>{t('Hosted skills')}</h3>
+        <h3 id={`${id}-remote-skills`}>{t('Central skills')}</h3>
         {gateway && !online && <p>{t('Connect to a gateway to browse provider skills.')}</p>}
         {gateway && online && <>
           {skills.length > 0 && <div className="chat-tool-switches">

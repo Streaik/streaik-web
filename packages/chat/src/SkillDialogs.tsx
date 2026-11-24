@@ -58,7 +58,7 @@ export function SkillEditor({ skill, onSave, onClose }: { skill?: LocalSkill; on
   const existing = skill && defaultSkillVersion(skill);
   const [fields, setFields] = useState(() => ({ name: existing?.metadata.name ?? '', description: existing?.metadata.description ?? '',
     license: existing?.metadata.license ?? '', compatibility: existing?.metadata.compatibility ?? '',
-    allowedTools: existing?.metadata['allowed-tools'] ?? '', metadata: existing?.metadata.metadata ? JSON.stringify(existing.metadata.metadata, null, 2) : '' }));
+    allowedTools: existing?.metadata['allowed-tools'] ?? '' }));
   const [instructions, setInstructions] = useState(existing?.instructions ?? '');
   const [files, setFiles] = useState<SkillFile[]>(existing?.files ?? []);
   const [file, setFile] = useState<File>();
@@ -71,7 +71,7 @@ export function SkillEditor({ skill, onSave, onClose }: { skill?: LocalSkill; on
     return validateSkillBundle({ metadata: { name: fields.name.trim(), description: fields.description.trim(),
       ...(fields.license.trim() && { license: fields.license.trim() }), ...(fields.compatibility.trim() && { compatibility: fields.compatibility.trim() }),
       ...(fields.allowedTools.trim() && { 'allowed-tools': fields.allowedTools.trim() }),
-      ...(fields.metadata.trim() && { metadata: JSON.parse(fields.metadata) }) }, instructions: instructions.trim(), files: nextFiles });
+      metadata: existing?.metadata.metadata }, instructions: instructions.trim(), files: nextFiles });
   }
 
   function addFile() {
@@ -92,33 +92,34 @@ export function SkillEditor({ skill, onSave, onClose }: { skill?: LocalSkill; on
     }}>
       <SkillTabs label={t('Skill editor')} tabs={[
         { title: t('General'), panel: <div className="skill-fields">
-          <label>{t('Name')}<input value={fields.name} maxLength={64} onChange={event => field('name', event.currentTarget.value)} /></label>
-          <label>{t('Description')}<textarea rows={3} maxLength={1024} value={fields.description} onChange={event => field('description', event.currentTarget.value)} /></label>
-          <details><summary>{t('Optional metadata')}</summary><div className="skill-fields">
-            <label>{t('License')}<input value={fields.license} onChange={event => field('license', event.currentTarget.value)} /></label>
-            <label>{t('Compatibility')}<input value={fields.compatibility} maxLength={500} onChange={event => field('compatibility', event.currentTarget.value)} /></label>
-            <label>{t('Allowed tools')}<input value={fields.allowedTools} onChange={event => field('allowedTools', event.currentTarget.value)} /></label>
-            <label>{t('Metadata (JSON)')}<textarea rows={3} value={fields.metadata} onChange={event => field('metadata', event.currentTarget.value)} /></label>
-          </div></details>
+          <label>{t('Name')}<input value={fields.name} maxLength={64} placeholder={t('e.g. weekly-digest')}
+            onChange={event => field('name', event.currentTarget.value)} /></label>
+          <label>{t('Description')}<textarea rows={3} maxLength={1024} value={fields.description} placeholder={t('Describe what the skill does and when to use it')}
+            onChange={event => field('description', event.currentTarget.value)} /></label>
+          <label>{t('License')}<input value={fields.license} placeholder={t('e.g. MIT (optional)')}
+            onChange={event => field('license', event.currentTarget.value)} /></label>
+          <label>{t('Compatibility')}<input value={fields.compatibility} maxLength={500} placeholder={t('e.g. Requires internet access (optional)')}
+            onChange={event => field('compatibility', event.currentTarget.value)} /></label>
+          <label>{t('Allowed tools')}<input value={fields.allowedTools} placeholder={t('e.g. Read Search (optional)')}
+            onChange={event => field('allowedTools', event.currentTarget.value)} /></label>
         </div> },
-        { title: 'SKILL.md', panel: <div className="skill-fields"><label>{t('Instructions (Markdown)')}
-          <textarea className="skill-markdown-input" rows={13} value={instructions} onChange={event => setInstructions(event.currentTarget.value)} /></label>
-          <p className="agent-hint">{t('The fields on the General tab become YAML frontmatter.')}</p></div> },
+        { title: 'SKILL.md', panel: <div className="skill-fields"><label>{t('Instructions')}
+          <textarea className="skill-markdown-input" rows={13} value={instructions} onChange={event => setInstructions(event.currentTarget.value)} />
+        </label></div> },
         { title: t('Files'), panel: <div className="skill-fields">
-          <p className="agent-hint">{t('Add resources by relative path, such as references/guide.md. Skills do not execute bundled files.')}</p>
           {files.length > 0 && <ul className="skill-file-list">{files.map(item => <li key={item.path}><code>{item.path}</code>
-            <Button type="button" variant="subtle" aria-label={t('Remove {{path}}', { path: item.path })}
+            <Button type="button" variant="subtle" aria-label={t('Remove {{name}}', { name: item.path })}
               onClick={() => setFiles(files.filter(file => file.path !== item.path))}><ChatIcon name="trash" /></Button></li>)}</ul>}
           <label>{t('Choose resource file')}<input ref={fileInput} type="file" onChange={event => {
             const next = event.currentTarget.files?.[0]; setFile(next); setPath(next?.name ?? '');
           }} /></label>
-          <label>{t('Resource path')}<input value={path} onChange={event => setPath(event.currentTarget.value)} /></label>
+          <label>{t('Resource path')}<input value={path} placeholder={t('e.g. references/guide.md')} onChange={event => setPath(event.currentTarget.value)} /></label>
           <Button type="button" disabled={!file} onClick={addFile}>{t('Add or replace file')}</Button>
         </div> },
       ]} />
       {error && <p className="chat-error agent-save-error" role="alert">{t(error)}</p>}
       <div className="agent-actions"><Button type="button" onClick={onClose}>{t('Cancel')}</Button>
-        <Button type="submit" variant="primary">{t(skill ? 'Save new version' : 'Create skill')}</Button></div>
+        <Button type="submit" variant="primary">{t(skill ? 'Save' : 'Create')}</Button></div>
     </form>
   </SkillDialog>;
 }
