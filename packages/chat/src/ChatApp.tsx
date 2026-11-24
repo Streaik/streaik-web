@@ -7,6 +7,7 @@ import { lazy, memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useS
 import type { ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { ChatComposer, AttachmentChip } from './ChatComposer';
+import type { ComposerBadge } from './ChatComposer';
 import { httpLink } from './chatAttachments';
 import { MessageActions } from './MessageActions';
 import { MessageClock, MessageTime } from './MessageTime';
@@ -30,11 +31,12 @@ import { loadChatPreferences, saveChatPreferences } from './chatPreferences';
 import type { ChatPreferences } from './chatPreferences';
 import { buildRequestContext, requestContextText, withRequestContext } from './chatContext';
 import type { RequestContext } from './chatContext';
-import { activeChatTools, filterLocalToolReplay, runLocalTool, toolPartName } from './localPlugins';
+import { activeChatTools, filterLocalToolReplay, localPlugins, runLocalTool, toolPartName } from './localPlugins';
 import type { ChatTool, ToolDefinition } from './localPlugins';
 import { resolveSkillTool } from './skillTools';
 import type { TurnRemoteSkills } from './skillTools';
 import type { LocalSkill } from './skillBundles';
+import { defaultSkillVersion } from './skillBundles';
 import { SkillsView } from './SkillsView';
 import { useLocalSkills } from './useLocalSkills';
 import type { LocalSkills } from './useLocalSkills';
@@ -45,8 +47,9 @@ import type { AgentsConfig } from './agentCatalog';
 import { agentModels as configuredAgentModels } from './agentDefinition';
 import { conversationOpeningText, deleteConversation, listConversations, newConversation, newestFirst, saveConversation } from './conversations';
 import type { Conversation } from './conversations';
-import { callMcpTool, mcpFailure } from './mcp';
+import { callMcpTool, mcpFailure, readMcpResource } from './mcp';
 import type { McpOptions } from './mcp';
+import { mcpResourceCatalog, readResourceTool, resolveResourceRead } from './mcpChatContext';
 import { McpServerEditor, McpServersView, ModelContextDialog } from './McpServersView';
 import type { McpEditorTarget } from './McpServersView';
 import { useMcpSelection, useMcpServers } from './useMcpServers';
@@ -407,9 +410,9 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
           model?: string; route?: ChatRoute; decision?: ModelDecision; context?: RequestContext; tools?: ToolDefinition[];
         };
         let model = body.model;
-        const useGateway = route?.mode !== 'direct';
         const enabledSkillIds = new Set(context?.skills?.availableSkills.skills.map(({ id }) => id));
-        request = { ...request, body, messages: filterLocalToolReplay(request.messages, useGateway ? body.tools ?? [] : [], isApiChat(route), enabledSkillIds) };
+        const resourceServers = new Set(context?.mcp?.mcpResourceCatalog.servers.map(({ serverId }) => serverId));
+        request = { ...request, body, messages: filterLocalToolReplay(request.messages, body.tools ?? [], isApiChat(route), enabledSkillIds, resourceServers) };
         if (route?.mode === 'gateway' && decision) {
           const { endpoint, ...choice } = decision;
           const input = chatDecisionInput(request.messages);
@@ -437,7 +440,9 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
           return withReplyMetadata(stream, model, previous);
         }
         if (route?.mode === 'direct' && direct && nativeChatEndpoints.includes(route.endpoint)) {
-          return withReplyMetadata(await direct.chatTransport(route.endpoint).sendMessages(request), model, previous);
+          const stream = await direct.chatTransport(route.endpoint).sendMessages({ ...request,
+            body: { ...request.body, ...(context?.mcp && { mcpInstructions: requestContextText(context) }) } });
+          return withReplyMetadata(stream, model, previous);
         }
         throw new GatewayError('The selected chat route is unavailable.');
       },
@@ -473,9 +478,26 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
     if (restoringSkills && !skillsBusy) loadSkills(skillCursor);
   }, [restoringSkills, skillsBusy, loadSkills, skillCursor]);
   const hasSkills = enabledRemoteSkills.length > 0 || localSkills.skills.some(({ enabled }) => enabled);
-  const enabledTools = activeChatTools(route, preferences.plugins, hasHistory, mcpSelection.tools, hasSkills);
-  const context = useMemo(() => gatewayRoute ? buildRequestContext(appName, language, darkMode, localSkills.skills, enabledRemoteSkills) : undefined,
+  const mcpCatalog = mcpResourceCatalog(mcpSelection.connected);
+  const enabledTools = activeChatTools(route, preferences.plugins, hasHistory, mcpSelection.tools, hasSkills, mcpCatalog ? readResourceTool : undefined);
+  const baseContext = useMemo(() => gatewayRoute ? buildRequestContext(appName, language, darkMode, localSkills.skills, enabledRemoteSkills) : undefined,
     [gatewayRoute, appName, language, darkMode, localSkills.skills, enabledRemoteSkills]);
+  const context = mcpCatalog ? { ...baseContext, mcp: mcpCatalog } : baseContext;
+  const badges: ComposerBadge[] = [
+    ...mcpSelection.connected.map(({ record }) => ({ key: `mcp:${record.id}`, label: record.title, icon: 'providers' as const,
+      remove: () => mcpSelection.set(record, false) })),
+    ...localPlugins.filter(plugin => enabledTools.some(tool => tool.source === 'local' && tool.plugin === plugin)).map(plugin => ({
+      key: `tool:${plugin.id}`, label: t(plugin.label), icon: 'tool' as const,
+      remove: () => onPreferences({ ...preferences, plugins: preferences.plugins.filter(id => id !== plugin.id) }),
+    })),
+    ...(gatewayRoute ? localSkills.skills.filter(skill => skill.enabled).map(skill => ({ key: `skill:${skill.id}`,
+      label: defaultSkillVersion(skill).metadata.name, icon: 'docs' as const,
+      remove: () => localSkills.update(items => items.map(item => item.id === skill.id ? { ...item, enabled: false } : item)),
+    })) : []),
+    ...enabledRemoteSkills.map(skill => ({ key: `remote-skill:${skill.id}`, label: skill.name, icon: 'docs' as const,
+      remove: () => onPreferences({ ...preferences, remoteSkillIds: preferences.remoteSkillIds.filter(id => id !== skill.id) }),
+    })),
+  ];
   const last = messages.at(-1);
   const parts = last?.role === 'assistant' ? last.parts : [];
   const toolParts = parts.flatMap(part => {
@@ -513,7 +535,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
       }
       return;
     }
-    if (pending?.part.state === 'input-available' && (pending.tool?.source === 'skill' || pending.tool?.source === 'mcp' ||
+    if (pending?.part.state === 'input-available' && (pending.tool?.source === 'skill' || pending.tool?.source === 'mcp' || pending.tool?.source === 'mcp-resource' ||
         (pending.tool?.source === 'local' && !pending.tool.plugin.approval))) {
       if (stagedResult) return;
       if (turn.automatic.calls >= 8) {
@@ -521,7 +543,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
         setTurn(undefined);
       } else {
         turn.automatic.calls++;
-        void completeTool(pending.part, pending.tool, pending.tool.source === 'mcp' ? 'stage' : 'run');
+        void completeTool(pending.part, pending.tool, pending.tool.source === 'skill' || pending.tool.source === 'local' ? 'run' : 'stage');
       }
       return;
     }
@@ -544,6 +566,16 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
           : runLocalTool(tool, part.input, { catalog: turn.catalog, history: tool.plugin.requiresHistory ? readHistory?.() ?? [] : [] });
       } else if (tool.source === 'skill') {
         output = await resolveSkillTool(tool.definition.name, part.input, turn.skills, turn.remoteSkills, controller.signal);
+      } else if (tool.source === 'mcp-resource') {
+        const target = resolveResourceRead(mcpSelection.connected, part.input);
+        const enabled = target && turn.context?.mcp?.mcpResourceCatalog.servers.some(server => server.serverId === target.record.id);
+        const server = enabled ? mcpServers.connection(target.record) : undefined;
+        if (!target || !server) output = 'Choose a connected MCP server and an absolute resource URI.';
+        else try {
+          const result = await readMcpResource(server, target.uri, controller.signal);
+          output = result.text || (result.images.length ? 'MCP returned an image resource for the user.' : 'The resource has no supported content.');
+          images = result.images;
+        } catch (error) { output = mcpFailure(error); }
       } else {
         if (!mcpServers.available) output = 'MCP is unavailable.';
         else try {
@@ -573,7 +605,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
     const { part, tool } = pending;
     if (turn.resolved.has(part.toolCallId)) return;
     if (!isApiChat(turn.route)) {
-      if (tool?.source === 'mcp') {
+      if (tool?.source === 'mcp' || tool?.source === 'mcp-resource') {
         if (!stagedResult || part.state !== 'input-available') return;
         turn.resolved.add(part.toolCallId);
         setStaged(undefined);
@@ -718,10 +750,11 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
            </section>}
           {toolNotice && <p className="chat-notice" role="status">{t(toolNotice)}</p>}
            <div className="chat-progress" role="status">{(progress || restoringSkills || mcpSelection.loading) && <><span className="chat-spinner" aria-hidden="true" />
-             {progress || (restoringSkills ? t('Loading provider skills…') : t('Loading MCP tools…'))}</>}</div>
+             {progress || (restoringSkills ? t('Loading provider skills…') : t('Connecting to MCP servers…'))}</>}</div>
           <ChatComposer busy={busy || (status === 'ready' && toolParts.length > 0)} canSend={canSend} onStop={stopTurn}
-            convert={preferences.convertAttachmentsToText}
-            mcp={mcpServers.available ? { count: mcpSelection.entries.length, disabled: routesLocked, open: () => setModelContextOpen(true) } : undefined}
+            convert={preferences.convertAttachmentsToText} badges={badges}
+            mcp={view === 'chat' && mcpServers.available ? { count: mcpSelection.entries.length, disabled: routesLocked, open: () => setModelContextOpen(true),
+              servers: mcpSelection.connected, connect: mcpServers.connection } : undefined}
             onChatSettings={() => chatSettings.current?.showModal()} onViewContext={() => contextDialog.current?.showModal()}
             onSend={(parts) => {
               if (!model || !canSend) return;

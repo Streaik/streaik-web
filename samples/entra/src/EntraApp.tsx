@@ -19,7 +19,7 @@ export function EntraApp({ appName, base, auth, mcpConfig }: { appName: string; 
   const [mcp] = useState<McpOptions | undefined>(() => {
     if (!mcpConfig?.base || !auth.hasMcpScope) return mcpConfig;
     const headersFor = createEntraMcpHeaders(mcpConfig.base, auth, auth.clientId);
-    return { ...mcpConfig, browseCapabilities: true, headersForRemote: (headers, endpoint) => headers.length === 0
+    return { ...mcpConfig, headersForRemote: (headers, endpoint) => headers.length === 0
       ? { ready: !!auth.getAccount(), headers: (signal) => headersFor(endpoint, signal) } : undefined };
   });
 

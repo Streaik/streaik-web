@@ -818,6 +818,135 @@ function sse(text: string, turn: number, answerModel = model) {
   ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n';
 }
 
+for (const approved of [true, false]) test(`MCP composer discovers resources and prompts and ${approved ? 'shares' : 'withholds'} read_resource results`, async ({ page }) => {
+  await mockModels(page);
+  const serverName = 'Composer fixture';
+  const reads: string[] = [];
+  const assistantUri = 'fixture://pages/assistant';
+  const userUri = 'fixture://pages/user';
+  const privateText = 'Content from the model-requested resource';
+  const promptText = 'Prompt about waterfalls';
+  const templateText = 'Attached template contents';
+  const complete = { resultType: 'complete', ttlMs: 0, cacheScope: 'private' };
+  await page.route('**/mcp-context-fixture', async route => {
+    const request = route.request();
+    expect(await request.headerValue('Authorization')).toBe('Bearer test-mcp-composer');
+    const { id, method, params } = request.postDataJSON();
+    const reply = (result: unknown) => route.fulfill({ json: { jsonrpc: '2.0', id, result } });
+    if (method === 'server/discover') return reply({ supportedVersions: ['2026-07-28'], capabilities: { resources: {}, prompts: {} } });
+    if (method === 'resources/list') return reply(params.cursor === 'page-two' ? { ...complete, resources: [
+      { name: 'User guide', uri: userUri, annotations: { audience: ['user'] } },
+    ] } : { ...complete, nextCursor: 'page-two', resources: [
+      { name: 'Shared guide', uri: 'fixture://pages/shared' }, { name: 'Assistant guide', uri: assistantUri, annotations: { audience: ['assistant'] } },
+    ] });
+    if (method === 'resources/templates/list') return reply({ ...complete, resourceTemplates: [
+      { name: 'Project template', uriTemplate: 'fixture://project/{slug}', annotations: { audience: ['user'] } },
+    ] });
+    if (method === 'prompts/list') return reply({ ...complete, prompts: [{ name: 'make-prompt', title: 'Topic prompt', arguments: [{ name: 'topic', required: true }] }] });
+    if (method === 'prompts/get') {
+      expect(params).toMatchObject({ name: 'make-prompt', arguments: { topic: 'waterfalls' } });
+      return reply({ ...complete, messages: [{ role: 'user', content: { type: 'text', text: promptText } }] });
+    }
+    if (method === 'resources/read') {
+      reads.push(params.uri);
+      return reply({ ...complete, contents: [{ uri: params.uri, text: params.uri === assistantUri ? privateText : templateText }] });
+    }
+    throw new Error(`Unexpected MCP method: ${method}`);
+  });
+  let requests = 0;
+  await page.route('**/gateway/api/chat', async route => {
+    requests++;
+    const body = route.request().postDataJSON();
+    const wire = JSON.stringify(body);
+    const headers = { 'x-vercel-ai-ui-message-stream': 'v1', 'content-type': 'text/event-stream' };
+    if (requests === 1) {
+      expect(body.tools.map((tool: { name: string }) => tool.name)).toContain('read_resource');
+      expect(body.clientToolResultApproval).toBe(true);
+      expect(wire).toContain(promptText);
+      expect(wire).toContain(templateText);
+      expect(wire).not.toContain(privateText);
+      expect(wire).not.toContain(userUri);
+      expect(wire).not.toContain('test-mcp-composer');
+      const systemParts = body.messages[0].parts.map((part: { text: string }) => JSON.parse(part.text));
+      const server = systemParts.find((part: { mcpResourceCatalog?: unknown }) => part.mcpResourceCatalog).mcpResourceCatalog.servers[0];
+      expect(server.resources.map((item: { uri: string }) => item.uri)).toEqual(['fixture://pages/shared', assistantUri]);
+      expect(server.resourceTemplates).toEqual([]);
+      const chunks = [
+        { type: 'start', messageId: 'read-resource-answer' }, { type: 'start-step' },
+        { type: 'tool-input-available', toolCallId: 'read-fixture', toolName: 'read_resource', dynamic: true,
+          input: { serverId: server.serverId, uri: assistantUri } },
+        { type: 'tool-approval-request', toolCallId: 'read-fixture', approvalId: 'review-resource', signature: 'fixture-signature' },
+        { type: 'finish-step' }, { type: 'finish', finishReason: 'tool-calls' },
+      ];
+      await route.fulfill({ headers, body: chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n' });
+    } else {
+      expect(requests).toBe(2);
+      expect(wire.includes(privateText)).toBe(approved);
+      expect(wire).toContain('fixture-signature');
+      expect(wire).not.toContain('test-mcp-composer');
+      await route.fulfill({ headers, body: sse('Resource turn complete.', 2).replace(/^data: [^\n]+\n\n/, '') });
+    }
+  });
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await expectChatModel(page);
+  const openMenu = () => page.getByRole('button', { name: 'Add to message', exact: true }).click();
+  const openContext = async () => {
+    await openMenu();
+    await page.getByRole('menuitem', { name: 'Model Context', exact: true }).click();
+    return page.getByRole('dialog', { name: 'Model Context', exact: true });
+  };
+  await openMenu();
+  await expect(page.getByRole('menuitem', { name: 'Prompts', exact: true })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  const context = await openContext();
+  await context.getByRole('tab', { name: 'Installed', exact: true }).click();
+  await context.getByRole('button', { name: 'Add by URL' }).click();
+  const editor = page.getByRole('dialog', { name: 'Add MCP server' });
+  await editor.getByLabel('Server name').fill(serverName);
+  await editor.getByLabel('Server URL').fill(new URL('/mcp-context-fixture', page.url()).href);
+  await editor.getByRole('button', { name: 'Add header' }).click();
+  await editor.getByLabel('Header name').fill('Authorization');
+  await editor.getByLabel('Header value').fill('Bearer test-mcp-composer');
+  await editor.getByRole('button', { name: 'Save server' }).click();
+  await context.getByRole('switch', { name: serverName }).check();
+  await expect(context.getByText('Connected', { exact: true })).toBeVisible();
+  await context.getByRole('button', { name: 'Close', exact: true }).click();
+  const badges = page.getByRole('list', { name: 'Active chat context' });
+  await expect(badges.getByText(serverName)).toBeVisible();
+  expect(reads).toEqual([]);
+
+  await openMenu();
+  await page.getByRole('menuitem', { name: 'Resources', exact: true }).click();
+  const resources = page.getByRole('dialog', { name: 'Resources', exact: true });
+  await expect(resources.getByRole('button', { name: /Shared guide/ })).toBeVisible();
+  await expect(resources.getByRole('button', { name: /User guide/ })).toBeVisible();
+  await expect(resources.getByRole('button', { name: /Assistant guide/ })).toHaveCount(0);
+  await resources.getByRole('button', { name: /Project template/ }).click();
+  await resources.getByLabel('slug', { exact: true }).fill('road map');
+  await resources.getByRole('button', { name: 'Add resource', exact: true }).click();
+  await expect(page.getByRole('list', { name: 'Attachments' }).getByText('Project template')).toBeVisible();
+  expect(requests).toBe(0);
+
+  await openMenu();
+  await page.getByRole('menuitem', { name: 'Prompts', exact: true }).click();
+  const prompts = page.getByRole('dialog', { name: 'Prompts', exact: true });
+  await prompts.getByRole('button', { name: /Topic prompt/ }).click();
+  await prompts.getByLabel('topic', { exact: true }).fill('waterfalls');
+  await prompts.getByRole('button', { name: 'Run prompt', exact: true }).click();
+  const review = page.getByRole('dialog', { name: 'Review tool result' });
+  await expect(review.getByRole('tabpanel', { name: 'Output' })).toContainText(privateText);
+  expect(requests).toBe(1);
+  expect(reads).toEqual(['fixture://project/road%20map', assistantUri]);
+  await review.getByRole('button', { name: approved ? 'Approve and share' : 'Decline', exact: true }).click();
+  await expect(page.getByText('Resource turn complete.', { exact: true })).toBeVisible();
+  await badges.getByRole('button', { name: `Remove ${serverName}` }).click();
+  await expect(badges).toHaveCount(0);
+  await openMenu();
+  await expect(page.getByRole('menuitem', { name: 'Prompts', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('menuitem', { name: 'Resources', exact: true })).toHaveCount(0);
+});
+
 test('Gateway chat settings share context and replay catalog and approved text-only history tools once', async ({ page }) => {
   await mockModels(page);
   const requests: { messages: { role: string; parts: { text?: string; toolCallId?: string; output?: unknown }[] }[];
@@ -850,14 +979,17 @@ test('Gateway chat settings share context and replay catalog and approved text-o
   await expect(page.getByText('Chat reply 1', { exact: true })).toBeVisible();
   expect(requests[0].tools).toBeUndefined();
   await page.getByRole('button', { name: 'New chat', exact: true }).click();
+  await expect(page.getByText('Chat reply 1', { exact: true })).toHaveCount(0);
 
   const settingsButton = page.getByRole('button', { name: 'Chat settings', exact: true });
   const settings = page.getByRole('dialog', { name: 'Chat settings', exact: true });
   const contextButton = page.getByRole('button', { name: 'View context', exact: true });
   await expect(settingsButton).toHaveText('');
   await expect(contextButton).toHaveText('');
+  const sendButton = page.getByRole('button', { name: 'Send', exact: true });
+  await expect(sendButton).toBeVisible();
   const contextBox = (await contextButton.boundingBox())!;
-  const sendBox = (await page.getByRole('button', { name: 'Send', exact: true }).boundingBox())!;
+  const sendBox = (await sendButton.boundingBox())!;
   expect(sendBox.x - contextBox.x - contextBox.width).toBeLessThan(12);
   expect(sendBox.x).toBeGreaterThan(contextBox.x);
   await settingsButton.click();
@@ -875,6 +1007,9 @@ test('Gateway chat settings share context and replay catalog and approved text-o
   await expect(history).not.toBeChecked();
   await ai.check(); await history.check();
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  const badges = page.getByRole('list', { name: 'Active chat context' });
+  await expect(badges.getByText('Artificial Intelligence', { exact: true })).toBeVisible();
+  await expect(badges.getByText('Chat History', { exact: true })).toBeVisible();
 
   await contextButton.click();
   const context = page.getByRole('dialog', { name: 'Context', exact: true });

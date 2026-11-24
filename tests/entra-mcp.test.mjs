@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createEntraMcpHeaders } from '../samples/entra/src/mcpAuth.ts';
 import { readMcpScopes } from '../samples/entra/src/auth.ts';
-import { discoverMcpCapabilities, expandMcpResource, filterMcpCatalog, preferredMcpRemote, readMcpCapability } from '../packages/chat/src/mcp.ts';
+import { discoverMcpServer, expandMcpResource, filterMcpCatalog, preferredMcpRemote, readMcpResource } from '../packages/chat/src/mcp.ts';
 import { byokRegistryRemote } from '../samples/shared/mcpConfig.ts';
 
 const base = new URL('https://mcp.example.test/team/entra/');
@@ -135,8 +135,9 @@ test('the web MCP client lists and reads delegated data with the resource-bound 
   const headers = createEntraMcpHeaders(base, auth, 'spa-client-id');
   const server = { id: 'calendar', title: 'Calendar', endpoint, requestHeaders: signal => headers(endpoint, signal) };
   const signal = new AbortController().signal;
-  assert.deepEqual(await discoverMcpCapabilities(server, signal), { resources: [], resourceTemplates: [template], prompts: [] });
-  assert.equal(await readMcpCapability(server, { uri: resource }, signal), 'calendar data');
+  assert.deepEqual(await discoverMcpServer(server, signal), { tools: [], hasResources: true, hasPrompts: false,
+    resources: [], resourceTemplates: [template], prompts: [], promptsFailed: false });
+  assert.deepEqual(await readMcpResource(server, resource, signal), { text: 'calendar data', images: [] });
   assert.deepEqual(calls, ['images']);
   assert.deepEqual(methods, ['server/discover', 'resources/list', 'resources/templates/list', 'server/discover', 'resources/read']);
 });

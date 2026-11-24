@@ -4,9 +4,8 @@ import type { FormEvent, ReactNode } from 'react';
 import { ChatIcon } from './ChatIcon';
 import { DialogTabs } from './ChatToolsDialogs';
 import { useAppTranslation } from './i18n';
-import { McpCapabilities } from './McpCapabilities';
 import { fetchMcpCatalog, filterMcpCatalog, mcpAppAuth, preferredMcpRemote } from './mcp';
-import type { McpCatalogServer, McpOptions, McpServer } from './mcp';
+import type { McpCatalogServer, McpOptions } from './mcp';
 import { mcpEndpoint, mcpHeaderFields, resolveMcpHeaders } from './mcpConfiguration';
 import type { McpHeaderRow, McpServerRecord } from './mcpConfiguration';
 import type { McpSelection, McpServers } from './useMcpServers';
@@ -114,11 +113,10 @@ function Configure({ record, disabled, onConfigure }: { record: McpServerRecord;
 
 type ServerSectionsProps = { store: McpServers; options?: McpOptions; locked: boolean; onEdit: (target: McpEditorTarget) => void };
 
-function InstalledServers({ store, options, selection, locked, onEdit }: ServerSectionsProps & { selection?: McpSelection }) {
+function InstalledServers({ store, selection, locked, onEdit }: ServerSectionsProps & { selection?: McpSelection }) {
   const { t } = useAppTranslation();
   const id = useId();
   const [error, setError] = useState(false);
-  const [browse, setBrowse] = useState<McpServer>();
   const disabled = locked || !store.available;
   const addLabel = t('Add by URL');
   return <section aria-label={t('Installed servers')}>
@@ -132,18 +130,16 @@ function InstalledServers({ store, options, selection, locked, onEdit }: ServerS
         const entry = selection?.entries.find(entry => entry.record === record);
          const connection = store.connection(record);
          const ready = !!connection;
-        const status = !ready ? t('Credentials needed') : entry?.state === 'loading' ? t('Loading tools…')
+        const status = !ready ? t('Credentials needed') : entry?.state === 'loading' ? t('Connecting…')
           : entry?.state === 'error' ? t('Could not connect. Turn the server off and back on to retry.')
-          : entry?.state === 'ready' ? entry.tools?.length ? t('{{count, number}} tools available', { count: entry.tools.length })
-            : t('No compatible tools') : undefined;
+          : entry?.state === 'ready' ? entry.discovery.tools.length ? t('{{count, number}} tools available', { count: entry.discovery.tools.length })
+            : entry.discovery.hasPrompts || entry.discovery.hasResources ? t('Connected') : t('No compatible tools') : undefined;
         const description = `${id}-${record.id}`;
         return <li className="mcp-row" key={record.id}>
           {selection ? <label className="mcp-toggle"><input type="checkbox" role="switch" checked={!!entry} aria-describedby={status ? description : undefined}
             disabled={!ready || disabled} onChange={event => selection.set(record, event.target.checked)} /><span>{record.title}</span></label>
             : <strong>{record.title}</strong>}
           <div className="mcp-actions">
-            {options?.browseCapabilities && record.auth === 'app' && connection && <Button type="button" disabled={disabled}
-              aria-label={t('Browse resources for {{name}}', { name: record.title })} onClick={() => setBrowse(connection)}>{t('Resources and prompts')}</Button>}
             <Configure record={record} disabled={disabled} onConfigure={() => onEdit({ record })} />
             <Tooltip content={t('Remove {{name}}', { name: record.title })}><Button className="chat-composer-icon" variant="subtle" type="button" disabled={disabled}
               aria-label={t('Remove {{name}}', { name: record.title })} onClick={() => {
@@ -155,7 +151,6 @@ function InstalledServers({ store, options, selection, locked, onEdit }: ServerS
           {status && <small id={description} role="status">{status}</small>}
         </li>;
       })}</ul> : <p>{t('No MCP servers installed yet.')}</p>}
-    {browse && <McpDialog title={browse.title} close={() => setBrowse(undefined)} wide>{() => <McpCapabilities server={browse} />}</McpDialog>}
   </section>;
 }
 

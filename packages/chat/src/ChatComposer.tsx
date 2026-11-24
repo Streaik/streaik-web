@@ -5,19 +5,27 @@ import { ChatIcon } from './ChatIcon';
 import { attachmentByteLimit, attachmentCountLimit, composeAttachmentParts, fileMediaType, httpLink, isTextAttachment, linkMediaType } from './chatAttachments';
 import type { AttachmentPart, DraftAttachment } from './chatAttachments';
 import { useAppTranslation } from './i18n';
+import { hasMcpPickerResources, McpComposerPicker } from './McpComposerPicker';
+import type { ConnectedMcpServer } from './mcpChatContext';
+import type { McpOutput, McpServer } from './mcp';
+import type { McpServerRecord } from './mcpConfiguration';
 
-export function AttachmentChip({ name, url, note, children }: { name: string; url?: URL; note?: string; children?: ReactNode }) {
+export function AttachmentChip({ name, url, note, icon, children }: { name: string; url?: URL; note?: string; icon?: Parameters<typeof ChatIcon>[0]['name']; children?: ReactNode }) {
   return <Tooltip content={url?.href ?? name} visualOnly><span className="chat-attachment">
-    <ChatIcon name={url ? 'link' : 'attachment'} />
+    <ChatIcon name={icon ?? (url ? 'link' : 'attachment')} />
     {url ? <a href={url.href} target="_blank" rel="noopener noreferrer">{name}</a> : <span className="chat-attachment-name">{name}</span>}
     {note && <small>{note}</small>}{children}
   </span></Tooltip>;
 }
 
 type ImageDraft = { prompt: string; attachments: DraftAttachment[] };
+export type ComposerBadge = { key: string; label: string; icon: 'providers' | 'tool' | 'docs'; remove: () => void };
+type DraftMcpResource = { record: McpServerRecord; uri: string; label: string; parts: AttachmentPart[]; size: number };
+type ComposerMcp = { count: number; disabled: boolean; open: () => void; servers: readonly ConnectedMcpServer[];
+  connect: (record: McpServerRecord) => McpServer | undefined };
 type ComposerProps = { busy: boolean; canSend: boolean } & (
   { image?: undefined; video?: undefined; convert: boolean; onSend: (parts: AttachmentPart[]) => void; onChatSettings: () => void; onViewContext: () => void;
-    mcp?: { count: number; disabled: boolean; open: () => void }; onStop: () => void } |
+    mcp?: ComposerMcp; badges?: readonly ComposerBadge[]; onStop: () => void } |
   { image: { draft: ImageDraft; onChange: (value: ImageDraft) => void; onSend: () => void; onSettings: () => void }; video?: undefined; onStop: () => void } |
   { image?: undefined; video: { prompt: string; onChange: (prompt: string) => void; onSend: () => void }; onStop?: undefined }
 );
@@ -28,12 +36,21 @@ export function ChatComposer(props: ComposerProps) {
   const convert = !image && !video && props.convert;
   const { t } = useAppTranslation();
   const mcp = !image && !video ? props.mcp : undefined;
+  const badges = !image && !video ? props.badges : undefined;
   const plusLabel = t(mcp ? 'Add to message' : 'Add attachments');
   const id = useId();
   const [localDraft, setLocalDraft] = useState('');
   const [localAttachments, setLocalAttachments] = useState<DraftAttachment[]>([]);
+  const [mcpResources, setMcpResources] = useState<DraftMcpResource[]>([]);
+  const [mcpPicker, setMcpPicker] = useState<'prompts' | 'resources'>();
+  const resourceAttached = (item: DraftMcpResource, context?: ComposerMcp) => context?.servers.some(({ record }) => record === item.record) === true;
+  const resources = mcpResources.filter(item => resourceAttached(item, mcp));
+  if (mcp && resources.length !== mcpResources.length) setMcpResources(resources);
+  if (!mcp && mcpPicker) setMcpPicker(undefined);
   const draft = image?.draft.prompt ?? video?.prompt ?? localDraft;
   const attachments = image?.draft.attachments ?? localAttachments;
+  const fileCount = attachments.length + resources.length;
+  const byteCount = attachments.reduce((sum, item) => sum + ('file' in item ? item.file.size : 0), 0) + resources.reduce((sum, item) => sum + item.size, 0);
   const setDraft = (prompt: string) => image ? image.onChange({ prompt, attachments }) : video ? video.onChange(prompt) : setLocalDraft(prompt);
   const setAttachments = (items: DraftAttachment[]) => image ? image.onChange({ prompt: draft, attachments: items }) : setLocalAttachments(items);
   const [notice, setNotice] = useState('');
@@ -86,9 +103,8 @@ export function ChatComposer(props: ComposerProps) {
     const nextId = Math.max(0, ...attachments.map(item => item.id)) + 1;
     const added = [...files].map((file, index) => ({ id: nextId + index, name: file.name, file, mediaType: fileMediaType(file) }));
     if (image && added.some(item => !item.mediaType.startsWith('image/') || !item.file.size)) { setNotice('Choose an image file.'); return; }
-    if (attachments.length + added.length > attachmentCountLimit) { setNotice('Add up to 10 attachments per message.'); return; }
-    const size = attachments.reduce((sum, item) => sum + ('file' in item ? item.file.size : 0), 0);
-    if (size + added.reduce((sum, item) => sum + item.file.size, 0) > attachmentByteLimit) {
+    if (fileCount + added.length > attachmentCountLimit) { setNotice('Add up to 10 attachments per message.'); return; }
+    if (byteCount + added.reduce((sum, item) => sum + item.file.size, 0) > attachmentByteLimit) {
       setNotice('Add up to 10 MB of files per message.'); return;
     }
     setAttachments([...attachments, ...added]);
@@ -99,7 +115,7 @@ export function ChatComposer(props: ComposerProps) {
     event.preventDefault();
     if (image && busy) return;
     if (!link) { setLinkError(true); return; }
-    if (attachments.length >= attachmentCountLimit) { setNotice('Add up to 10 attachments per message.'); dialog.current?.close(); return; }
+    if (fileCount >= attachmentCountLimit) { setNotice('Add up to 10 attachments per message.'); dialog.current?.close(); return; }
     const item = { id: Math.max(0, ...attachments.map(item => item.id)) + 1, name: `${link.host}${link.pathname === '/' ? '' : link.pathname}`,
       url: link.href, mediaType: linkType || linkMediaType(link) };
     setAttachments([...attachments, item]);
@@ -109,23 +125,55 @@ export function ChatComposer(props: ComposerProps) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if ((!draft.trim() && (media || !attachments.length)) || !canSend || busy || pending.current) return;
+    if ((!draft.trim() && (media || !fileCount)) || !canSend || busy || pending.current) return;
     const mediaComposer = image ?? video;
     if (mediaComposer) { setNotice(''); mediaComposer.onSend(); return; }
+    try { await sendText(draft); }
+    catch { if (mounted.current) setNotice('Could not prepare the attachments.'); }
+  }
+
+  async function sendText(text: string, signal?: AbortSignal) {
+    if (pending.current || !canSend || busy) throw new Error('The composer is unavailable.');
     pending.current = true;
     setPreparing(true);
     setNotice('');
     try {
-      const parts = await composeAttachmentParts(draft, attachments, convert);
-      if (!mounted.current || !latest.current.canSend || latest.current.image || latest.current.video) return;
-      latest.current.onSend(parts);
-      setDraft('');
+      const parts = await composeAttachmentParts(text, attachments, convert);
+      signal?.throwIfAborted();
+      const current = latest.current;
+      if (!mounted.current || !current.canSend || current.image || current.video || resources.some(item => !resourceAttached(item, current.mcp))) {
+        throw new Error('The composer is unavailable.');
+      }
+      current.onSend([...parts, ...resources.flatMap(item => item.parts)]);
+      // A prompt runs as its own turn; leave any unsent text draft intact.
+      if (!signal) setDraft('');
       setAttachments([]);
-    } catch { if (mounted.current) setNotice('Could not prepare the attachments.'); }
-    finally { pending.current = false; if (mounted.current) setPreparing(false); }
+      setMcpResources([]);
+    } finally { pending.current = false; if (mounted.current) setPreparing(false); }
+  }
+
+  function attachResource(record: McpServerRecord, uri: string, label: string, output: McpOutput) {
+    if (!mcp?.servers.some(entry => entry.record === record)) return 'This MCP server is no longer connected.';
+    const parts: AttachmentPart[] = output.text.trim() ? [{ type: 'text', text: `\n\nMCP resource: ${JSON.stringify(label)}\n${output.text}`,
+      providerMetadata: { streaik: { attachmentName: label } } }] : [];
+    for (const url of output.images) parts.push({ type: 'file', mediaType: url.slice(5, url.indexOf(';')), url, filename: label });
+    if (!parts.length) return 'The resource has no supported content.';
+    const same = resources.find(item => item.record === record && item.uri === uri);
+    const size = new TextEncoder().encode(output.text).length + output.images.reduce((sum, image) => sum + Math.ceil(image.length * 0.75), 0);
+    if (!same && fileCount >= attachmentCountLimit) return 'Add up to 10 attachments per message.';
+    if (byteCount - (same?.size ?? 0) + size > attachmentByteLimit) return 'Add up to 10 MB of files per message.';
+    setMcpResources([...resources.filter(item => item !== same), { record, uri, label, parts, size }]);
+    setNotice('');
   }
 
   return <>
+    {!!badges?.length && <ul className="chat-attachments chat-context-badges" aria-label={t('Active chat context')}>
+      {badges.map(badge => <li key={badge.key}><AttachmentChip icon={badge.icon} name={badge.label}>
+        <Button type="button" variant="subtle" aria-label={t('Remove {{name}}', { name: badge.label })} disabled={busy || preparing} onClick={badge.remove}>
+          <ChatIcon name="close" />
+        </Button>
+      </AttachmentChip></li>)}
+    </ul>}
     <form className="chat-composer" onSubmit={submit} aria-label={t(image ? 'Image composer' : video ? 'Video composer' : 'Message composer')} data-file-drag={dragging || undefined}
       onDragEnter={event => {
         if (!event.dataTransfer.types.includes('Files')) return;
@@ -148,12 +196,18 @@ export function ChatComposer(props: ComposerProps) {
         setDragging(false);
         addFiles(event.dataTransfer.files);
       }}>
-      {attachments.length > 0 && <ul className="chat-attachments" aria-label={t('Attachments')}>
+      {fileCount > 0 && <ul className="chat-attachments" aria-label={t('Attachments')}>
         {attachments.map(item => <li key={item.id}>
           <AttachmentChip name={item.name} url={'url' in item ? httpLink(item.url) : undefined}
             note={'file' in item && convert ? t(isTextAttachment(item.mediaType) ? 'As text' : 'Original file') : undefined}>
             <Button type="button" variant="subtle" aria-label={t('Remove {{name}}', { name: item.name })} disabled={preparing || !!image && busy}
               onClick={() => { setAttachments(attachments.filter(other => other.id !== item.id)); setNotice(''); }}><ChatIcon name="close" /></Button>
+          </AttachmentChip>
+        </li>)}
+        {resources.map(item => <li key={JSON.stringify([item.record.id, item.uri])}>
+          <AttachmentChip name={item.label} icon="docs" note={t('MCP resource')}>
+            <Button type="button" variant="subtle" aria-label={t('Remove {{name}}', { name: item.label })} disabled={preparing}
+              onClick={() => setMcpResources(resources.filter(other => other !== item))}><ChatIcon name="close" /></Button>
           </AttachmentChip>
         </li>)}
       </ul>}
@@ -182,6 +236,10 @@ export function ChatComposer(props: ComposerProps) {
               setLinkInput(''); setLinkType(''); setLinkError(false);
               dialog.current?.showModal();
             }}><ChatIcon name="link" />{t('Link')}</button>
+            {mcp?.servers.some(({ discovery }) => discovery.hasPrompts) && <button type="button" role="menuitem" tabIndex={-1} aria-haspopup="dialog"
+              disabled={mcp.disabled || preparing} onClick={() => { closeMenu(true); setMcpPicker('prompts'); }}><ChatIcon name="compose" />{t('Prompts')}</button>}
+            {mcp && hasMcpPickerResources(mcp.servers) && <button type="button" role="menuitem" tabIndex={-1} aria-haspopup="dialog"
+              disabled={mcp.disabled || preparing} onClick={() => { closeMenu(true); setMcpPicker('resources'); }}><ChatIcon name="docs" />{t('Resources')}</button>}
             {mcp && <button type="button" role="menuitem" tabIndex={-1} aria-haspopup="dialog" disabled={mcp.disabled || preparing}
               onClick={() => { closeMenu(true); mcp.open(); }}><ChatIcon name="tool" />{t('Model Context')}
               {mcp.count > 0 && <span className="mcp-selected-count" aria-hidden="true">{mcp.count}</span>}
@@ -202,9 +260,11 @@ export function ChatComposer(props: ComposerProps) {
         {busy && onStop ? <Button key="stop" className="chat-send" type="button" aria-label={t('Stop')} title={t('Stop')}
             onClick={onStop}><ChatIcon name="stop" /></Button>
           : <Button key="send" className="chat-send" type="submit" variant="primary" aria-label={t('Send')} title={t('Send')}
-            disabled={busy || !canSend || preparing || (!draft.trim() && (media || !attachments.length))}><ChatIcon name="send" /></Button>}
+            disabled={busy || !canSend || preparing || (!draft.trim() && (media || !fileCount))}><ChatIcon name="send" /></Button>}
       </div>
     </form>
+    {mcp && mcpPicker && <McpComposerPicker mode={mcpPicker} servers={mcp.servers} canSend={canSend} connect={mcp.connect}
+      onPrompt={sendText} onResource={attachResource} close={() => setMcpPicker(undefined)} />}
     {!video && <dialog ref={dialog} className="chat-settings chat-link-dialog" aria-labelledby={`${id}-link-title`}>
       <form onSubmit={addLink}>
         <header className="chat-settings-header"><h2 id={`${id}-link-title`}>{t('Add link')}</h2></header>

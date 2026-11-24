@@ -139,13 +139,15 @@ export function ViewContextDialog({ dialog, context, tools }: { dialog: DialogRe
       value={tab} onChange={setTab} />
     {(['system', 'user'] as const).map(key => <div key={key} id={`${id}-${key}-panel`} role="tabpanel" tabIndex={0}
       aria-labelledby={`${id}-${key}-tab`} hidden={tab !== key}>
-      {context ? <section className="chat-tool-card"><h3>{t(key === 'system' ? 'System context' : 'User context')}</h3>
-        <ToolValue value={context[key]} /></section> : <p>{t('No extra context is sent on Direct routes.')}</p>}
+      {context?.[key] && <section className="chat-tool-card"><h3>{t(key === 'system' ? 'System context' : 'User context')}</h3>
+        <ToolValue value={context[key]} /></section>}
+      {key === 'system' && context?.mcp && <section className="chat-tool-card"><h3>{t('MCP resource catalog')}</h3><ToolValue value={context.mcp} /></section>}
+      {!context?.[key] && !(key === 'system' && context?.mcp) && <p>{t(context ? 'No additional context.' : 'No extra context is sent on Direct routes.')}</p>}
     </div>)}
     <div id={`${id}-tools-panel`} role="tabpanel" tabIndex={0} aria-labelledby={`${id}-tools-tab`} hidden={tab !== 'tools'}>
       {tools.length ? <div className="chat-tool-list">{tools.map(item => {
         const remote = item.source === 'mcp' ? item.tool : undefined;
-        const labels = item.source === 'local' ? [t(item.plugin.label)] : item.source === 'skill' ? [t('Skills')] : [item.tool.server.title];
+        const labels = item.source === 'local' ? [t(item.plugin.label)] : item.source === 'skill' ? [t('Skills')] : remote ? [remote.server.title] : [t('MCP'), t('Read-only')];
         if (remote?.annotations?.readOnlyHint) labels.push(t('Read-only'));
         if (remote?.annotations?.idempotentHint) labels.push(t('Idempotent'));
         if (remote?.annotations?.destructiveHint) labels.push(t('Destructive'));

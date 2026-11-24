@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { discoverMcpTools, mcpAppAuth } from '../packages/chat/src/mcp.ts';
+import { discoverMcpServer, mcpAppAuth } from '../packages/chat/src/mcp.ts';
 import { mcpDeclarations, mcpEndpoint, mcpHeaderFields, parseMcpServer, resolveMcpHeaders } from '../packages/chat/src/mcpConfiguration.ts';
 
 test('MCP endpoints accept HTTPS and local HTTP without credentials or ambiguous paths', () => {
@@ -56,7 +56,7 @@ test('MCP fails closed when a remote only supports an earlier protocol revision'
       code: -32022, message: 'Unsupported protocol revision', data: { supported: ['2025-11-25'] },
     } }, { status: 400 });
   });
-  await assert.rejects(discoverMcpTools({ id: 'remote', title: 'Remote', endpoint, requestHeaders: () => ({}) },
+  await assert.rejects(discoverMcpServer({ id: 'remote', title: 'Remote', endpoint, requestHeaders: () => ({}) },
     new AbortController().signal));
   assert.deepEqual(attempts, [['POST', 'server/discover', '2026-07-28', '2026-07-28']]);
 });

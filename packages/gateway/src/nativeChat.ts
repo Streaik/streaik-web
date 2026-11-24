@@ -40,10 +40,11 @@ function nativeAttachmentMessages(messages: ChatMessage[], endpoint: NativeChatE
 export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (model: string) => NativeTarget): ChatTransport<ChatMessage> {
   return {
     async sendMessages({ messages, body, abortSignal }) {
-      const { model, tools: definitions, instructions: inputInstructions } = asRecord(body) ?? {};
+      const { model, tools: definitions, instructions: gatewayInstructions, mcpInstructions } = asRecord(body) ?? {};
       if (typeof model !== 'string') throw new GatewayError('Choose a model for this route.');
       const target = resolve(model);
-      const instructions = !target.gateway ? undefined : typeof inputInstructions === 'string' ? inputInstructions
+      const inputInstructions = target.gateway ? gatewayInstructions : mcpInstructions;
+      const instructions = typeof inputInstructions === 'string' ? inputInstructions
         : Array.isArray(inputInstructions) && inputInstructions.every(text => typeof text === 'string')
           ? inputInstructions.map(content => ({ role: 'system' as const, content })) : undefined;
       const direct = target.direct && createDirectMetrics(endpoint, target.direct);

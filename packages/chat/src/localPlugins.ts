@@ -153,6 +153,7 @@ export const localPlugins = [
 export type LocalPluginId = (typeof localPlugins)[number]['id'];
 export type ChatTool = { source: 'local'; plugin: (typeof localPlugins)[number]; spec: LocalToolSpec; definition: ToolDefinition }
   | { source: 'skill'; definition: ToolDefinition }
+  | { source: 'mcp-resource'; definition: ToolDefinition }
   | { source: 'mcp'; tool: McpTool; definition: ToolDefinition };
 
 const registeredNames = new Set(localPlugins.flatMap(plugin => plugin.tools.map(({ definition }) => definition.name)));
@@ -160,9 +161,12 @@ if (registeredNames.size !== localPlugins.reduce((total, plugin) => total + plug
   throw new Error('Duplicate local tool name.');
 }
 import { activateSkill, readSkillResource, skillTools } from './skillTools.ts';
+import { readResourceTool } from './mcpChatContext.ts';
 for (const skill of skillTools) registeredNames.add(skill.name);
+registeredNames.add(readResourceTool.name);
 
-export function activeChatTools(route: ChatRoute, enabled: readonly LocalPluginId[], historyAvailable: boolean, mcpTools: readonly McpTool[], hasSkills = false): ChatTool[] {
+export function activeChatTools(route: ChatRoute, enabled: readonly LocalPluginId[], historyAvailable: boolean, mcpTools: readonly McpTool[], hasSkills = false,
+  resourceTool?: ToolDefinition): ChatTool[] {
   const tools: ChatTool[] = [];
   if (route.mode === 'gateway') {
     if (hasSkills) for (const definition of skillTools) tools.push({ source: 'skill', definition });
@@ -175,6 +179,7 @@ export function activeChatTools(route: ChatRoute, enabled: readonly LocalPluginI
   for (const tool of mcpTools) {
     if (!registeredNames.has(tool.name)) tools.push({ source: 'mcp', tool, definition: tool });
   }
+  if (resourceTool) tools.push({ source: 'mcp-resource', definition: resourceTool });
   return tools;
 }
 
@@ -208,7 +213,8 @@ export function toolPartName(part: ChatMessage['parts'][number]) {
 
 // Never replay unfinished calls or local parts to Direct/after their plugin is switched off.
 // Native routes use ordinary tool results, not signed API-chat approval records.
-export function filterLocalToolReplay(messages: ChatMessage[], definitions: readonly ToolDefinition[], apiChat = true, enabledSkillIds?: ReadonlySet<string>): ChatMessage[] {
+export function filterLocalToolReplay(messages: ChatMessage[], definitions: readonly ToolDefinition[], apiChat = true, enabledSkillIds?: ReadonlySet<string>,
+  enabledMcpResourceServers?: ReadonlySet<string>): ChatMessage[] {
   const allowed = new Set(definitions.map(({ name }) => name));
   return messages.flatMap(message => {
     let changed = false;
@@ -221,7 +227,9 @@ export function filterLocalToolReplay(messages: ChatMessage[], definitions: read
       const skillId = skillCall && part.input && typeof part.input === 'object' && 'skill_id' in part.input ? part.input.skill_id : undefined;
       const sharesSkill = skillCall && part.state === 'output-available' &&
         !(part.output && typeof part.output === 'object' && 'isError' in part.output && part.output.isError === true);
-      if ((sharesSkill && (typeof skillId !== 'string' || !enabledSkillIds?.has(skillId))) || (!complete && !part.providerExecuted) || part.state === 'approval-requested' ||
+      const sourceId = name === readResourceTool.name && part.input && typeof part.input === 'object' && 'serverId' in part.input ? part.input.serverId : undefined;
+      const disconnectedResource = name === readResourceTool.name && typeof sourceId === 'string' && !enabledMcpResourceServers?.has(sourceId);
+      if ((sharesSkill && (typeof skillId !== 'string' || !enabledSkillIds?.has(skillId))) || disconnectedResource || (!complete && !part.providerExecuted) || part.state === 'approval-requested' ||
         (part.providerExecuted && part.approval) || (registeredNames.has(name) && !allowed.has(name))) {
         changed = true;
         return [];

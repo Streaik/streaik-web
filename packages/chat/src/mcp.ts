@@ -10,7 +10,6 @@ export type McpAppAuth = { ready: boolean; headers: RequestHeaders };
 export type McpOptions = {
   base?: URL;
   registryUrl?: URL;
-  browseCapabilities?: boolean;
   filterRegistryRemote?: (name: string, remote: McpCatalogServer['remotes'][number]) => boolean;
   headersForRemote?: (headers: readonly McpRemoteHeader[], endpoint: string) => McpAppAuth | undefined;
 };
@@ -172,9 +171,9 @@ export function discoverMcpServer(server: McpServer, signal: AbortSignal) {
     signal.throwIfAborted();
     if (toolsResult.status === 'rejected' && !caps?.resources && !caps?.prompts) throw toolsResult.reason;
     const tools: McpTool[] = toolsResult.status === 'fulfilled' ? toolsResult.value.map(tool => {
-        const name = `mcp_${server.id}_${tool.name}`;
-        return { server, name, remoteName: tool.name, title: tool.title, description: tool.description,
-          inputSchema: tool.inputSchema, outputSchema: tool.outputSchema, annotations: tool.annotations };
+      const name = `mcp_${server.id}_${tool.name}`;
+      return { server, name, remoteName: tool.name, title: tool.title, description: tool.description,
+        inputSchema: tool.inputSchema, outputSchema: tool.outputSchema, annotations: tool.annotations };
     }) : [];
     return { tools, hasResources: !!caps?.resources, hasPrompts: !!caps?.prompts,
       resources: resourcesResult.status === 'fulfilled' ? resourcesResult.value : [],
@@ -196,13 +195,13 @@ export function mcpTemplateSlots(template: string): string[] | undefined {
 }
 
 export function expandMcpResource(template: string, values: Record<string, string>): string {
-  if (!mcpTemplateSlots(template)) throw new Error('This URI template is not supported.');
+  if (!mcpTemplateSlots(template)) throw new McpRequestError('This URI template is not supported.');
   const uri = template.replace(/\{([A-Za-z0-9_-]+)\}/g, (_, name: string) => {
     const value = Object.hasOwn(values, name) && values[name];
-    if (!value || value.length > 2048) throw new Error('Fill in the resource template values.');
+    if (!value || value.length > 2048) throw new McpRequestError('Fill in the resource template values.');
     return encodeURIComponent(value).replace(/[!'()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
   });
-  if (uri.length > 8192) throw new Error('The resource URI is too long.');
+  if (uri.length > 8192) throw new McpRequestError('The resource URI is too long.');
   return uri;
 }
 
