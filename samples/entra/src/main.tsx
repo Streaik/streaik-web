@@ -1,5 +1,5 @@
 import { normalizeGatewayBase } from '@streaik/gateway';
-import { localizationReady, useAppTranslation } from '@streaik/chat';
+import { ChatRouter, localizationReady, useAppTranslation } from '@streaik/chat';
 import { createRoot } from 'react-dom/client';
 import { EntraApp } from './EntraApp';
 
@@ -26,7 +26,9 @@ async function start() {
     scope: import.meta.env.VITE_ENTRA_API_SCOPE ?? '',
     mcpScope: mcpBase ? import.meta.env.VITE_ENTRA_MCP_SCOPE ?? '' : undefined,
   }, site);
-  root.render(<EntraApp appName={appName} base={base} auth={auth} mcpBase={mcpBase} />);
+  root.render(<ChatRouter basename={site.pathname}>
+    <EntraApp appName={appName} base={base} auth={auth} mcpBase={mcpBase} />
+  </ChatRouter>);
 }
 
 void start().catch(() => root.render(<Startup failed />));

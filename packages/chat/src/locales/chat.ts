@@ -200,6 +200,8 @@ export const chatMessages = {
   'MCP is unavailable.': ['MCP is niet beschikbaar.', 'MCP no está disponible.'],
   'Could not load models.': ['Kan de modellen niet laden.', 'No se pudieron cargar los modelos.'],
   'Could not open local chat history.': ['Kan de lokale chatgeschiedenis niet openen.', 'No se pudo abrir el historial local de chats.'],
+  'This conversation is not available in this browser or profile.': ['Dit gesprek is niet beschikbaar in deze browser of dit profiel.', 'Esta conversación no está disponible en este navegador o perfil.'],
+  'This page is not available.': ['Deze pagina is niet beschikbaar.', 'Esta página no está disponible.'],
   'Could not save this conversation to this browser.': ['Kan dit gesprek niet opslaan in deze browser.', 'No se pudo guardar esta conversación en este navegador.'],
   'Could not delete this conversation from this browser.': ['Kan dit gesprek niet verwijderen uit deze browser.', 'No se pudo eliminar esta conversación de este navegador.'],
   'Loading chat history…': ['Chatgeschiedenis laden…', 'Cargando historial de chats…'],

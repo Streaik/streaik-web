@@ -5,6 +5,7 @@ import type { CatalogModel, ChatMessage, Gateway } from '@streaik/gateway';
 import { Button, ThemeRoot, useColorScheme } from '@streaik/themes';
 import { lazy, memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import { ChatComposer, AttachmentChip } from './ChatComposer';
 import { httpLink } from './chatAttachments';
 import { MessageActions } from './MessageActions';
@@ -14,6 +15,7 @@ import { AssistantSpeaker } from './AssistantSpeaker';
 import { ChatIcon } from './ChatIcon';
 import { ChatNavigation } from './ChatNavigation';
 import type { ChatAccount, ChatView } from './ChatNavigation';
+import { chatLocation, conversationPath, pagePaths } from './chatLocation';
 import { ModelsView, ProvidersView } from './CatalogViews';
 import { ModelPicker, resolveModelSelection } from './ModelPicker';
 import { pageRouteMenu } from './routeMenu';
@@ -57,6 +59,7 @@ import type { ImageRouteSetting } from './imageRoute';
 import { useTranscriptionRoute } from './transcriptionPreferences';
 import type { TranscriptionRouteSetting } from './transcriptionPreferences';
 import { useVideoJobs } from './useVideoJobs';
+export { BrowserRouter as ChatRouter } from 'react-router';
 export { localizationReady, useAppTranslation } from './i18n';
 export { default as providerDirectory } from './provider-directory.json';
 export type { AgentsConfig } from './agentCatalog';
@@ -191,21 +194,40 @@ function HistoryChat({ appName, gateway, connection, scope, models, route, onRou
   preferences: ChatPreferences; onPreferences: (preferences: ChatPreferences) => void;
 }) {
   const { t } = useAppTranslation();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [initialLocation] = useState(location);
+  const target = chatLocation(location.pathname);
   const [nav, setNav] = useState(false);
-  const [selectedView, setView] = useState<ChatView>('chat');
   const agentsEnabled = !!useAgents();
   const localSkills = useLocalSkills(scope);
   const remoteSkills = useRemoteSkills(gateway, connection.ready && gateway.historyScope !== 'direct', connection.modelRevision ?? 0);
-  const view = selectedView === 'agents' && !agentsEnabled ? 'chat' : selectedView;
+  const view = target.kind === 'page' && (target.view !== 'agents' || agentsEnabled) ? target.view : 'chat';
   const videos = useVideoJobs(gateway, scope, view === 'videos');
-  const [active, setActive] = useState(newConversation);
+  const [draft, setDraft] = useState(newConversation);
+  const [retained, setRetained] = useState(draft);
   const [history, setHistory] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(!!scope);
+  const [recentId, setRecentId] = useState<string>();
+  const [savedIds, setSavedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [storageIssue, setStorageIssue] = useState('');
   // Transcript effects and pin clicks can both enqueue writes before React renders again.
   const latestHistory = useRef<Conversation[]>([]);
   const writes = useRef(Promise.resolve());
   const pendingNames = useRef(new Map<string, AbortController>());
+
+  const resumeId = target.kind === 'home' && location === initialLocation && location.state?.newChat !== true ? recentId : undefined;
+  const requestedId = target.kind === 'conversation' ? target.id : resumeId;
+  const requested = requestedId ? history.find(item => item.id === requestedId) : undefined;
+  const selected = view === 'chat' ? requested ?? draft : retained;
+  // Preserve the session snapshot across catalog pages and when a draft's URL is promoted.
+  const active = selected.id === retained.id ? retained : selected;
+  if (active !== retained) setRetained(active);
+  if (requested && target.kind === 'conversation' && requested.id === draft.id) setDraft(newConversation());
+  const homeId = target.kind === 'home' && !loading ? requested?.id ?? (savedIds.has(draft.id) ? draft.id : undefined) : undefined;
+  useEffect(() => {
+    if (homeId) void navigate({ pathname: conversationPath(homeId), search: location.search, hash: location.hash }, { replace: true });
+  }, [homeId, location.search, location.hash, navigate]);
 
   useEffect(() => {
     const pending = pendingNames.current;
@@ -227,15 +249,19 @@ function HistoryChat({ appName, gateway, connection, scope, models, route, onRou
       if (!live) return;
       records.sort(newestFirst);
       updateHistory(records);
-      if (records[0]) setActive(records[0]);
+      setRecentId(records[0]?.id);
     }).catch(() => { if (live) setStorageIssue('Could not open local chat history.'); })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
   }, [scope]);
 
   function save(conversation: Conversation) {
-    if (scope) writes.current = writes.current.then(() => saveConversation(scope, conversation))
-      .catch(() => setStorageIssue('Could not save this conversation to this browser.'));
+    if (scope) writes.current = writes.current.then(async () => {
+      await saveConversation(scope, conversation);
+      if (latestHistory.current.some(item => item.id === conversation.id)) {
+        setSavedIds(ids => ids.has(conversation.id) ? ids : new Set(ids).add(conversation.id));
+      }
+    }).catch(() => setStorageIssue('Could not save this conversation to this browser.'));
   }
 
   function persist(conversation: Conversation, nameRequest?: TextAppRequest) {
@@ -279,19 +305,37 @@ function HistoryChat({ appName, gateway, connection, scope, models, route, onRou
     pendingNames.current.get(id)?.abort();
     pendingNames.current.delete(id);
     updateHistory(latestHistory.current.filter((item) => item.id !== id));
-    if (active.id === id) setActive(newConversation());
+    if (view === 'chat' && active.id === id) startDraft(true);
+    else if (retained.id === id) setRetained(draft);
+    if (recentId === id) setRecentId(undefined);
+    setSavedIds(ids => {
+      if (!ids.has(id)) return ids;
+      const next = new Set(ids);
+      next.delete(id);
+      return next;
+    });
     if (scope) writes.current = writes.current.then(() => deleteConversation(scope, id))
       .catch(() => setStorageIssue('Could not delete this conversation from this browser.'));
   }
 
+  function startDraft(replace = false) {
+    setDraft(newConversation());
+    void navigate('/', { replace: replace || target.kind === 'home', state: { newChat: true } });
+  }
+
   if (loading) return <p className="chat-start" role="status">{t('Loading chat history…')}</p>;
-  return <ChatSession key={active.id} appName={appName} gateway={gateway} connection={connection} conversation={active} history={history} storageIssue={storageIssue}
+  const locationIssue = target.kind === 'conversation' && !requested ? 'This conversation is not available in this browser or profile.'
+    : target.kind === 'unavailable' || target.kind === 'page' && view === 'chat' ? 'This page is not available.' : undefined;
+  return <ChatSession key={active.id} appName={appName} gateway={gateway} connection={connection} conversation={active} history={history}
+    storageIssue={storageIssue} locationIssue={locationIssue}
     nav={nav} view={view} onView={(next) => {
-      setView(next);
+      if (next !== 'chat' && next !== view) void navigate(pagePaths[next]);
       if (window.matchMedia('(max-width: 42rem)').matches) setNav(false);
     }} toggleNav={() => setNav((open) => !open)} onPersist={persist}
-    onNew={() => { setView('chat'); setActive(newConversation()); }}
-    onSwitch={(item) => { setView('chat'); if (item.id !== active.id) setActive(item); }} onPin={togglePin} onDelete={remove}
+    onNew={() => startDraft()}
+    onSwitch={(item) => {
+      if (target.kind !== 'conversation' || target.id !== item.id) void navigate(conversationPath(item.id));
+    }} onPin={togglePin} onDelete={remove}
     models={models} route={route} onRoute={onRoute} decisions={decisions} images={images} videos={videos} transcriptions={transcriptions} scope={scope} onSettings={onSettings}
     preferences={preferences} onPreferences={onPreferences}
     localSkills={localSkills} remoteSkills={remoteSkills} readHistory={scope ? () => latestHistory.current : undefined} />;
@@ -304,8 +348,9 @@ type Turn = { model: string; route: ChatRoute; tools: ChatTool[]; context?: Requ
 const isApiChat = (route: ChatRoute | undefined) => !route || (route.mode === 'gateway' && route.endpoint === '/api/chat');
 const toolComplete = (part: Invocation) => part.state === 'output-available' || part.state === 'output-error' || part.state === 'approval-responded';
 
-function ChatSession({ appName, gateway, connection, conversation, history, storageIssue, nav, view, onView, toggleNav, onPersist, onNew, onSwitch, onPin, onDelete, models, route, onRoute, decisions, images, videos, transcriptions, scope, onSettings, preferences, onPreferences, localSkills, remoteSkills, readHistory }: {
+function ChatSession({ appName, gateway, connection, conversation, history, storageIssue, locationIssue, nav, view, onView, toggleNav, onPersist, onNew, onSwitch, onPin, onDelete, models, route, onRoute, decisions, images, videos, transcriptions, scope, onSettings, preferences, onPreferences, localSkills, remoteSkills, readHistory }: {
   appName: string; gateway: Gateway; connection: Connection; conversation: Conversation; history: Conversation[]; storageIssue: string;
+  locationIssue?: string;
   nav: boolean; toggleNav: () => void; onPersist: (conversation: Conversation, nameRequest?: TextAppRequest) => void; onNew: () => void;
   view: ChatView; onView: (view: ChatView) => void;
   onSwitch: (conversation: Conversation) => void; onPin: (id: string) => void; onDelete: (id: string) => void;
@@ -642,25 +687,31 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
       : t('No compatible models are available. Check the gateway and its provider credentials.') : null);
 
   return <div ref={setMenuContainer} className="chat-shell" data-nav={nav ? 'expanded' : 'collapsed'} data-view={view}>
-      <ChatNavigation appName={appName} expanded={nav} history={history} active={view === 'chat' ? conversation.id : ''} busy={busy || toolBusy}
+      <ChatNavigation appName={appName} expanded={nav} history={history} active={view === 'chat' && !locationIssue ? conversation.id : ''} busy={busy || toolBusy}
         account={connection.account} container={menuContainer} view={view} onView={onView}
         pinnedViews={preferences.pinnedViews} onToggleViewPin={(key) => onPreferences({ ...preferences,
           pinnedViews: preferences.pinnedViews.includes(key) ? preferences.pinnedViews.filter(view => view !== key) : [...preferences.pinnedViews, key] })}
         toggle={toggleNav} onNew={onNew} onOpen={onSwitch}
         onPin={onPin} onDelete={onDelete} onSettings={onSettings} routes={routeMenu} />
       <header className="chat-toolbar" hidden={view !== 'chat' && view !== 'agents' && view !== 'skills' && !mediaView && !connection.signIn}>
-        {view === 'chat' && <ModelPicker models={compatible} selected={selected} multiple={!!router}
+        {view === 'chat' && !locationIssue && <ModelPicker models={compatible} selected={selected} multiple={!!router}
           loading={connection.ready && !result} disabled={routesLocked} onChange={setSelectedIds} />}
         {mediaView && <div className="chat-image-toolbar" ref={setMediaToolbar} />}
         {connection.signIn && <div className="chat-account">{connection.signIn}</div>}
         {(view === 'agents' || view === 'skills') && <div ref={setAgentToolbar} />}
       </header>
-      <main className="chat-main" data-empty={!messages.length} hidden={view !== 'chat'}>
+      {locationIssue && <main className="catalog-main"><div className="catalog-content">
+        <p role="status">{t(locationIssue)}</p>
+        {storageIssue && <p role="status">{t(storageIssue)}</p>}
+        {!connection.ready && <p>{connection.emptyMessage}</p>}
+      </div>
+      </main>}
+      <main className="chat-main" data-empty={!messages.length} hidden={view !== 'chat' || !!locationIssue}>
         {messages.length ? <Transcript messages={messages} /> : null}
         <div className="chat-column chat-dock">
-           {!messages.length && <WelcomeHeading request={welcomeRequest} discovering={connection.ready && !result && welcomeModels.length > 0} />}
-           {storageIssue && <div className="chat-notice" role="status">{t(storageIssue)}</div>}
-          {modelStatus && <div className="chat-notice" role="status">
+           {!messages.length && !locationIssue && <WelcomeHeading request={welcomeRequest} discovering={connection.ready && !result && welcomeModels.length > 0} />}
+           {storageIssue && !locationIssue && <div className="chat-notice" role="status">{t(storageIssue)}</div>}
+           {modelStatus && !locationIssue && <div className="chat-notice" role="status">
             {modelStatus}{connection.ready && result && <Button onClick={reload}>{t('Refresh models')}</Button>}
           </div>}
           {error && <div className="chat-notice chat-error" role="alert">
@@ -692,7 +743,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
       <ViewContextDialog dialog={contextDialog} context={(busy || toolParts.length > 0) && turn ? turn.context : context}
         tools={(busy || toolParts.length > 0) && turn ? turn.tools : enabledTools} />
       {review && <ToolApprovalDialog key={review.id} review={review} onAnswer={answerTool} onStop={stopTurn} />}
-      <footer className="chat-disclaimer" hidden={view !== 'chat'}>{t('{{appName}} can make mistakes. Check important information.', { appName })}</footer>
+       <footer className="chat-disclaimer" hidden={view !== 'chat' || !!locationIssue}>{t('{{appName}} can make mistakes. Check important information.', { appName })}</footer>
       {view === 'images' ? <Suspense fallback={<main className="catalog-main"><p role="status">{t('Loading images…')}</p></main>}>
         <ImagesView gateway={gateway} scope={scope} route={images.selected} toolbar={mediaToolbar} catalog={mediaModels?.catalog}
           loading={hasGateway && connection.ready && !mediaModels} router={imageRouter} status={mediaStatus} />
