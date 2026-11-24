@@ -11,6 +11,7 @@ const version = '2026-07-28';
 const auth = { openai: { Authorization: 'Bearer browser-openai' }, google: { 'x-goog-api-key': 'browser-google' },
   anthropic: { 'x-api-key': 'browser-anthropic' } };
 const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jf2sAAAAASUVORK5CYII=';
+const openAiError = 'OpenAI request failed (HTTP 400) [invalid_size, field: size]: This model does not support the requested size. Key: [redacted]';
 
 function sse(events: unknown[]) { return events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n'; }
 
@@ -54,7 +55,7 @@ async function selectServer(page: Page, name: string, count: number) {
   await picker.getByRole('button', { name: 'Close' }).click();
 }
 
-async function exerciseChat(page: Page, approve: boolean, manual = false) {
+async function exerciseChat(page: Page, approve: boolean, manual = false, rejectUpstream = false) {
   const endpoint = `${manual ? delegated : mcp}/openai-images`;
   const authorization = manual ? 'Bearer test-mcp-token' : auth.openai.Authorization;
   const toolRequests: Request[] = [];
@@ -62,7 +63,8 @@ async function exerciseChat(page: Page, approve: boolean, manual = false) {
   const mcpFailures: string[] = [];
   let chatRequests = 0;
   let decisions = 0;
-  const routed = !approve && !manual;
+  const routed = !approve && !manual && !rejectUpstream;
+  const prompt = rejectUpstream ? 'Reject my image' : 'A tiny landscape';
   const candidate = 'openai/gpt-5-nano';
   const router = 'openai/test-router';
   const instructions = 'Choose the model most suitable for concise image prompts.';
@@ -96,7 +98,7 @@ async function exerciseChat(page: Page, approve: boolean, manual = false) {
     if (chatRequests === 1) {
       await route.fulfill({ headers, body: sse([
         { type: 'start', messageId: 'mcp-assistant' }, { type: 'start-step' },
-        { type: 'tool-input-available', toolCallId: 'fixture-tool', toolName: tool, input: { prompt: 'A tiny landscape' }, dynamic: true },
+        { type: 'tool-input-available', toolCallId: 'fixture-tool', toolName: tool, input: { prompt }, dynamic: true },
         { type: 'tool-approval-request', toolCallId: 'fixture-tool', approvalId: 'fixture-review' },
         { type: 'finish-step' }, { type: 'finish', finishReason: 'tool-calls' },
       ]) });
@@ -107,7 +109,7 @@ async function exerciseChat(page: Page, approve: boolean, manual = false) {
         approval: { id: 'fixture-review', approved: approve },
       });
       expect(reviewed.approval).not.toHaveProperty('signature');
-      if (approve) expect(reviewed.output).toBe('MCP returned 1 image(s), displayed to the user.');
+      if (approve) expect(reviewed.output).toBe(rejectUpstream ? `MCP tool failed: ${openAiError}` : 'MCP returned 1 image(s), displayed to the user.');
       else expect(reviewed).not.toHaveProperty('output');
       expect(JSON.stringify(sent)).not.toContain('browser-openai');
       expect(JSON.stringify(sent)).not.toContain('test-mcp-token');
@@ -153,22 +155,17 @@ async function exerciseChat(page: Page, approve: boolean, manual = false) {
   await selectServer(page, manual ? 'Manual images' : 'OpenAI Images', 3);
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Create a tiny landscape.');
   await page.getByRole('button', { name: 'Send', exact: false }).click();
-  if (manual) {
-    const execution = page.getByRole('dialog', { name: 'Approve tool execution' });
-    await expect(execution.getByText(`Arguments go to Manual images on ${new URL(endpoint).host}.`, { exact: false })).toBeVisible();
-    expect(calls).toEqual([]);
-    await execution.getByRole('button', { name: 'Approve and run' }).click();
-  }
   const review = page.getByRole('dialog', { name: 'Review tool result' });
-  await expect(review.getByRole('tabpanel', { name: 'Output' })).toContainText('MCP returned 1 image(s)');
-  await expect(review.getByRole('img', { name: 'MCP image 1' })).toBeVisible();
+  await expect(review.getByRole('tabpanel', { name: 'Output' })).toContainText(rejectUpstream ? openAiError : 'MCP returned 1 image(s)');
+  await expect(page.getByRole('dialog', { name: 'Approve tool execution' })).toHaveCount(0);
+  if (!rejectUpstream) await expect(review.getByRole('img', { name: 'MCP image 1' })).toBeVisible();
   await review.getByRole('tab', { name: 'Input' }).click();
-  await expect(review.getByRole('tabpanel', { name: 'Input' })).toContainText('A tiny landscape');
+  await expect(review.getByRole('tabpanel', { name: 'Input' })).toContainText(prompt);
   expect(calls).toEqual(['OpenAIImages_CreateImage']);
   expect(chatRequests).toBe(1);
   await review.getByRole('button', { name: approve ? 'Approve and share' : 'Decline', exact: true }).click();
   await expect(page.getByText('Chat continued after MCP.')).toBeVisible();
-  if (approve) {
+  if (approve && !rejectUpstream) {
     const image = page.getByRole('img', { name: 'MCP image 1' });
     await expect(image).toBeVisible();
     await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1);
@@ -190,7 +187,68 @@ async function exerciseChat(page: Page, approve: boolean, manual = false) {
 
 test('browser executes once, previews the image in a review modal, and shares the approved result', async ({ page }) => exerciseChat(page, true));
 test('the assigned router runs once and its chosen model continues after an MCP denial', async ({ page }) => exerciseChat(page, false));
-test('a manual server outside the trusted base uses only stateless MCP and requires execution approval', async ({ page }) => exerciseChat(page, true, true));
+test('a manual server outside the trusted base runs once before result approval', async ({ page }) => exerciseChat(page, true, true));
+test('approved MCP failures reach the model with provider details and without credentials', async ({ page }) => exerciseChat(page, true, false, true));
+test('declined MCP failures do not reach the model', async ({ page }) => exerciseChat(page, false, false, true));
+
+for (const approve of [true, false]) {
+  test(`native chat ${approve ? 'shares' : 'withholds'} the executed MCP result`, async ({ page }) => {
+    const endpoint = `${mcp}/openai-images`;
+    let chatCalls = 0, toolCalls = 0;
+    let release = () => {};
+    const inFlight = new Promise<void>(resolve => { release = resolve; });
+    const chunk = { id: 'native-mcp', object: 'chat.completion.chunk', created: 1, model: 'gpt-4.1-mini' };
+    await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: model }] } }));
+    await page.route(endpoint, async route => {
+      if (route.request().method() === 'POST' && route.request().postDataJSON().method === 'tools/call') {
+        toolCalls++;
+        await inFlight;
+      }
+      await route.continue();
+    });
+    await page.route('**/gateway/v1/chat/completions', route => {
+      const sent = route.request().postDataJSON();
+      if (++chatCalls === 1) {
+        const name = sent.tools.find(({ function: tool }: { function: { name: string } }) => tool.name.endsWith('_OpenAIImages_CreateImage')).function.name;
+        return route.fulfill({ contentType: 'text/event-stream', body: sse([
+          { ...chunk, choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'native-call', type: 'function',
+            function: { name, arguments: '{"prompt":"Reject my image"}' } }] }, finish_reason: null }] },
+          { ...chunk, choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
+        ]) });
+      }
+      expect(sent.messages.at(-1)).toMatchObject({ role: 'tool', tool_call_id: 'native-call',
+        content: approve ? `MCP tool failed: ${openAiError}` : 'The user declined to share this tool result.' });
+      expect(JSON.stringify(sent)).not.toContain('Key: browser-openai');
+      return route.fulfill({ contentType: 'text/event-stream', body: sse([
+        { ...chunk, choices: [{ index: 0, delta: { role: 'assistant', content: 'Native chat continued.' }, finish_reason: 'stop' }] },
+      ]) });
+    });
+    await page.goto('/');
+    await setOpenAiKey(page);
+    await addManualServer(page, 'Native images', endpoint);
+    await page.getByRole('button', { name: 'New chat', exact: true }).click();
+    await page.getByRole('button', { name: 'Account menu', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Route', exact: true }).press('ArrowRight');
+    await page.getByRole('menuitem', { name: 'Gateway', exact: true }).press('ArrowRight');
+    await page.getByRole('menuitemradio', { name: '/v1/chat/completions', exact: true }).click();
+    await selectServer(page, 'Native images', 3);
+    const review = page.getByRole('dialog', { name: 'Review tool result' });
+    const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+    try {
+      await composer.fill('Test the native tool.');
+      await composer.press('Enter');
+      await expect.poll(() => toolCalls).toBe(1);
+      await expect(review).toHaveCount(0);
+      await expect(page.getByRole('dialog', { name: 'Approve tool execution' })).toHaveCount(0);
+    } finally { release(); }
+    await expect(review.getByRole('tabpanel', { name: 'Output' })).toContainText(openAiError);
+    expect(chatCalls).toBe(1);
+    await review.getByRole('button', { name: approve ? 'Approve and share' : 'Decline', exact: true }).click();
+    await expect(page.getByText('Native chat continued.')).toBeVisible();
+    expect(chatCalls).toBe(2);
+    expect(toolCalls).toBe(1);
+  });
+}
 
 test('the registry controls which servers appear in chat and receives no credentials', async ({ page }) => {
   await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: model }] } }));
@@ -352,14 +410,20 @@ test('all provider tools execute with isolated credentials; delegated mode only 
     expect(payload, JSON.stringify(payload)).toHaveProperty('result');
     return payload.result;
   };
-  const edit = await invoke(mcp, 'openai-images', 'OpenAIImages_CreateImageEdit', { prompt: 'Test', fileUrl: png }, { ...auth.openai, ...auth.google, ...auth.anthropic });
+  for (const model of [undefined, 'openai/gpt_image_2_6_flare', 'openai/gpt-image-2.6-flare']) {
+    const generated = await invoke(mcp, 'openai-images', 'OpenAIImages_CreateImage', { prompt: 'Test', model }, auth.openai);
+    expect(generated.content[0]).toMatchObject({ type: 'image', mimeType: 'image/png' });
+  }
+  const edit = await invoke(mcp, 'openai-images', 'OpenAIImages_CreateImageEdit', { prompt: 'Test', fileUrl: png, model: 'gpt_image_2_6_flare' }, { ...auth.openai, ...auth.google, ...auth.anthropic });
   expect(edit.content[0]).toMatchObject({ type: 'image', mimeType: 'image/png', data: png.split(',')[1] });
   const ask = await invoke(mcp, 'openai-images', 'OpenAIImages_AskImages', { question: 'Test', imageUrls: [png] }, auth.openai);
   expect(ask.content[0].text).toBe('OpenAI sees an image.');
-  for (const inputs of [{}, { fileUrl: png }]) {
-    const generated = await invoke(mcp, 'google-images', 'GoogleNanoBanana_CreateImage', { prompt: 'Test', model: 'gemini-nano-banana-2.1', ...inputs }, { ...auth.google, ...auth.openai });
+  for (const inputs of [{}, { model: 'google/models/gemini-nano-banana-2.1', fileUrl: png, referenceImageUrls: [png] }]) {
+    const generated = await invoke(mcp, 'google-images', 'GoogleNanoBanana_CreateImage', { prompt: 'Test', ...inputs }, { ...auth.google, ...auth.openai });
     expect(generated.content[0].type).toBe('image');
   }
+  const badGoogle = await invoke(mcp, 'google-images', 'GoogleNanoBanana_CreateImage', { prompt: 'Test', model: 'gemini-flash-latest' }, auth.google);
+  expect(badGoogle).toMatchObject({ isError: true, content: [{ type: 'text', text: 'Google request failed (HTTP 400) [INVALID_ARGUMENT, field: model]: Select a Gemini image model. Key: [redacted]' }] });
   const google = await invoke(mcp, 'google-images', 'GoogleNanoBanana_AskImages', { question: 'Test', imageUrls: [png] }, auth.google);
   expect(google.content[0].text).toBe('Google sees an image.');
   const keyMissing = await invoke(mcp, 'anthropic-skills', 'AnthropicSkills_List', {}, auth.openai);

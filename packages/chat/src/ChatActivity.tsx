@@ -57,7 +57,10 @@ export function ChatActivity({ parts, renderMarkdown }: { parts: ActivityPart[];
   const part = parts[page];
   const reasoning = part.type === 'reasoning';
   const title = reasoning ? t('Reasoning') : invocationName(part);
-  const state = reasoning ? undefined : part.approval?.approved === false ? 'Declined' : toolStates[part.state];
+  // API Chat reserves an approval record before execution, but MCP only asks to review the result.
+  const mcpPending = !reasoning && part.state === 'approval-requested' &&
+    (part.type === 'dynamic-tool' ? part.toolName.startsWith('mcp_') : part.type.startsWith('tool-mcp_'));
+  const state = reasoning ? undefined : part.approval?.approved === false ? 'Declined' : mcpPending ? 'Tool requested' : toolStates[part.state];
   return <section className="chat-activity" aria-label={t('Assistant activity')}>
     <header className="chat-activity-header">
       <ChatIcon name={reasoning ? 'brain' : 'tool'} />
