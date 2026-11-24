@@ -120,10 +120,12 @@ function InstalledServers({ store, options, selection, locked, onEdit }: ServerS
   const [error, setError] = useState(false);
   const [browse, setBrowse] = useState<McpServer>();
   const disabled = locked || !store.available;
+  const addLabel = t('Add by URL');
   return <section aria-label={t('Installed servers')}>
-    <div className="mcp-section-heading"><h2>{t('Installed servers')}</h2><Button type="button" disabled={disabled} onClick={() => onEdit({})}>
-      <ChatIcon name="add" /> {t('Add by URL')}
-    </Button></div>
+    <div className="mcp-section-heading"><h2>{t('Installed servers')}</h2>
+      <Tooltip content={addLabel}><Button type="button" variant="subtle" className="chat-composer-icon" aria-label={addLabel}
+        aria-haspopup="dialog" disabled={disabled} onClick={() => onEdit({})}><ChatIcon name="link" /></Button></Tooltip>
+    </div>
     {selection && store.records.length > 0 && <p>{t('Only enable servers you trust. Tool inputs are sent when a tool runs; approval controls sharing the result with the chat model.')}</p>}
     {error && <p role="alert" className="chat-error">{t('Could not remove this MCP server.')}</p>}
       {store.records.length ? <ul className="mcp-list">{store.records.map(record => {
@@ -163,6 +165,7 @@ function CatalogCard({ item, installed, disabled, options, install }: { item: Mc
   const [selected, setSelected] = useState('');
   const remote = item.remotes.find(choice => choice.endpoint === selected) ?? preferredMcpRemote(item.remotes, options);
   const isInstalled = remote && installed.has(remote.endpoint);
+  const installLabel = t('Install {{name}}', { name: item.title });
   return <article className="catalog-card">
     <div className="catalog-card-title"><span className="catalog-mark"><ChatIcon name="tool" /></span>
       <div><h3>{item.title}</h3><small>{item.name}</small></div></div>
@@ -172,7 +175,8 @@ function CatalogCard({ item, installed, disabled, options, install }: { item: Mc
       {item.remotes.map(choice => <option key={choice.endpoint}>{choice.endpoint}</option>)}
     </select></label> : remote && <small className="mcp-endpoint">{remote.endpoint}</small>}
     <div className="mcp-actions">{!remote ? <small>{t('No compatible Streamable HTTP endpoint')}</small> : isInstalled ? <small>{t('Installed')}</small>
-      : <Button type="button" aria-label={t('Install {{name}}', { name: item.title })} disabled={disabled} onClick={() => install(item, remote)}>{t('Install')}</Button>}</div>
+      : <Tooltip content={installLabel}><Button type="button" variant="subtle" className="chat-composer-icon" aria-label={installLabel}
+        disabled={disabled} onClick={() => install(item, remote)}><ChatIcon name="download" /></Button></Tooltip>}</div>
   </article>;
 }
 
@@ -205,6 +209,7 @@ function McpRegistry({ store, options, locked, onEdit }: ServerSectionsProps) {
   const results = filterMcpCatalog(catalog, options?.filterRegistryRemote)
     .filter(item => `${item.title} ${item.name} ${item.description ?? ''}`.toLowerCase().includes(term));
   const disabled = locked || !store.available;
+  const refreshLabel = t('Refresh registry');
 
   function install(item: McpCatalogServer, remote: McpCatalogServer['remotes'][number]) {
     setError('');
@@ -220,7 +225,10 @@ function McpRegistry({ store, options, locked, onEdit }: ServerSectionsProps) {
   }
 
   return <section aria-label={t('MCP registry')}>
-    <div className="mcp-section-heading"><h2>{t('Registry')}</h2>{registryUrl && <Button type="button" disabled={!!request} onClick={() => setRequest({})}>{t('Refresh registry')}</Button>}</div>
+    <div className="mcp-section-heading"><h2>{t('Registry')}</h2>{registryUrl && <Tooltip content={refreshLabel}>
+      <Button type="button" variant="subtle" className="chat-composer-icon" aria-label={refreshLabel}
+        disabled={!!request} onClick={() => setRequest({})}><ChatIcon name="refresh" /></Button>
+    </Tooltip>}</div>
     {error && <p role="alert" className="chat-error">{t(error)}</p>}
       {!registryUrl ? <p>{t('No MCP registry is configured. You can still add servers by URL.')}</p> : <>
         <div className="catalog-filters"><input type="search" aria-label={t('Search MCP servers')} placeholder={t('Search MCP servers')} value={query}

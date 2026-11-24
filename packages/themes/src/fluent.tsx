@@ -1,11 +1,11 @@
 import { Button } from '@fluentui/react-button';
 import {
-  Add24Regular, Apps24Regular, ArrowDownload24Regular, ArrowExport24Regular, ArrowLeft24Regular, ArrowUp24Regular, Attach24Regular, BookOpen24Regular, Bot24Regular,
+  Add24Regular, Apps24Regular, ArrowDownload24Regular, ArrowExport24Regular, ArrowLeft24Regular, ArrowSync24Regular, ArrowUp24Regular, Attach24Regular, BookOpen24Regular, Bot24Regular,
   BrainCircuit24Regular, BranchFork24Regular, Chat24Regular, Checkmark24Regular, ChevronDown24Regular, Code24Regular, Color24Regular, Compose24Regular, Copy24Regular,
   Cube24Regular, Delete24Regular, Dismiss24Regular, Document24Regular, DocumentText24Regular, Edit24Regular, Globe24Regular, GridDots24Regular, ImageMultiple24Regular,
   Info24Regular, Key24Regular, Link24Regular, Mic24Regular, Money24Regular, MoreHorizontal24Regular, MoreVertical24Regular, PanelLeft24Regular, Person24Regular,
   Pin24Regular, PinOff24Regular, PlugConnected24Regular, Pulse24Regular, Search24Regular, Settings24Regular, Shapes24Regular, Shield24Regular, ShieldCheckmark24Regular,
-  SignOut24Regular, Speaker224Regular, Stop24Regular, TextSortAscending24Regular, TextWordCount24Regular, Timer24Regular, Toolbox24Regular, TopSpeed24Regular, Video24Regular, WindowConsoleRegular,
+  SignOut24Regular, Speaker224Regular, Stop24Regular, Tag24Regular, TextSortAscending24Regular, TextWordCount24Regular, Timer24Regular, Toolbox24Regular, TopSpeed24Regular, Video24Regular, WindowConsoleRegular,
 } from '@fluentui/react-icons';
 import { FluentProvider } from '@fluentui/react-provider';
 import { Select } from '@fluentui/react-select';
@@ -93,6 +93,8 @@ export const fluent: ThemeAdapter = {
     trash: Delete24Regular,
     copy: Copy24Regular,
     download: ArrowDownload24Regular,
+    refresh: ArrowSync24Regular,
+    tag: Tag24Regular,
     check: Checkmark24Regular,
     tokens: Code24Regular,
     cost: Money24Regular,

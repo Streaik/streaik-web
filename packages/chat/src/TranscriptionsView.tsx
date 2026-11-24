@@ -26,8 +26,8 @@ const errorMessage = (error: unknown, fallback: string) => error instanceof Gate
 const wholeSeconds = browserNumberFormat({ maximumFractionDigits: 0 });
 const segmentSeconds = browserNumberFormat({ minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
-function selectFileModel(models: readonly CatalogModel[], id?: string) {
-  return models.find(model => model.id === id) ?? preferredModels.map(id => models.find(model => model.id === id)).find(Boolean)
+function defaultFileModel(models: readonly CatalogModel[]) {
+  return preferredModels.map(id => models.find(model => model.id === id)).find(Boolean)
     ?? models.find(model => model.provider === 'openai') ?? models[0];
 }
 
@@ -111,22 +111,24 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
   const operation = useRef<{ abort: AbortController; stop?: AbortController; mode: 'upload' | 'live' | 'dictate' }>(null);
   const enabled = !status && !loading;
   const fileLimit = transcriptionUploadLimit(route);
-  const ASR = (catalog ?? []).filter(model => model.type === 'transcription');
-  const models = ASR.filter(({ id }) => supportsFileTranscription(route, id));
-  const fileModel = selectFileModel(models, settings.fileModel);
+  const transcriptionModels = (catalog ?? []).filter(model => model.type === 'transcription');
+  const fileModels = transcriptionModels.filter(({ id }) => supportsFileTranscription(route, id));
+  const models = transcriptionModels.filter(model => fileModels.includes(model) || model.tags.includes('realtime'));
+  const selectedModel = models.find(({ id }) => id === settings.model) ?? defaultFileModel(fileModels) ?? models[0];
+  const fileModel = selectedModel && supportsFileTranscription(route, selectedModel.id) ? selectedModel : undefined;
   // Dictation transcribes a finished clip, even when uploaded files are set to stream.
   const dictateRoute = route === '/api/transcriptions/stream' ? '/api/transcriptions' : route;
-  const dictateModel = dictateRoute === route ? fileModel : selectFileModel(ASR.filter(({ id }) => supportsFileTranscription(dictateRoute, id)), settings.fileModel);
-  const liveModels = (catalog ?? []).filter(model => isLiveTranscriptionModel(model.id));
-  const liveModel = liveModels.find(model => model.id === settings.liveModel) ??
-    liveModels.find(model => model.provider === fileModel?.provider) ?? liveModels.find(model => model.provider === 'openai') ?? liveModels[0];
+  const dictateModel = selectedModel && supportsFileTranscription(dictateRoute, selectedModel.id) ? selectedModel : undefined;
+  const taggedLive = selectedModel?.tags.includes('realtime');
+  const liveModel = selectedModel && taggedLive && isLiveTranscriptionModel(selectedModel.id) ? selectedModel : undefined;
   const busy = phase !== undefined;
   const live = phase === 'connecting' || phase === 'listening' || phase === 'finishing';
   const dictating = phase === 'dictate-connecting' || phase === 'dictating' || phase === 'dictate-finishing';
   const canCapture = !!globalThis.navigator?.mediaDevices?.getUserMedia;
   const canRecord = canCapture && !!dictationFormat();
   const liveSocket = liveModel && usesTranscriptionWebSocket(liveModel.id);
-  const canLive = canCapture && (liveSocket ? typeof WebSocket !== 'undefined' && typeof AudioWorkletNode !== 'undefined' : typeof RTCPeerConnection !== 'undefined');
+  const canLive = !!liveModel && canCapture && (liveSocket
+    ? typeof WebSocket !== 'undefined' && typeof AudioWorkletNode !== 'undefined' : typeof RTCPeerConnection !== 'undefined');
   const canSubmit = enabled && !busy && queue.some(item => item.dictation || fileModel);
 
   useEffect(() => {
@@ -293,10 +295,14 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
     : phase === 'dictate-finishing' ? 'Finishing dictation…' : '';
   const dictateLabel = t(dictating ? 'Stop Dictate' : 'Dictate');
   const liveLabel = t(live ? 'Stop Real-time' : 'Real-time');
+  const liveIssue = !selectedModel ? 'No compatible Real-time transcription model is available.'
+    : !taggedLive ? 'The selected model does not support real-time transcription.'
+    : !liveModel ? 'This app cannot start a live session for the selected model.'
+    : canCapture && !canLive ? 'Real-time transcription is not supported in this browser.' : '';
   const options = ['finished', 'streaming'] as const;
   return <main className="catalog-main images-main" aria-labelledby={`${id}-heading`}>
-    {toolbar && createPortal(<ModelPicker models={models} selected={fileModel ? [fileModel] : []} multiple={false} loading={loading}
-      disabled={busy} onChange={ids => change({ fileModel: ids[0] })} />, toolbar)}
+    {toolbar && createPortal(<ModelPicker models={models} selected={selectedModel ? [selectedModel] : []} multiple={false} loading={loading}
+      disabled={busy} onChange={ids => change({ model: ids[0] })} />, toolbar)}
     <div className="images-content">
       <h1 id={`${id}-heading`}>{t('Transcriptions')}</h1>
       <form className="chat-composer transcription-composer" aria-label={t('Transcription composer')} data-file-drag={dragging || undefined}
@@ -328,8 +334,9 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
               <ChatIcon name={dictating ? 'stop' : 'mic'} />
             </Button>
             <Button className="chat-composer-icon" type="button" aria-label={liveLabel}
+              aria-describedby={enabled && catalog && !busy && liveIssue ? `${id}-live-issue` : undefined}
               title={liveModel ? `${liveLabel} · ${liveModel.name}` : liveLabel} aria-pressed={live} variant={live ? 'primary' : 'subtle'}
-              disabled={live ? phase === 'finishing' : busy || !enabled || !liveModel || !canLive} onClick={() => void microphone()}>
+              disabled={live ? phase === 'finishing' : busy || !enabled || !canLive} onClick={() => void microphone()}>
               <ChatIcon name={live ? 'stop' : 'speed'} />
             </Button>
             {phase === 'upload' ? <Button key="stop" type="button" className="chat-send" aria-label={t('Stop')} title={t('Stop')}
@@ -340,10 +347,12 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
         </div>
       </form>
       {(status || phaseLabel) && <p className="chat-attachment-notice" role="status">{status || t(phaseLabel)}</p>}
-      {!status && catalog && !fileModel && <p className="chat-attachment-notice" role="status">{t('No models support this file transcription route.')}</p>}
+      {!status && catalog && !fileModel && <p className="chat-attachment-notice" role="status">
+        {t(fileModels.length ? 'The selected model does not support file transcription on this route.' : 'No models support this file transcription route.')}
+      </p>}
+      {enabled && catalog && !busy && liveIssue && <p id={`${id}-live-issue`} className="chat-attachment-notice">{t(liveIssue)}</p>}
       {enabled && catalog && !busy && (!canCapture ? <p className="chat-attachment-notice">{t('Microphone access requires a secure browser context.')}</p> : <>
         {(!dictateModel || !canRecord) && <p className="chat-attachment-notice">{t(!dictateModel ? 'Dictate needs a file transcription model.' : 'Dictate recording is not supported in this browser.')}</p>}
-        {(!liveModel || !canLive) && <p className="chat-attachment-notice">{t(!liveModel ? 'No compatible Real-time transcription model is available.' : 'Real-time transcription is not supported in this browser.')}</p>}
       </>)}
       {error && <p className="chat-attachment-notice" role="alert">{t(error)}</p>}
       {libraryError && <p className="chat-attachment-notice" role="alert">{t(libraryError)}</p>}
@@ -377,11 +386,6 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
       <form method="dialog">
         <header className="chat-settings-header"><h2 id={`${id}-settings`}>{t('Transcription settings')}</h2></header>
         <div className="chat-link-fields transcription-fields">
-          <label htmlFor={`${id}-live`}>{t('Real-time model')}</label>
-          <select id={`${id}-live`} value={liveModel?.id ?? ''} disabled={!liveModels.length} onChange={event => change({ liveModel: event.target.value })}>
-            {!liveModels.length && <option value="">{t('No model available')}</option>}
-            {liveModels.map(model => <option key={model.id} value={model.id}>{model.id}</option>)}
-          </select>
           <label htmlFor={`${id}-language`}>{t('Audio language (optional)')}</label>
           <input id={`${id}-language`} maxLength={35} placeholder="en" value={settings.language ?? ''} onChange={event => change({ language: event.target.value })} />
           {fileModel?.provider === 'openai' && !fileModel.id.includes('diarize') && <>

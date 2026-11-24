@@ -8,6 +8,7 @@ import { listImages, saveImage } from './imageLibrary';
 import type { ImageItem } from './imageLibrary';
 import { imageOptionsForModel, readImagePreferences, writeImagePreferences } from './imagePreferences';
 import { canEditImage, canMaskImage, imageMaskIssue } from './imageRoute';
+import { ImageBadges, ImagePreview } from './ImagePreview';
 import { ImageSettingsDialog } from './ImageSettingsDialog';
 import { ModelPicker, resolveModelSelection } from './ModelPicker';
 import type { ModelRouter } from './modelDecisions';
@@ -32,6 +33,7 @@ export default function ImagesView({ gateway, scope, route, toolbar, catalog, lo
   const [selectedIds, setSelectedIds] = useState<string[]>();
   const [draft, setDraft] = useState<{ prompt: string; attachments: DraftAttachment[] }>({ prompt: '', attachments: [] });
   const [items, setItems] = useState<ImageItem[]>([]);
+  const [preview, setPreview] = useState<{ image: string; response: ImageItem['imageResponse'] }>();
   const [phase, setPhase] = useState<'choosing' | 'generating'>();
   const [pendingImages, setPendingImages] = useState(0);
   const [settings, setSettings] = useState(() => readImagePreferences(scope));
@@ -145,12 +147,17 @@ export default function ImagesView({ gateway, scope, route, toolbar, catalog, lo
         {(entries.length > 0 || pendingImages > 0) && <ul className="images-grid">
           {Array.from({ length: pendingImages }, (_, index) => <li className="image-tile image-shimmer" aria-hidden="true" key={`pending:${index}`} />)}
           {entries.flatMap(({ id, imageResponse }) => imageResponse.images.map((image, index) => <li className="image-tile" key={`${id}:${index}`}>
-            <img src={imageSource(image)} alt={t('Generated image')} loading="lazy" decoding="async" />
+            <button type="button" className="image-tile-button" aria-haspopup="dialog" aria-label={t('Open image preview')}
+              onClick={event => { event.currentTarget.focus(); setPreview({ image, response: imageResponse }); }}>
+              <img src={imageSource(image)} alt={t('Generated image')} loading="lazy" decoding="async" />
+              <ImageBadges response={imageResponse} />
+            </button>
           </li>))}
         </ul>}
       </section>
     </div>
     {showSettings && <ImageSettingsDialog initial={settings} models={selected} route={route} references={references}
       onSave={next => { setSettings(next); writeImagePreferences(scope, next); }} onClose={() => setShowSettings(false)} />}
+    {preview && <ImagePreview image={preview.image} response={preview.response} onClose={() => setPreview(undefined)} />}
   </main>;
 }

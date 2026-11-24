@@ -14,5 +14,8 @@ export default defineConfig({
         VITE_ENTRA_API_SCOPE: 'api://33333333-3333-3333-3333-333333333333/access_as_user',
       },
     },
+    // Keep the registry-enabled composer separate from the default BYOK fixture.
+    { command: 'npm run dev -w @streaik/sample-byok -- --port 15175', url: 'http://localhost:15175',
+      env: { VITE_MCP_REGISTRY_URL: '/test-mcp-registry' } },
   ],
 });

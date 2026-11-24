@@ -42,6 +42,44 @@ async function chooseRoute(page: Page, path: string) {
   await page.getByRole('menuitemradio', { name: path, exact: true }).click();
 }
 
+const modelPicker = (page: Page) => page.getByRole('button', { name: 'Model', exact: true });
+async function chooseModel(page: Page, model: string) {
+  await modelPicker(page).click();
+  await page.getByRole('option', { name: model.split('/').at(-1), exact: true }).click();
+}
+
+test('Real-time follows the transcription picker and explains tagged models without a live adapter', async ({ page }) => {
+  const unsupported = 'deepgram/nova-3';
+  await openTranscriptions(page, 'OpenAI', [
+    { id: batchModel, type: 'transcription' },
+    { id: googleModel, type: 'transcription', tags: ['real-time'] },
+    { id: unsupported, type: 'transcription', tags: ['realtime'] },
+    { id: liveModel, type: 'audio', tags: ['realtime'] },
+    { id: 'openai/gpt-live-transcribe', type: 'transcription' },
+  ]);
+  await expect(modelPicker(page)).toContainText('gpt-4o-transcribe');
+  await expect(start(page)).toBeDisabled();
+  await expect(start(page)).toHaveAccessibleDescription('The selected model does not support real-time transcription.');
+  await modelPicker(page).click();
+  await expect(page.getByRole('option')).toHaveCount(3);
+  await expect(page.getByRole('option', { name: 'gemini-3.5-transcribe-live', exact: true })).toBeVisible();
+  await expect(page.getByRole('option', { name: 'gpt-4o-transcribe', exact: true })).toBeVisible();
+  await page.getByRole('option', { name: 'nova-3', exact: true }).click();
+  await expect(start(page)).toBeDisabled();
+  await expect(start(page)).toHaveAccessibleDescription('This app cannot start a live session for the selected model.');
+  await chooseModel(page, googleModel);
+  await expect(modelPicker(page)).toContainText('gemini-3.5-transcribe-live');
+  await expect(start(page)).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Dictate', exact: true })).toBeDisabled();
+  const composer = page.getByRole('form', { name: 'Transcription composer' });
+  await composer.locator('input[type=file]').setInputFiles(file);
+  const send = composer.getByRole('button', { name: 'Send', exact: true });
+  await expect(send).toBeDisabled();
+  await chooseModel(page, batchModel);
+  await expect(send).toBeEnabled();
+  await expect(start(page)).toBeDisabled();
+});
+
 test('all file routes, drag and drop, interrupted SSE, and scoped finished cards', async ({ page }) => {
   const paths: string[] = [];
   let streamingAttempt = 0;
@@ -239,6 +277,8 @@ test('OpenAI microphone uses only the ephemeral secret, saves confirmed turns an
     return route.fulfill({ contentType: 'application/sdp', headers, body: 'fixture-answer' });
   });
   await openTranscriptions(page);
+  await expect(start(page)).toBeDisabled();
+  await chooseModel(page, liveModel);
   await start(page).click();
   await expect(page.getByText('Listening…', { exact: true })).toBeVisible();
   async function event(type: string, fields: Record<string, string>) {
@@ -287,9 +327,7 @@ test('Gladia consumes the gateway session URL, streams PCM and drains the final 
     });
   });
   await openTranscriptions(page, 'Gladia');
-  await page.getByRole('button', { name: 'Transcription settings' }).click();
-  await page.getByLabel('Real-time model').selectOption('gladia/solaria-1');
-  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await chooseModel(page, 'gladia/solaria-1');
   await start(page).click();
   await expect(preview(page)).toContainText('Gladia draft');
   expect(pcm).toBe(true);
@@ -333,12 +371,12 @@ for (const [model, languageOptions] of [
       }
     });
   });
-  await openTranscriptions(page, 'OpenAI', [{ id: model, type: 'transcription' }]);
+  await openTranscriptions(page, 'OpenAI', [{ id: model, type: 'transcription', tags: ['realtime'] }]);
   await expect(start(page)).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Dictate', exact: true })).toBeDisabled();
   await expect(page.getByText('Dictate needs a file transcription model.')).toBeVisible();
   await page.getByRole('button', { name: 'Transcription settings' }).click();
-  await expect(page.getByLabel('Real-time model')).toHaveValue(model);
+  await expect(page.getByLabel('Real-time model')).toHaveCount(0);
   await page.getByLabel('Audio language (optional)').fill('nl');
   await page.getByRole('button', { name: 'Done', exact: true }).click();
   // Wrap Playwright's routed WebSocket after its init script has installed it.
@@ -404,8 +442,6 @@ test('Google Live Transcribe waits for setup, streams PCM, and saves only finali
   await expect(start(page)).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Dictate', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: 'Transcription settings' }).click();
-  await expect(page.getByLabel('Real-time model')).toHaveValue(googleModel);
-  await expect(page.getByLabel('Real-time model').locator('option')).toHaveCount(1);
   await page.getByLabel('Audio language (optional)').fill('nl-NL');
   await page.getByRole('button', { name: 'Done', exact: true }).click();
   await start(page).click();
@@ -444,7 +480,7 @@ test('Google Live Transcribe rejects untrusted socket targets, cleans up on canc
       socket.close({ code: 1011 });
     });
   });
-  await openTranscriptions(page, 'Google Gemini', [{ id: googleModel, type: 'transcription' }]);
+  await openTranscriptions(page, 'Google Gemini', [{ id: googleModel, type: 'transcription', tags: ['realtime'] }]);
   await start(page).click();
   await expect(page.getByRole('alert')).toContainText('did not return a valid microphone session credential');
   await expect(page.locator('html')).toHaveAttribute('data-track', 'stopped');
@@ -516,6 +552,7 @@ test('Dictate warns, records only on confirmation, submits on Stop, and keeps a 
   expect(uploads).toBe(2);
 
   await page.getByRole('button', { name: 'Images', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Images', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Transcriptions', exact: true }).click();
   await page.evaluate(() => { document.documentElement.dataset.denyMic = 'true'; });
   await dictate.click();

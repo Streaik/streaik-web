@@ -29,7 +29,7 @@ export type MultiSelectProps = Omit<SelectProps, 'multiple' | 'value' | 'onValue
 export type TextareaProps = Omit<ComponentPropsWithoutRef<'textarea'>, 'value' | 'defaultValue'> & { value?: string; defaultValue?: string };
 export type ThemeSettingsProps = ThemeEnv & { onChange: (value: Preferences) => void; translate: (key: string) => string };
 export type IconName = 'images' | 'videos' | 'models' | 'providers' | 'agents' | 'sidebar' | 'compose' | 'user' | 'settings' | 'logout' | 'more' | 'moreVertical' | 'pin' | 'unpin' | 'trash' |
-  'copy' | 'download' | 'check' | 'tokens' | 'cost' | 'timer' | 'speed' | 'stop' | 'send' | 'search' | 'chevronDown' | 'key' | 'add' | 'edit' | 'palette' |
+  'copy' | 'download' | 'check' | 'tokens' | 'cost' | 'timer' | 'speed' | 'stop' | 'send' | 'search' | 'chevronDown' | 'key' | 'add' | 'edit' | 'palette' | 'refresh' | 'tag' |
   'back' | 'close' | 'website' | 'docs' | 'pricing' | 'terms' | 'privacy' | 'console' | 'info' | 'brain' | 'tool' | 'attachment' | 'link' | 'mic' |
   'grid' | 'language' | 'decision' | 'ranking' | 'realtime' | 'transcription' | 'embedding' | 'audio' | 'moderation' | 'shapes' | 'contextWindow' | 'outputLimit';
 type IconGlyphProps = Pick<ComponentPropsWithoutRef<'svg'>, 'className' | 'width' | 'height' | 'aria-hidden' | 'focusable'>;

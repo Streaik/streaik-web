@@ -3,7 +3,7 @@ import type { GatewayTranscriptionEndpoint, TranscriptionOptions } from '@streai
 import { useState } from 'react';
 
 export type TranscriptionRouteSetting = { selected: GatewayTranscriptionEndpoint; onSelect: (route: GatewayTranscriptionEndpoint) => void };
-export type TranscriptionPreferences = TranscriptionOptions & { fileModel?: string; liveModel?: string; split?: boolean; overlap?: number; skipDictateWarning?: boolean };
+export type TranscriptionPreferences = TranscriptionOptions & { model?: string; split?: boolean; overlap?: number; skipDictateWarning?: boolean };
 
 function read(key: string | undefined) {
   try { return key ? localStorage.getItem(key) : null; } catch { return null; }
@@ -30,8 +30,7 @@ export function useTranscriptionPreferences(scope?: string) {
   const [value, setValue] = useState<TranscriptionPreferences>(() => {
     try {
       const data = JSON.parse(read(key) ?? '{}');
-      return { fileModel: typeof data.fileModel === 'string' ? data.fileModel : undefined,
-        liveModel: typeof data.liveModel === 'string' ? data.liveModel : undefined,
+      return { model: typeof data.model === 'string' ? data.model : typeof data.fileModel === 'string' ? data.fileModel : undefined,
         language: typeof data.language === 'string' ? data.language.slice(0, 35) : undefined,
         prompt: typeof data.prompt === 'string' ? data.prompt.slice(0, 1000) : undefined,
         split: data.split === true, diarization: data.diarization === true, skipDictateWarning: data.skipDictateWarning === true,
