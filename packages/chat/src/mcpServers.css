@@ -1,0 +1,21 @@
+.mcp-page, .mcp-form, .mcp-fields { display: grid; gap: 1rem; }
+.mcp-section-heading, .mcp-actions { display: flex; align-items: center; gap: .35rem; }
+.mcp-section-heading { justify-content: space-between; flex-wrap: wrap; }
+.mcp-actions { justify-content: flex-end; }
+.mcp-page h2, .mcp-dialog p { margin-block: .4rem; }
+.mcp-list { list-style: none; margin: 0; padding: 0; }
+.mcp-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .25rem .5rem; padding: .55rem 0; border-bottom: 1px solid var(--chat-border); }
+.mcp-row small { grid-column: 1 / -1; }
+.mcp-toggle { display: flex; align-items: center; gap: .6rem; }
+.mcp-toggle input { margin: 0; }
+.mcp-toggle span, .mcp-endpoint, .mcp-page .catalog-card { min-width: 0; overflow-wrap: anywhere; }
+.mcp-endpoint select { max-width: 100%; }
+.mcp-fields { min-width: 0; margin: 0; border: 1px solid var(--chat-border); border-radius: .5rem; padding: .75rem; }
+.mcp-form label { display: grid; gap: .25rem; min-width: 0; }
+.mcp-form input, .mcp-form select, .mcp-page input, .mcp-page select {
+  min-width: 0; width: 100%; padding: .45rem .6rem; color: inherit;
+  background: var(--chat-surface); border: 1px solid var(--chat-border); border-radius: .4rem; font: inherit;
+}
+.mcp-form input:read-only { opacity: .75; }
+.mcp-header-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) auto; gap: .4rem; align-items: end; }
+.mcp-selected-count { font-size: .72rem; }

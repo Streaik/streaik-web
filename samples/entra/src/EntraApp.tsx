@@ -17,7 +17,8 @@ export function EntraApp({ appName, base, auth, mcpConfig }: { appName: string; 
   const working = useRef(false);
   const [gateway] = useState(() => createGateway(base, auth.headers));
   const [mcp] = useState<McpOptions | undefined>(() => mcpConfig && { ...mcpConfig,
-    headersForRemote: (headers) => acceptsEntraMcpToken(headers) ? auth.mcpHeaders : undefined });
+    headersForRemote: (headers) => auth.hasMcpScope && acceptsEntraMcpToken(headers)
+      ? { ready: !!auth.getAccount(), headers: auth.mcpHeaders } : undefined });
 
   async function authenticate(signOut = false) {
     if (working.current) return;
@@ -36,7 +37,7 @@ export function EntraApp({ appName, base, auth, mcpConfig }: { appName: string; 
   }
 
   return <ChatApp key={account?.homeAccountId ?? 'signed-out'} appName={appName} gateway={gateway} agents={account ? appAgents : undefined} connection={{
-    ready: !!account, modelRevision: revision, mcp,
+    ready: !!account, modelRevision: revision, mcp, mcpSession: !!account,
     historyProfile: account && `entra:${account.environment}:${account.tenantId}:${account.homeAccountId}` || undefined,
     emptyMessage: t(issue || 'Sign in with Microsoft to start chatting.'),
     account: account ? { name: account.name || account.username, busy, onLogout: () => { void authenticate(true); } } : undefined,

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { APIRequestContext, APIResponse, Page } from '@playwright/test';
-import { discoverMcpTools } from '../packages/chat/src/mcp';
+import { fetchMcpCatalog, mcpAppAuth } from '../packages/chat/src/mcp';
 import { acceptsEntraMcpToken, readMcpConfig } from '../samples/shared/mcpConfig';
 
 const model = 'openai/gpt-4.1-mini';
@@ -25,12 +25,35 @@ async function setOpenAiKey(page: Page) {
   await page.getByRole('button', { name: 'Close', exact: true }).click();
 }
 
-async function exerciseChat(page: Page, approve: boolean) {
+async function addManualServer(page: Page, title: string, url: string) {
+  await page.getByRole('button', { name: 'MCP Servers', exact: true }).click();
+  await page.getByRole('button', { name: 'Add by URL' }).click();
+  const editor = page.getByRole('dialog', { name: 'Add MCP server' });
+  await editor.getByLabel('Server name').fill(title);
+  await editor.getByLabel('Server URL').fill(url);
+  await editor.getByRole('button', { name: 'Add header' }).click();
+  await editor.getByLabel('Header name').fill('Authorization');
+  await editor.getByLabel('Header value').fill(auth.openai.Authorization);
+  await editor.getByRole('button', { name: 'Save server' }).click();
+  await expect(editor).toHaveCount(0);
+}
+
+async function selectServer(page: Page, name: string, count: number) {
+  await page.getByRole('button', { name: 'Choose MCP servers' }).click();
+  const picker = page.getByRole('dialog', { name: 'MCP servers for this chat' });
+  const toggle = picker.getByRole('switch', { name, exact: true });
+  await expect(toggle).not.toBeChecked();
+  await toggle.check();
+  await expect(picker.getByText(`${count} tools available`)).toBeVisible();
+  await picker.getByRole('button', { name: 'Close' }).click();
+}
+
+async function exerciseChat(page: Page, approve: boolean, manual = false) {
   const calls: string[] = [];
   const mcpFailures: string[] = [];
   let chatRequests = 0;
   let decisions = 0;
-  const routed = !approve;
+  const routed = !approve && !manual;
   const candidate = 'openai/gpt-5-nano';
   const router = 'openai/test-router';
   const instructions = 'Choose the model most suitable for concise image prompts.';
@@ -54,10 +77,11 @@ async function exerciseChat(page: Page, approve: boolean) {
   await page.route('**/gateway/api/chat', async route => {
     chatRequests++;
     const sent = route.request().postDataJSON();
-    const tool = 'mcp_openai_images_OpenAIImages_CreateImage';
+    const tool = sent.tools.map((tool: { name: string }) => tool.name).find((name: string) => name.endsWith('_OpenAIImages_CreateImage'));
     expect(sent.model).toBe(routed ? candidate : model);
     expect(sent.clientToolResultApproval).toBe(true);
-    expect(sent.tools.map((tool: { name: string }) => tool.name)).toContain(tool);
+    expect(tool).toMatch(manual ? /^mcp_[\w-]+_OpenAIImages_CreateImage$/ : /^mcp_openai_images_OpenAIImages_CreateImage$/);
+    expect(sent.tools.map((tool: { name: string }) => tool.name).filter((name: string) => name.startsWith('mcp_'))).toHaveLength(3);
     const headers = { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' };
     if (chatRequests === 1) {
       await route.fulfill({ headers, body: sse([
@@ -87,6 +111,13 @@ async function exerciseChat(page: Page, approve: boolean) {
 
   await page.goto('/');
   await setOpenAiKey(page);
+  if (manual) await addManualServer(page, 'Manual images', `${mcp}/openai-images`);
+  else {
+    await page.getByRole('button', { name: 'MCP Servers', exact: true }).click();
+    await page.getByRole('button', { name: 'Install OpenAI Images' }).click();
+    await expect(page.getByRole('region', { name: 'Installed servers' }).getByText('OpenAI Images', { exact: true })).toBeVisible();
+  }
+  await page.getByRole('button', { name: 'New chat', exact: true }).click();
   if (routed) {
     await page.getByRole('button', { name: 'Agents', exact: true }).click();
     await page.getByRole('button', { name: 'Create agent', exact: true }).click();
@@ -108,12 +139,15 @@ async function exerciseChat(page: Page, approve: boolean) {
     await page.getByRole('option', { name: 'gpt-5-nano', exact: true }).click();
     await page.keyboard.press('Escape');
   }
-  await page.getByRole('button', { name: 'Discover MCP tools' }).click();
-  await expect(page.getByText('7 MCP tools enabled')).toBeVisible();
-  await page.getByText('7 MCP tools enabled').click();
-  await expect(page.getByText('Anthropic Skills: AnthropicSkills_Get')).toBeVisible();
+  await selectServer(page, manual ? 'Manual images' : 'OpenAI Images', 3);
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Create a tiny landscape.');
   await page.getByRole('button', { name: 'Send', exact: false }).click();
+  if (manual) {
+    const execution = page.getByRole('dialog', { name: 'Approve tool execution' });
+    await expect(execution.getByText('Arguments go to Manual images on localhost:15281.', { exact: false })).toBeVisible();
+    expect(calls).toEqual([]);
+    await execution.getByRole('button', { name: 'Approve and run' }).click();
+  }
   const review = page.getByRole('dialog', { name: 'Review tool result' });
   await expect(review.getByRole('tabpanel', { name: 'Output' })).toContainText('MCP returned 1 image(s)');
   await expect(review.getByRole('img', { name: 'MCP image 1' })).toBeVisible();
@@ -135,10 +169,15 @@ async function exerciseChat(page: Page, approve: boolean) {
 
 test('browser executes once, previews the image in a review modal, and shares the approved result', async ({ page }) => exerciseChat(page, true));
 test('the assigned router runs once and its chosen model continues after an MCP denial', async ({ page }) => exerciseChat(page, false));
+test('a manually added server requires approval before sending tool arguments', async ({ page }) => exerciseChat(page, true, true));
 
 test('the registry controls which servers appear in chat and receives no credentials', async ({ page }) => {
   await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: model }] } }));
   let listings = 0;
+  const discovery: string[] = [];
+  page.on('request', request => {
+    if (request.url().startsWith(mcp) && request.method() === 'POST') discovery.push(request.url());
+  });
   await page.route(registryUrl, async route => {
     listings++;
     const headers = await route.request().allHeaders();
@@ -151,34 +190,65 @@ test('the registry controls which servers appear in chat and receives no credent
   });
   await page.goto('/');
   await setOpenAiKey(page);
-  await page.getByRole('button', { name: 'Discover MCP tools' }).click();
-  const tools = page.getByText('3 MCP tools enabled');
-  await expect(tools).toBeVisible();
-  await tools.click();
-  await expect(page.getByText('Images from the configured registry: OpenAIImages_CreateImage', { exact: true })).toBeVisible();
+  expect(listings).toBe(0);
+  await page.getByRole('button', { name: 'MCP Servers', exact: true }).click();
+  await expect(page).toHaveURL(/\/mcp$/);
+  await page.getByRole('button', { name: 'Install Images from the configured registry' }).click();
+  expect(discovery).toEqual([]);
+  await page.getByRole('button', { name: 'New chat' }).click();
+  await selectServer(page, 'Images from the configured registry', 3);
+  expect([...new Set(discovery)]).toEqual([`${mcp}/openai-images`]);
   expect(listings).toBe(1);
 });
 
-test('registry discovery is opt-in, and credentials are not resolved for remotes outside the trusted base', async () => {
-  const site = new URL('http://localhost:15273/');
-  expect(readMcpConfig(site, mcp)).toBeUndefined();
-  expect(readMcpConfig(site, undefined, registryUrl)).toBeUndefined();
-  expect(readMcpConfig(site, mcp, 'http://remote.example.test/v0.1/servers')).toBeUndefined();
-  expect(readMcpConfig(site, mcp, '/registry/v0.1/servers')?.registryUrl.href).toBe(`${site.origin}/registry/v0.1/servers`);
+test('manual headers are not persisted, and the disabled toggle has a separate configure button', async ({ page }) => {
+  await page.goto('/');
+  await addManualServer(page, 'Private MCP', `${mcp}/openai-images`);
+  expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain(auth.openai.Authorization);
+  await page.reload();
+  const installed = page.getByRole('region', { name: 'Installed servers' });
+  await expect(installed.getByText('Credentials needed')).toBeVisible();
+  await page.getByRole('button', { name: 'New chat' }).click();
+  await page.getByRole('button', { name: 'Choose MCP servers' }).click();
+  const picker = page.getByRole('dialog', { name: 'MCP servers for this chat' });
+  const toggle = picker.getByRole('switch', { name: 'Private MCP' });
+  await expect(toggle).toBeDisabled();
+  await expect(toggle).not.toBeChecked();
+  const configure = picker.getByRole('button', { name: 'Configure Private MCP' });
+  await expect(configure).toHaveText('');
+  await configure.click();
+  const editor = page.getByRole('dialog', { name: 'Configure MCP server' });
+  await expect(editor.getByLabel('Header value')).toHaveValue('');
+  await editor.getByLabel('Header value').fill(auth.openai.Authorization);
+  await editor.getByRole('button', { name: 'Save server' }).click();
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).not.toBeChecked();
+});
 
+test('catalog is configured separately, and app credentials are not resolved outside the trusted base', async () => {
+  const site = new URL('http://localhost:15273/');
+  expect(readMcpConfig(site, mcp)?.registryUrl).toBeUndefined();
+  expect(readMcpConfig(site, undefined, registryUrl)?.base).toBeUndefined();
+  expect(readMcpConfig(site, mcp, 'http://remote.example.test/v0.1/servers')).toBeUndefined();
+  expect(readMcpConfig(site, mcp, '/registry/v0.1/servers')?.registryUrl?.href).toBe(`${site.origin}/registry/v0.1/servers`);
+
+  const { servers } = await fetchMcpCatalog(new URL(registryUrl), new AbortController().signal);
+  expect(servers).not.toHaveLength(0);
   for (const base of [delegated, `${mcp}/other-runtime/`]) {
     const options = readMcpConfig(site, base, registryUrl)!;
-    expect(await discoverMcpTools({ ...options, headersForRemote: () => {
+    const policy = { ...options, headersForRemote: () => {
       throw new Error('Untrusted endpoints must not reach the credential policy.');
-    } }, new AbortController().signal)).toEqual([]);
+    } };
+    for (const server of servers) for (const remote of server.remotes) expect(mcpAppAuth(policy, { ...remote, source: 'registry' })).toBeUndefined();
   }
 });
 
 test('the bundled header-auth registry is not compatible with the Entra chat credential policy', async () => {
   const options = readMcpConfig(new URL('http://localhost:15274/'), mcp, registryUrl)!;
-  expect(await discoverMcpTools({ ...options, headersForRemote: (headers) => acceptsEntraMcpToken(headers) ? () => {
-    throw new Error('The Entra sample must not acquire a token for a provider-key listing.');
-  } : undefined }, new AbortController().signal)).toEqual([]);
+  const { servers } = await fetchMcpCatalog(new URL(registryUrl), new AbortController().signal);
+  const policy = { ...options, headersForRemote: (headers: Parameters<typeof acceptsEntraMcpToken>[0]) => acceptsEntraMcpToken(headers)
+    ? { ready: true, headers: () => ({ Authorization: 'Bearer fixture' }) } : undefined };
+  for (const server of servers) for (const remote of server.remotes) expect(mcpAppAuth(policy, { ...remote, source: 'registry' })).toBeUndefined();
   expect(acceptsEntraMcpToken([])).toBe(true);
   expect(acceptsEntraMcpToken([{ name: 'Authorization', value: 'Bearer {access_token}' }])).toBe(true);
 });

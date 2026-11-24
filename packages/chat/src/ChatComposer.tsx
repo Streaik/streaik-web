@@ -16,7 +16,8 @@ export function AttachmentChip({ name, url, note, children }: { name: string; ur
 
 type ImageDraft = { prompt: string; attachments: DraftAttachment[] };
 type ComposerProps = { busy: boolean; canSend: boolean } & (
-  { image?: undefined; video?: undefined; convert: boolean; onSend: (parts: AttachmentPart[]) => void; onChatSettings: () => void; onViewContext: () => void; onStop: () => void } |
+  { image?: undefined; video?: undefined; convert: boolean; onSend: (parts: AttachmentPart[]) => void; onChatSettings: () => void; onViewContext: () => void;
+    mcp?: { count: number; disabled: boolean; open: () => void }; onStop: () => void } |
   { image: { draft: ImageDraft; onChange: (value: ImageDraft) => void; onSend: () => void; onSettings: () => void }; video?: undefined; onStop: () => void } |
   { image?: undefined; video: { prompt: string; onChange: (prompt: string) => void; onSend: () => void }; onStop?: undefined }
 );
@@ -191,6 +192,10 @@ export function ChatComposer(props: ComposerProps) {
             title={t('Chat settings')} aria-haspopup="dialog" onClick={props.onChatSettings}><ChatIcon name="settings" /></Button></span>
           <Button className="chat-composer-icon" type="button" variant="subtle" aria-label={t('View context')}
             title={t('View context')} aria-haspopup="dialog" onClick={props.onViewContext}><ChatIcon name="info" /></Button>
+          {props.mcp && <Tooltip content={t('Choose MCP servers')}><Button className="chat-composer-icon" type="button" variant="subtle"
+            aria-label={t('Choose MCP servers')} aria-haspopup="dialog" disabled={props.mcp.disabled || preparing} onClick={props.mcp.open}>
+            <ChatIcon name="tool" />{props.mcp.count > 0 && <span className="mcp-selected-count" aria-hidden="true">{props.mcp.count}</span>}
+          </Button></Tooltip>}
         </>}
         {busy && onStop ? <Button key="stop" className="chat-send" type="button" aria-label={t('Stop')} title={t('Stop')}
             onClick={onStop}><ChatIcon name="stop" /></Button>

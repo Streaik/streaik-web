@@ -20,7 +20,7 @@ async function start() {
   const site = new URL(import.meta.env.BASE_URL, location.origin);
   const base = normalizeGatewayBase(import.meta.env.VITE_GATEWAY_BASE || '/gateway', site.href);
   const mcpScope = import.meta.env.VITE_ENTRA_MCP_SCOPE?.trim();
-  const mcpConfig = mcpScope ? readMcpConfig(site, import.meta.env.VITE_MCP_BASE, import.meta.env.VITE_MCP_REGISTRY_URL) : undefined;
+  const mcpConfig = readMcpConfig(site, import.meta.env.VITE_MCP_BASE, import.meta.env.VITE_MCP_REGISTRY_URL);
   const { createEntraAuth } = await import('./auth');
   const auth = await createEntraAuth({
     tenantId: import.meta.env.VITE_ENTRA_TENANT_ID ?? '',

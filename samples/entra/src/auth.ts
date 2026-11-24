@@ -28,6 +28,7 @@ export async function createEntraAuth(config: { tenantId: string; clientId: stri
 
   return {
     getAccount: () => current,
+    hasMcpScope: !!mcpScope,
     async signIn() {
       const result = await msal.loginPopup({ scopes, prompt: 'select_account', extraScopesToConsent: mcpScope ? [mcpScope] : undefined });
       if (result.account.tenantId.toLowerCase() !== tenantId.toLowerCase()) {

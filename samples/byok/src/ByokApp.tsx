@@ -37,13 +37,12 @@ export function ByokApp({ appName, base, mcpConfig }: { appName: string; base?: 
   const [mcp] = useState<McpOptions | undefined>(() => mcpConfig && ({ ...mcpConfig, headersForRemote: (declarations) => {
     const provider = byokMcpProvider(declarations);
     if (!provider) return;
-    return () => {
-      const headers = new Headers();
+    return { ready: !!keys.current[provider], headers: () => {
       const key = keys.current[provider];
-      if (key && provider === 'openai') headers.set('Authorization', `Bearer ${key}`);
-      else if (key) headers.set(provider === 'google' ? 'x-goog-api-key' : 'x-api-key', key);
-      return headers;
-    };
+      if (!key) throw new GatewayError('Set or unlock the provider key for this MCP server.');
+      return provider === 'openai' ? { Authorization: `Bearer ${key}` }
+        : { [provider === 'google' ? 'x-goog-api-key' : 'x-api-key']: key };
+    } };
   } }));
 
   function updateKeys(next: ProviderKeys) {
@@ -116,7 +115,7 @@ export function ByokApp({ appName, base, mcpConfig }: { appName: string; base?: 
 
   const configured = providerIds.filter((id) => !!keys.current[id]);
   return <ChatApp appName={appName} gateway={gateway} agents={vault.state === 'locked' ? undefined : appAgents} connection={{
-    ready: configured.length > 0, modelRevision: revision, mcp, direct,
+    ready: configured.length > 0, modelRevision: revision, mcp, direct, mcpSession: vault.state !== 'locked',
     historyProfile: vault.state === 'locked' ? undefined : 'byok',
     emptyMessage: t(vault.state === 'locked' ? 'Unlock your provider keys in Settings to start chatting.' : 'Add a provider key in Settings to start chatting.'),
     account: { name: 'BYOK' },

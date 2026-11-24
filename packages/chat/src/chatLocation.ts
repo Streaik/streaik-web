@@ -10,6 +10,7 @@ export const pagePaths = {
   transcriptions: '/transcriptions',
   agents: '/agents',
   skills: '/skills',
+  mcp: '/mcp',
 } as const satisfies Record<PageView, string>;
 
 const home = { kind: 'home' } as const;

@@ -45,9 +45,13 @@ import type { AgentsConfig } from './agentCatalog';
 import { agentModels as configuredAgentModels } from './agentDefinition';
 import { conversationOpeningText, deleteConversation, listConversations, newConversation, newestFirst, saveConversation } from './conversations';
 import type { Conversation } from './conversations';
-import { callMcpTool, discoverMcpTools } from './mcp';
-import type { McpOptions, McpTool } from './mcp';
-export type { McpOptions, McpRemoteHeader } from './mcp';
+import { callMcpTool } from './mcp';
+import type { McpOptions } from './mcp';
+import { McpServerEditor, McpServerPicker, McpServersView } from './McpServersView';
+import type { McpEditorTarget } from './McpServersView';
+import { useMcpSelection, useMcpServers } from './useMcpServers';
+import type { McpServers } from './useMcpServers';
+export type { McpAppAuth, McpOptions, McpRemoteHeader } from './mcp';
 import { chatDecisionInput, chatModelDecision, modelDecisionRouter, selectModelRoleId, useDecisionRoute } from './modelDecisions';
 import type { ModelDecision } from './modelDecisions';
 import { conversationNameRoleId, runTextAppAgent, welcomeRoleId } from './textAppAgents';
@@ -82,6 +86,8 @@ type Connection = {
   settings?: ReactNode;
   apiKeySettings?: ReactNode;
   mcp?: McpOptions;
+  /** Disallow MCP configuration and discard in-memory headers when the user signs out or locks the profile. */
+  mcpSession?: boolean;
   direct?: DirectChat;
 };
 
@@ -202,6 +208,7 @@ function HistoryChat({ appName, gateway, connection, scope, models, route, onRou
   const [nav, setNav] = useState(false);
   const agentsEnabled = !!useAgents();
   const localSkills = useLocalSkills(scope);
+  const mcpServers = useMcpServers(scope, connection.mcp, connection.mcpSession ?? (!connection.signIn || connection.ready));
   const remoteSkills = useRemoteSkills(gateway, connection.ready && gateway.historyScope !== 'direct', connection.modelRevision ?? 0);
   const view = target.kind === 'page' && (target.view !== 'agents' || agentsEnabled) ? target.view : 'chat';
   const videos = useVideoJobs(gateway, scope, view === 'videos');
@@ -339,7 +346,7 @@ function HistoryChat({ appName, gateway, connection, scope, models, route, onRou
     }} onPin={togglePin} onDelete={remove}
     models={models} route={route} onRoute={onRoute} decisions={decisions} images={images} videos={videos} transcriptions={transcriptions} scope={scope} onSettings={onSettings}
     preferences={preferences} onPreferences={onPreferences}
-    localSkills={localSkills} remoteSkills={remoteSkills} readHistory={scope ? () => latestHistory.current : undefined} />;
+    localSkills={localSkills} remoteSkills={remoteSkills} mcpServers={mcpServers} readHistory={scope ? () => latestHistory.current : undefined} />;
 }
 
 type ToolResult = { output: unknown; images?: string[] };
@@ -349,7 +356,7 @@ type Turn = { model: string; route: ChatRoute; tools: ChatTool[]; context?: Requ
 const isApiChat = (route: ChatRoute | undefined) => !route || (route.mode === 'gateway' && route.endpoint === '/api/chat');
 const toolComplete = (part: Invocation) => part.state === 'output-available' || part.state === 'output-error' || part.state === 'approval-responded';
 
-function ChatSession({ appName, gateway, connection, conversation, history, storageIssue, locationIssue, nav, view, onView, toggleNav, onPersist, onNew, onSwitch, onPin, onDelete, models, route, onRoute, decisions, images, videos, transcriptions, scope, onSettings, preferences, onPreferences, localSkills, remoteSkills, readHistory }: {
+function ChatSession({ appName, gateway, connection, conversation, history, storageIssue, locationIssue, nav, view, onView, toggleNav, onPersist, onNew, onSwitch, onPin, onDelete, models, route, onRoute, decisions, images, videos, transcriptions, scope, onSettings, preferences, onPreferences, localSkills, remoteSkills, mcpServers, readHistory }: {
   appName: string; gateway: Gateway; connection: Connection; conversation: Conversation; history: Conversation[]; storageIssue: string;
   locationIssue?: string;
   nav: boolean; toggleNav: () => void; onPersist: (conversation: Conversation, nameRequest?: TextAppRequest) => void; onNew: () => void;
@@ -365,6 +372,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
   preferences: ChatPreferences; onPreferences: (preferences: ChatPreferences) => void;
   localSkills: LocalSkills;
   remoteSkills: RemoteSkills;
+  mcpServers: McpServers;
   readHistory?: () => readonly Conversation[];
 }) {
   const { t, i18n } = useAppTranslation();
@@ -438,14 +446,14 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
     id: conversation.id, messages: conversation.messages, transport, throttle: preferences.delay || undefined,
   });
   useEffect(() => () => { void stop(); }, [stop]);
-  const [tools, setTools] = useState<McpTool[] | null>(null);
-  const [mcpNotice, setMcpNotice] = useState('');
+  const [mcpPicker, setMcpPicker] = useState(false);
+  const [mcpEditor, setMcpEditor] = useState<McpEditorTarget>();
+  const mcpSelection = useMcpSelection(mcpServers);
   const [toolNotice, setToolNotice] = useState('');
   const [toolBusy, setToolBusy] = useState(false);
   const [staged, setStaged] = useState<{ turn: Turn; callId: string; result: ToolResult }>();
   const [toolImages, setToolImages] = useState<string[]>([]);
   const operation = useRef<AbortController | null>(null);
-  const mcp = connection.mcp;
   const hasHistory = !!readHistory;
   const language = i18n.resolvedLanguage ?? i18n.language ?? 'en';
   const gatewayRoute = route.mode === 'gateway';
@@ -463,8 +471,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
     if (restoringSkills && !skillsBusy) loadSkills(skillCursor);
   }, [restoringSkills, skillsBusy, loadSkills, skillCursor]);
   const hasSkills = enabledRemoteSkills.length > 0 || localSkills.skills.some(({ enabled }) => enabled);
-  const enabledTools = useMemo(() => activeChatTools(route, preferences.plugins, hasHistory, mcp ? tools ?? [] : [], hasSkills),
-    [route, preferences.plugins, hasHistory, mcp, tools, hasSkills]);
+  const enabledTools = activeChatTools(route, preferences.plugins, hasHistory, mcpSelection.tools, hasSkills);
   const context = useMemo(() => gatewayRoute ? buildRequestContext(appName, language, darkMode, localSkills.skills, enabledRemoteSkills) : undefined,
     [gatewayRoute, appName, language, darkMode, localSkills.skills, enabledRemoteSkills]);
   const last = messages.at(-1);
@@ -493,7 +500,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
       if (part.state !== 'approval-requested' || !tool) {
         setToolNotice('The gateway did not return an approval for this client tool.');
         setTurn(undefined);
-      } else if (!stagedResult) {
+      } else if (!stagedResult && !(tool.source === 'mcp' && tool.tool.server.reviewExecution)) {
         if (turn.automatic.calls >= 8) {
           setToolNotice('Local tool limit reached for this turn.');
           setTurn(undefined);
@@ -521,30 +528,12 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
     }
   });
 
-  async function discover() {
-    if (!mcp || operation.current) return;
-    const controller = new AbortController();
-    operation.current = controller; setToolBusy(true); setMcpNotice('');
-    try {
-      const result = await discoverMcpTools(mcp, controller.signal);
-      if (!controller.signal.aborted) { setTools(result); if (!result.length) setMcpNotice('No MCP tools were found.'); }
-    } catch {
-      if (!controller.signal.aborted) setMcpNotice('Could not discover MCP tools. Check the standalone MCP app and your access.');
-    } finally {
-      if (operation.current === controller) {
-        operation.current = null;
-        if (!controller.signal.aborted) setToolBusy(false);
-      }
-    }
-  }
-
   async function completeTool(part: Invocation, tool: ChatTool, action: 'stage' | 'run' | 'decline') {
     if (!turn || turn.resolved.has(part.toolCallId) || operation.current || status !== 'ready') return;
     const controller = new AbortController();
     // The render snapshot can lag behind addToolOutput when message updates are throttled.
     if (action !== 'stage') turn.resolved.add(part.toolCallId);
     operation.current = controller; setToolBusy(true);
-    if (tool.source === 'mcp') setMcpNotice('');
     try {
       let output: unknown, images: string[] | undefined;
       if (tool.source === 'local') {
@@ -556,8 +545,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
         output = 'The user declined to run this MCP tool.';
         if (action !== 'decline') {
           try {
-            if (!mcp) throw new Error('MCP is unavailable.');
-            const result = await callMcpTool(mcp, tool.tool, part.input, controller.signal);
+            if (!mcpServers.available) throw new Error('MCP is unavailable.');
+            const result = await callMcpTool(tool.tool, part.input, controller.signal);
             output = result.text;
             images = result.images;
           } catch { output = 'The MCP tool could not be completed.'; }
@@ -588,13 +577,17 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
       return;
     }
     const result = stagedResult;
-    if (part.state !== 'approval-requested' || !result) return;
+    if (part.state !== 'approval-requested') return;
+    if (!result) {
+      if (tool?.source !== 'mcp' || !tool.tool.server.reviewExecution) return;
+      if (approved) { void completeTool(part, tool, 'stage'); return; }
+    }
     turn.resolved.add(part.toolCallId);
     setStaged(undefined);
     if (approved && result?.images?.length) setToolImages(result.images);
     // Apply the decision and approved output atomically, preserving a signature when provided.
     const approval = { ...part.approval, approved };
-    const answered: Invocation = approved
+    const answered: Invocation = approved && result
       ? { ...part, state: 'output-available', approval: { ...approval, approved: true }, output: result.output }
       : { ...part, state: 'approval-responded', approval, output: undefined };
     setMessages(current => current.map(message => message.id === last.id ? { ...message,
@@ -625,11 +618,14 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
     const { tool, part } = pending;
     const name = tool?.source === 'mcp' ? tool.tool.title || tool.tool.remoteName : invocationName(part);
     const details = { id: part.toolCallId, name, input: part.input, disabled: toolBusy || !connection.ready };
+    const destination = tool?.source === 'mcp' ? { server: tool.tool.server.title, host: new URL(tool.tool.server.endpoint).host } : undefined;
     if (isApiChat(turn.route)) {
-      if (part.state === 'approval-requested' && stagedResult) return { ...details, kind: 'result', ...stagedResult };
+      if (part.state === 'approval-requested') {
+        if (stagedResult) return { ...details, kind: 'result', ...stagedResult };
+        if (tool?.source === 'mcp' && tool.tool.server.reviewExecution) return { ...details, kind: 'execution', destination };
+      }
     } else if (part.state === 'input-available' && (tool?.source === 'mcp' || (tool?.source === 'local' && tool.plugin.approval))) {
-      return { ...details, kind: 'execution', destination: tool.source === 'mcp' && mcp
-        ? { server: tool.tool.server.title, host: mcp.base.host } : undefined };
+      return { ...details, kind: 'execution', destination };
     }
   }
   const review = pendingReview();
@@ -676,7 +672,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
   const hasDecisions = agents?.config.roles?.some(({ id }) => id === selectModelRoleId);
   const decision = chatModelDecision(router, selected);
   const routesLocked = busy || toolBusy || (status === 'ready' && toolParts.length > 0);
-  const canSend = !!model && !routesLocked && !restoringSkills;
+  const canSend = !!model && !routesLocked && !restoringSkills && !mcpSelection.loading;
   const routeMenu = pageRouteMenu(view, {
     chat: connection.account ? { selected: route, direct: direct?.endpoints(!connection.ready), disabled: routesLocked, onSelect: onRoute } : undefined,
     decisions: connection.account && hasDecisions ? decisions : undefined,
@@ -719,18 +715,15 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
             {t(errorMessage(error, 'The reply was interrupted. You can retry or send another message.'))}
             <Button disabled={!canSend} onClick={() => { if (model && canSend) void regenerate({ body: beginTurn(model.id) }); }}>{t('Retry')}</Button>
           </div>}
-          {mcp && <section className="chat-notice" aria-label={t('MCP tools')}>
-             {tools === null ? <Button onClick={() => { void discover(); }} disabled={!connection.ready || routesLocked}>{t('Discover MCP tools')}</Button>
-               : <details><summary>{t('{{count, number}} MCP tools enabled', { count: tools.length })}</summary><ul>{tools.map(tool => <li key={tool.name}>{tool.server.title}: {tool.remoteName}</li>)}</ul>
-                <Button disabled={routesLocked} onClick={() => { setTools(null); setTurn(undefined); }}>{t('Disable MCP tools')}</Button></details>}
-             {mcpNotice && <p role="status">{t(mcpNotice)}</p>}
+          {!!toolImages.length && <section className="chat-notice" aria-label={t('MCP output')}>
              {toolImages.map((image, index) => <img className="chat-mcp-image" key={index} alt={t('MCP image {{index, number}}', { index: index + 1 })} src={image} />)}
            </section>}
           {toolNotice && <p className="chat-notice" role="status">{t(toolNotice)}</p>}
-          <div className="chat-progress" role="status">{(progress || restoringSkills) && <><span className="chat-spinner" aria-hidden="true" />
-            {progress || t('Loading provider skills…')}</>}</div>
+           <div className="chat-progress" role="status">{(progress || restoringSkills || mcpSelection.loading) && <><span className="chat-spinner" aria-hidden="true" />
+             {progress || (restoringSkills ? t('Loading provider skills…') : t('Loading MCP tools…'))}</>}</div>
           <ChatComposer busy={busy || (status === 'ready' && toolParts.length > 0)} canSend={canSend} onStop={stopTurn}
             convert={preferences.convertAttachmentsToText}
+            mcp={mcpServers.available ? { count: mcpSelection.entries.length, disabled: routesLocked, open: () => setMcpPicker(true) } : undefined}
             onChatSettings={() => chatSettings.current?.showModal()} onViewContext={() => contextDialog.current?.showModal()}
             onSend={(parts) => {
               if (!model || !canSend) return;
@@ -743,7 +736,10 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
         hasHistory={hasHistory} locked={routesLocked} localSkills={localSkills} remoteSkills={remoteSkills} />
       <ViewContextDialog dialog={contextDialog} context={(busy || toolParts.length > 0) && turn ? turn.context : context}
         tools={(busy || toolParts.length > 0) && turn ? turn.tools : enabledTools} />
-      {review && <ToolApprovalDialog key={review.id} review={review} onAnswer={answerTool} onStop={stopTurn} />}
+      {review && <ToolApprovalDialog key={`${review.id}:${review.kind}`} review={review} onAnswer={answerTool} onStop={stopTurn} />}
+      {mcpServers.available && mcpPicker && <McpServerPicker store={mcpServers} selection={mcpSelection} locked={routesLocked}
+        onConfigure={record => setMcpEditor({ record })} close={() => setMcpPicker(false)} onBrowse={() => { setMcpPicker(false); onView('mcp'); }} />}
+      {mcpServers.available && mcpEditor && <McpServerEditor target={mcpEditor} options={connection.mcp} store={mcpServers} close={() => setMcpEditor(undefined)} />}
        <footer className="chat-disclaimer" hidden={view !== 'chat' || !!locationIssue}>{t('{{appName}} can make mistakes. Check important information.', { appName })}</footer>
       {view === 'images' ? <Suspense fallback={<main className="catalog-main"><p role="status">{t('Loading images…')}</p></main>}>
         <ImagesView gateway={gateway} scope={scope} route={images.selected} toolbar={mediaToolbar} catalog={mediaModels?.catalog}
@@ -755,7 +751,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
         <TranscriptionsView gateway={gateway} scope={scope} route={transcriptions.selected} toolbar={mediaToolbar} catalog={mediaModels?.catalog}
           menuContainer={menuContainer} loading={hasGateway && connection.ready && !mediaModels} status={mediaStatus} />
       </Suspense> : view !== 'chat' && <main className="catalog-main">
-        {view === 'models' ? <ModelsView models={result?.error ? undefined : result?.catalog}
+        {view === 'mcp' ? <McpServersView store={mcpServers} options={connection.mcp} locked={routesLocked} onEdit={setMcpEditor} />
+          : view === 'models' ? <ModelsView models={result?.error ? undefined : result?.catalog}
           status={!connection.ready ? connection.emptyMessage : !result ? t('Loading models…') : result.error}
            refresh={connection.ready && result ? reload : undefined} /> : view === 'agents'
           ? <AgentsView catalog={agentModels?.catalog ?? []} catalogStatus={agentModelStatus}
