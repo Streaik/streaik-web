@@ -3,7 +3,7 @@ import { GatewayError, gatewayChatEndpoints, nativeChatEndpoints, pickChatCatalo
 import type { ChatRoute, DirectChat } from '@streaik/gateway';
 import type { CatalogModel, ChatMessage, Gateway } from '@streaik/gateway';
 import { Button, ThemeRoot, useColorScheme } from '@streaik/themes';
-import { lazy, memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { ChatComposer, AttachmentChip } from './ChatComposer';
@@ -47,6 +47,7 @@ import type { AgentsConfig } from './agentCatalog';
 import { agentModels as configuredAgentModels } from './agentDefinition';
 import { conversationOpeningText, deleteConversation, listConversations, newConversation, newestFirst, saveConversation } from './conversations';
 import type { Conversation } from './conversations';
+import type { createConversationSearch, SearchHistory } from './conversationSearch';
 import { callMcpTool, mcpFailure, readMcpResource } from './mcp';
 import type { McpOptions } from './mcp';
 import { mcpResourceCatalog, readResourceTool, resolveResourceRead } from './mcpChatContext';
@@ -226,8 +227,15 @@ function HistoryChat({ appName, gateway, connection, scope, models, route, onRou
   const [storageIssue, setStorageIssue] = useState('');
   // Transcript effects and pin clicks can both enqueue writes before React renders again.
   const latestHistory = useRef<Conversation[]>([]);
+  const searchIndex = useRef<Promise<ReturnType<typeof createConversationSearch>>>(undefined);
   const writes = useRef(Promise.resolve());
   const pendingNames = useRef(new Map<string, AbortController>());
+  const searchHistory = useCallback<SearchHistory>(async (term) => {
+    // HistoryChat is keyed by scope; neither stored history nor the index is shared with another profile.
+    const index = await (searchIndex.current ??= import('./conversationSearch').then(({ createConversationSearch }) => createConversationSearch())
+      .catch(error => { searchIndex.current = undefined; throw error; }));
+    return index.search(latestHistory.current, term);
+  }, []);
 
   const resumeId = target.kind === 'home' && location === initialLocation && location.state?.newChat !== true ? recentId : undefined;
   const requestedId = target.kind === 'conversation' ? target.id : resumeId;
@@ -253,6 +261,8 @@ function HistoryChat({ appName, gateway, connection, scope, models, route, onRou
   function updateHistory(records: Conversation[]) {
     latestHistory.current = records;
     setHistory(records);
+    // Search is derived data. A background index failure must not affect the chat or its persistence.
+    void searchIndex.current?.then(index => index.sync(latestHistory.current)).catch(() => {});
   }
 
   useEffect(() => {
@@ -340,7 +350,7 @@ function HistoryChat({ appName, gateway, connection, scope, models, route, onRou
   const locationIssue = target.kind === 'conversation' && !requested ? 'This conversation is not available in this browser or profile.'
     : target.kind === 'unavailable' || target.kind === 'page' && view === 'chat' ? 'This page is not available.' : undefined;
   return <ChatSession key={active.id} appName={appName} gateway={gateway} connection={connection} conversation={active} history={history}
-    storageIssue={storageIssue} locationIssue={locationIssue}
+    searchHistory={searchHistory} storageIssue={storageIssue} locationIssue={locationIssue}
     nav={nav} view={view} onView={(next) => {
       if (next !== 'chat' && next !== view) void navigate(pagePaths[next]);
       if (window.matchMedia('(max-width: 42rem)').matches) setNav(false);
@@ -348,6 +358,7 @@ function HistoryChat({ appName, gateway, connection, scope, models, route, onRou
     onNew={() => startDraft()}
     onSwitch={(item) => {
       if (target.kind !== 'conversation' || target.id !== item.id) void navigate(conversationPath(item.id));
+      if (window.matchMedia('(max-width: 42rem)').matches) setNav(false);
     }} onPin={togglePin} onDelete={remove}
     models={models} route={route} onRoute={onRoute} decisions={decisions} images={images} videos={videos} transcriptions={transcriptions} scope={scope} onSettings={onSettings}
     preferences={preferences} onPreferences={onPreferences}
@@ -361,8 +372,9 @@ type Turn = { model: string; route: ChatRoute; tools: ChatTool[]; context?: Requ
 const isApiChat = (route: ChatRoute | undefined) => !route || (route.mode === 'gateway' && route.endpoint === '/api/chat');
 const toolComplete = (part: Invocation) => part.state === 'output-available' || part.state === 'output-error' || part.state === 'approval-responded';
 
-function ChatSession({ appName, gateway, connection, conversation, history, storageIssue, locationIssue, nav, view, onView, toggleNav, onPersist, onNew, onSwitch, onPin, onDelete, models, route, onRoute, decisions, images, videos, transcriptions, scope, onSettings, preferences, onPreferences, localSkills, remoteSkills, mcpServers, readHistory }: {
+function ChatSession({ appName, gateway, connection, conversation, history, searchHistory, storageIssue, locationIssue, nav, view, onView, toggleNav, onPersist, onNew, onSwitch, onPin, onDelete, models, route, onRoute, decisions, images, videos, transcriptions, scope, onSettings, preferences, onPreferences, localSkills, remoteSkills, mcpServers, readHistory }: {
   appName: string; gateway: Gateway; connection: Connection; conversation: Conversation; history: Conversation[]; storageIssue: string;
+  searchHistory: SearchHistory;
   locationIssue?: string;
   nav: boolean; toggleNav: () => void; onPersist: (conversation: Conversation, nameRequest?: TextAppRequest) => void; onNew: () => void;
   view: ChatView; onView: (view: ChatView) => void;
@@ -715,7 +727,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
 
   return <div ref={setMenuContainer} className="chat-shell" data-nav={nav ? 'expanded' : 'collapsed'} data-view={view}>
       <ChatNavigation appName={appName} expanded={nav} history={history} active={view === 'chat' && !locationIssue ? conversation.id : ''} busy={busy || toolBusy}
-        account={connection.account} container={menuContainer} view={view} onView={onView}
+        searchHistory={searchHistory} account={connection.account} container={menuContainer} view={view} onView={onView}
         pinnedViews={preferences.pinnedViews} onToggleViewPin={(key) => onPreferences({ ...preferences,
           pinnedViews: preferences.pinnedViews.includes(key) ? preferences.pinnedViews.filter(view => view !== key) : [...preferences.pinnedViews, key] })}
         toggle={toggleNav} onNew={onNew} onOpen={onSwitch}

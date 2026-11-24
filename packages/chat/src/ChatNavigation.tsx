@@ -1,7 +1,8 @@
 import * as Menu from '@radix-ui/react-dropdown-menu';
 import { Button, Tooltip } from '@streaik/themes';
-import { useId, useLayoutEffect, useRef } from 'react';
+import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { useAgents } from './AgentsProvider';
+import { ChatHistorySearch } from './ChatHistorySearch';
 import { ChatIcon } from './ChatIcon';
 import { pinnableViews } from './chatPreferences';
 import type { PinnableView } from './chatPreferences';
@@ -9,6 +10,7 @@ import { useAppTranslation } from './i18n';
 import type { RouteMenu } from './routeMenu';
 import { conversationTitle, newestFirst } from './conversations';
 import type { Conversation } from './conversations';
+import type { SearchHistory } from './conversationSearch';
 
 export type ChatAccount = {
   name: string;
@@ -147,8 +149,9 @@ function HistoryRow({ item, active, busy, container, pinButtonId, onOpen, onPin,
   </li>;
 }
 
-export function ChatNavigation({ appName, expanded, history, active, busy, account, container, view, onView, pinnedViews, onToggleViewPin, toggle, onNew, onOpen, onPin, onDelete, onSettings, routes }: {
+export function ChatNavigation({ appName, expanded, history, searchHistory, active, busy, account, container, view, onView, pinnedViews, onToggleViewPin, toggle, onNew, onOpen, onPin, onDelete, onSettings, routes }: {
   appName: string; expanded: boolean; history: Conversation[]; active: string; busy: boolean; account?: ChatAccount; container: HTMLDivElement | null;
+  searchHistory: SearchHistory;
   view: ChatView; onView: (view: ChatView) => void;
   pinnedViews: readonly PinnableView[]; onToggleViewPin: (view: PinnableView) => void;
   toggle: () => void; onNew: () => void; onOpen: (item: Conversation) => void; onPin: (id: string) => void;
@@ -157,6 +160,8 @@ export function ChatNavigation({ appName, expanded, history, active, busy, accou
   const { t } = useAppTranslation();
   const agentsEnabled = !!useAgents();
   const panelId = useId();
+  const searchId = useId();
+  const [searchOpen, setSearchOpen] = useState(false);
   const toggleButton = useRef<HTMLButtonElement>(null);
   const pendingFocus = useRef<string | undefined>(undefined);
   useLayoutEffect(() => {
@@ -166,6 +171,15 @@ export function ChatNavigation({ appName, expanded, history, active, busy, accou
   }, [history]);
 
   const ordered = expanded ? [...history].sort(newestFirst) : [];
+  const searchLabel = t('Search chat history');
+  const searchButton = <Tooltip content={searchLabel} side={expanded ? 'bottom' : 'right'}>
+    <button type="button" className="chat-rail-button" aria-label={searchLabel} aria-haspopup="dialog"
+      aria-controls={searchOpen ? searchId : undefined} onClick={event => {
+        // Set the native dialog's return focus target even on browsers that don't focus clicked buttons.
+        event.currentTarget.focus();
+        setSearchOpen(true);
+      }}><ChatIcon name="search" /></button>
+  </Tooltip>;
   function group(label: string, records: Conversation[]) {
     if (!records.length) return null;
     return <section className="chat-history-group">
@@ -192,6 +206,7 @@ export function ChatNavigation({ appName, expanded, history, active, busy, accou
       <Tooltip content={t('New chat')}><button type="button" className="chat-rail-button" aria-label={t('New chat')} disabled={busy} onClick={onNew}>
         <ChatIcon name="compose" />
       </button></Tooltip>
+      {!expanded && searchButton}
       {([['images', 'Images'], ['videos', 'Videos'], ['transcriptions', 'Transcriptions'], ['agents', 'Agents'], ['skills', 'Skills'], ['mcp', 'MCP Servers']] as const)
         .filter(([key]) => key !== 'agents' || agentsEnabled).map(([key, label]) =>
         <Tooltip key={key} content={t(label)}><button type="button" className="chat-rail-button" aria-label={t(label)} aria-current={view === key ? 'page' : undefined}
@@ -203,7 +218,7 @@ export function ChatNavigation({ appName, expanded, history, active, busy, accou
       <AccountMenu account={account} onSettings={onSettings} container={container} routes={routes} />
     </nav>
     <aside id={panelId} className="chat-history-panel" aria-label={t('Chat history')} hidden={!expanded}>
-      <h2>{appName}</h2>
+      <header className="chat-history-header"><h2>{appName}</h2>{expanded && searchButton}</header>
       <div className="chat-history-scroll" onKeyDown={(event) => {
         if (event.key === 'Escape' && !event.defaultPrevented && !(event.target as HTMLElement).closest('[role=menu]')) {
           toggle();
@@ -215,5 +230,7 @@ export function ChatNavigation({ appName, expanded, history, active, busy, accou
         {!history.length && <p>{t('No conversations yet.')}</p>}
       </div>
     </aside>
+    {searchOpen && <ChatHistorySearch id={searchId} history={history} active={active} busy={busy} search={searchHistory}
+      onOpen={onOpen} onClose={() => setSearchOpen(false)} />}
   </>;
 }

@@ -127,6 +127,15 @@ test('conversation URLs survive reload, switch through browser history, and stay
   const conversationUrl = /\/c\/[0-9a-f-]{36}$/;
   await expect(page).toHaveURL(conversationUrl);
   const first = page.url();
+  await page.getByRole('button', { name: 'Search chat history', exact: true }).click();
+  const historySearch = page.getByRole('dialog', { name: 'Search chat history' });
+  const historyQuery = historySearch.getByRole('searchbox');
+  await historyQuery.fill('First linked');
+  await expect(historySearch.getByRole('button', { name: 'First linked conversation', exact: true })).toBeDisabled();
+  await historyQuery.press('Enter');
+  await expect(historySearch).toBeVisible();
+  await historyQuery.press('Escape');
+  await expect(historySearch).not.toBeVisible();
   await page.getByRole('button', { name: 'Images', exact: true }).click();
   await expect(page).toHaveURL(/\/images$/);
   release();
@@ -2178,7 +2187,7 @@ test('compact badges, logo fallback, copy, pinned history and conversation repla
       { type: 'reasoning-delta', id: 'r', delta: 'Not part of the copied reply' },
       { type: 'reasoning-end', id: 'r' },
       { type: 'text-start', id: 't' },
-      { type: 'text-delta', id: 't', delta: '**Saved answer**' },
+      { type: 'text-delta', id: 't', delta: bodies.length === 1 ? '**Saved answer**' : '**New searchable answer**' },
       { type: 'text-end', id: 't' },
       { type: 'finish', finishReason: 'stop', messageMetadata: { ...metadata, model: bodies.length === 1 ? model : 'unbranded/model' } },
     ];
@@ -2273,12 +2282,24 @@ test('compact badges, logo fallback, copy, pinned history and conversation repla
   await expect(reply.locator('time')).toHaveAttribute('datetime', timestamp);
   await toggle.click();
   await expect(pinned.getByRole('button', { name: title, exact: true })).toBeVisible();
+  const openHistorySearch = page.getByRole('button', { name: 'Search chat history' });
+  const historySearch = page.getByRole('dialog', { name: 'Search chat history' });
+  const historyQuery = historySearch.getByRole('searchbox');
+  await openHistorySearch.click();
+  await historyQuery.fill('Saved answer');
+  await expect(historySearch.getByRole('button', { name: title, exact: true })).toHaveAccessibleDescription(/Saved answer/);
+  await historyQuery.press('Escape');
+  await expect(openHistorySearch).toBeFocused();
   await showSettings(page); await addKey(page); await closeSettings(page);
   await composer.fill('Follow up after reload'); await composer.press('Enter');
   await expect(page.getByText('unbranded/model', { exact: true })).toBeVisible();
   expect(bodies[1]?.messages.find(({ id }: { id: string }) => id === 'persistent-reply-1')).toMatchObject({ role: 'assistant', metadata,
     parts: expect.arrayContaining([expect.objectContaining({ type: 'reasoning' }), expect.objectContaining({ type: 'text' })]) });
   await expect.poll(() => saved('persistent-reply-2')).toBe(true);
+  await openHistorySearch.click();
+  await historyQuery.fill('searchable answer');
+  await expect(historySearch.getByRole('button', { name: title, exact: true })).toHaveAccessibleDescription(/New searchable answer/);
+  await historySearch.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Foreign conversation', exact: true })).toHaveCount(0);
   await conversation.focus();
   await expect(more.locator('..')).toHaveCSS('opacity', '1');

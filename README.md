@@ -23,7 +23,7 @@ The chat client supports:
 - **Skills** with reusable instructions and supporting files
 - **Search** with client-side full-text, vector and hybrid search
 - **Files** with attachments, document content, PDF extraction and rich file handling
-- **Conversation history** with local persistence, search and configurable chat preferences
+- **Conversation history** with local persistence, configurable chat preferences, and browser-only full-text search across titles and user and assistant messages
 - **Streaming UI** with interactive apps, cards and structured response rendering
 - **Speech** with generation, streaming playback and realtime transcription
 - **Transcriptions** with configurable file splitting, overlap handling and merged results. **Real-time** streams microphone audio to supported OpenAI, Gladia, and Google Gemini 3.5 Transcribe Live models and displays text only. **Dictate** records a short clip and uploads it when you stop.
