@@ -59,7 +59,7 @@ export function ChatHistorySearch({ id, history, active, busy, search, onOpen, o
 
   return <dialog ref={dialog} id={id} className="chat-settings chat-history-search" aria-labelledby={`${id}-title`} onClose={onClose}>
     <header className="chat-settings-header">
-      <h2 id={`${id}-title`}>{t('Search chat history')}</h2>
+      <h2 id={`${id}-title`}>{t('Search chats')}</h2>
       <Button type="button" variant="subtle" className="chat-close" aria-label={t('Close')} onClick={() => dialog.current?.close()}>
         <ChatIcon name="close" />
       </Button>
@@ -68,7 +68,7 @@ export function ChatHistorySearch({ id, history, active, busy, search, onOpen, o
       event.preventDefault();
       if (entries[0]) open(entries[0].item);
     }}>
-      <input ref={input} className="ui-input" type="search" aria-label={t('Search chat history')} placeholder={t('Search conversations…')}
+      <input ref={input} className="ui-input" type="search" aria-label={t('Search chats')} placeholder={t('Search')}
         onKeyDown={event => {
           // Native search inputs can otherwise consume Escape to clear the query.
           if (event.key === 'Escape' && !event.nativeEvent.isComposing) {

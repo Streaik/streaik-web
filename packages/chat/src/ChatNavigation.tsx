@@ -171,15 +171,7 @@ export function ChatNavigation({ appName, expanded, history, searchHistory, acti
   }, [history]);
 
   const ordered = expanded ? [...history].sort(newestFirst) : [];
-  const searchLabel = t('Search chat history');
-  const searchButton = <Tooltip content={searchLabel} side={expanded ? 'bottom' : 'right'}>
-    <button type="button" className="chat-rail-button" aria-label={searchLabel} aria-haspopup="dialog"
-      aria-controls={searchOpen ? searchId : undefined} onClick={event => {
-        // Set the native dialog's return focus target even on browsers that don't focus clicked buttons.
-        event.currentTarget.focus();
-        setSearchOpen(true);
-      }}><ChatIcon name="search" /></button>
-  </Tooltip>;
+  const searchLabel = t('Search chats');
   function group(label: string, records: Conversation[]) {
     if (!records.length) return null;
     return <section className="chat-history-group">
@@ -206,7 +198,6 @@ export function ChatNavigation({ appName, expanded, history, searchHistory, acti
       <Tooltip content={t('New chat')}><button type="button" className="chat-rail-button" aria-label={t('New chat')} disabled={busy} onClick={onNew}>
         <ChatIcon name="compose" />
       </button></Tooltip>
-      {!expanded && searchButton}
       {([['images', 'Images'], ['videos', 'Videos'], ['transcriptions', 'Transcriptions'], ['agents', 'Agents'], ['skills', 'Skills'], ['mcp', 'MCP Servers']] as const)
         .filter(([key]) => key !== 'agents' || agentsEnabled).map(([key, label]) =>
         <Tooltip key={key} content={t(label)}><button type="button" className="chat-rail-button" aria-label={t(label)} aria-current={view === key ? 'page' : undefined}
@@ -218,7 +209,17 @@ export function ChatNavigation({ appName, expanded, history, searchHistory, acti
       <AccountMenu account={account} onSettings={onSettings} container={container} routes={routes} />
     </nav>
     <aside id={panelId} className="chat-history-panel" aria-label={t('Chat history')} hidden={!expanded}>
-      <header className="chat-history-header"><h2>{appName}</h2>{expanded && searchButton}</header>
+      <header className="chat-history-header">
+        <h2>{appName}</h2>
+        {expanded && <Tooltip content={searchLabel} side="bottom">
+          <button type="button" className="chat-rail-button" aria-label={searchLabel} aria-haspopup="dialog"
+            aria-controls={searchOpen ? searchId : undefined} onClick={event => {
+              // Set the return focus target even on browsers that don't focus clicked buttons.
+              event.currentTarget.focus();
+              setSearchOpen(true);
+            }}><ChatIcon name="search" /></button>
+        </Tooltip>}
+      </header>
       <div className="chat-history-scroll" onKeyDown={(event) => {
         if (event.key === 'Escape' && !event.defaultPrevented && !(event.target as HTMLElement).closest('[role=menu]')) {
           toggle();

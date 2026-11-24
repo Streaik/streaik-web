@@ -127,8 +127,10 @@ test('conversation URLs survive reload, switch through browser history, and stay
   const conversationUrl = /\/c\/[0-9a-f-]{36}$/;
   await expect(page).toHaveURL(conversationUrl);
   const first = page.url();
-  await page.getByRole('button', { name: 'Search chat history', exact: true }).click();
-  const historySearch = page.getByRole('dialog', { name: 'Search chat history' });
+  const toggleHistory = page.getByRole('button', { name: 'Toggle navigation' });
+  await toggleHistory.click();
+  await page.getByRole('button', { name: 'Search chats', exact: true }).click();
+  const historySearch = page.getByRole('dialog', { name: 'Search chats' });
   const historyQuery = historySearch.getByRole('searchbox');
   await historyQuery.fill('First linked');
   await expect(historySearch.getByRole('button', { name: 'First linked conversation', exact: true })).toBeDisabled();
@@ -136,6 +138,7 @@ test('conversation URLs survive reload, switch through browser history, and stay
   await expect(historySearch).toBeVisible();
   await historyQuery.press('Escape');
   await expect(historySearch).not.toBeVisible();
+  await toggleHistory.click();
   await page.getByRole('button', { name: 'Images', exact: true }).click();
   await expect(page).toHaveURL(/\/images$/);
   release();
@@ -2282,8 +2285,8 @@ test('compact badges, logo fallback, copy, pinned history and conversation repla
   await expect(reply.locator('time')).toHaveAttribute('datetime', timestamp);
   await toggle.click();
   await expect(pinned.getByRole('button', { name: title, exact: true })).toBeVisible();
-  const openHistorySearch = page.getByRole('button', { name: 'Search chat history' });
-  const historySearch = page.getByRole('dialog', { name: 'Search chat history' });
+  const openHistorySearch = page.getByRole('button', { name: 'Search chats', exact: true });
+  const historySearch = page.getByRole('dialog', { name: 'Search chats' });
   const historyQuery = historySearch.getByRole('searchbox');
   await openHistorySearch.click();
   await historyQuery.fill('Saved answer');

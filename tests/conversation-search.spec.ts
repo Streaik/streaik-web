@@ -1,22 +1,27 @@
 import { expect, test } from '@playwright/test';
 
 test('history search shows recent chats, opens keyboard results, and removes deleted chats across reload', async ({ page }) => {
-  const label = 'Search chat history';
-  const trigger = page.getByRole('button', { name: label, exact: true });
+  const label = 'Search chats';
+  const toggle = page.getByRole('button', { name: 'Toggle navigation' });
   const rail = page.getByRole('navigation', { name: 'Chat navigation' });
   const panel = page.getByRole('complementary', { name: 'Chat history' });
+  const headerTrigger = panel.getByRole('button', { name: label, exact: true });
   const dialog = page.getByRole('dialog', { name: label });
   const input = dialog.getByRole('searchbox', { name: label });
   const results = dialog.getByRole('list', { name: 'Search results' });
   const status = dialog.getByRole('status');
 
   await page.goto('/models');
-  await rail.getByRole('button', { name: label }).click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('button', { name: label, exact: true })).toHaveCount(0);
+  await toggle.click();
+  await headerTrigger.click();
+  await expect(input).toHaveAttribute('placeholder', 'Search');
   await expect(status).toHaveText('No conversations yet.');
   await expect(input).toBeFocused();
   await input.press('Escape');
   await expect(dialog).not.toBeVisible();
-  await expect(trigger).toBeFocused();
+  await expect(headerTrigger).toBeFocused();
 
   await page.evaluate(() => new Promise<void>((resolve, reject) => {
     const request = indexedDB.open('streaik-conversations', 1);
@@ -42,8 +47,7 @@ test('history search shows recent chats, opens keyboard results, and removes del
   }));
   await page.reload();
 
-  await page.getByRole('button', { name: 'Toggle navigation' }).click();
-  const headerTrigger = panel.getByRole('button', { name: label });
+  await toggle.click();
   await expect(rail.getByRole('button', { name: label })).toHaveCount(0);
   await expect(headerTrigger).toHaveText('');
   await page.setViewportSize({ width: 360, height: 620 });
@@ -74,7 +78,7 @@ test('history search shows recent chats, opens keyboard results, and removes del
   await expect(page.getByText('The observatory is downtown.', { exact: true })).toBeVisible();
 
   await page.setViewportSize({ width: 1024, height: 768 });
-  await page.getByRole('button', { name: 'Toggle navigation' }).click();
+  await toggle.click();
   await panel.getByRole('button', { name: 'Example 1', exact: true }).hover();
   await panel.getByRole('button', { name: 'More actions for Example 1', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Delete', exact: true }).click();
@@ -82,7 +86,8 @@ test('history search shows recent chats, opens keyboard results, and removes del
   await input.fill('observ');
   await expect(status).toHaveText('No matches found.');
   await page.reload();
-  await trigger.click();
+  await toggle.click();
+  await headerTrigger.click();
   await input.fill('observ');
   await expect(status).toHaveText('No matches found.');
   await input.fill('Example 8');
