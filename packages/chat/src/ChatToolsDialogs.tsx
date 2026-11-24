@@ -126,21 +126,21 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hasHistor
 export function ViewContextDialog({ dialog, context, tools }: { dialog: DialogRef; context?: RequestContext; tools: readonly ChatTool[] }) {
   const { t } = useAppTranslation();
   const id = useId();
-  const [tab, setTab] = useState<'system' | 'user' | 'tools'>('system');
+  const [tab, setTab] = useState<'system' | 'user' | 'tools' | 'skills'>('system');
+  const skills = context?.skills?.availableSkills.skills ?? [];
+  if (tab === 'skills' && !skills.length) setTab('system');
   return <dialog ref={dialog} className="chat-settings chat-tools-dialog" aria-labelledby={`${id}-title`} onClose={() => setTab('system')}>
     <header className="chat-settings-header">
-      <h2 id={`${id}-title`}>{t('View context')}</h2>
+      <h2 id={`${id}-title`}>{t('Context')}</h2>
       <Button className="chat-close" variant="subtle" aria-label={t('Close')} onClick={() => dialog.current?.close()}><ChatIcon name="close" /></Button>
     </header>
     <DialogTabs id={id} label={t('Context sections')} tabs={[[ 'system', t('System') ], [ 'user', t('User') ],
-      [ 'tools', t('Tools ({{count, number}})', { count: tools.length }) ]]} value={tab} onChange={setTab} />
+      [ 'tools', t('Tools ({{count, number}})', { count: tools.length }) ], ...(skills.length ? [[ 'skills', t('Skills') ] as const] : [])]}
+      value={tab} onChange={setTab} />
     {(['system', 'user'] as const).map(key => <div key={key} id={`${id}-${key}-panel`} role="tabpanel" tabIndex={0}
       aria-labelledby={`${id}-${key}-tab`} hidden={tab !== key}>
       {context ? <section className="chat-tool-card"><h3>{t(key === 'system' ? 'System context' : 'User context')}</h3>
         <ToolValue value={context[key]} /></section> : <p>{t('No extra context is sent on Direct routes.')}</p>}
-      {key === 'system' && context?.skills && <section className="chat-tool-card">
-        <h3>{t('Available skills')}</h3><ToolValue value={context.skills} />
-      </section>}
     </div>)}
     <div id={`${id}-tools-panel`} role="tabpanel" tabIndex={0} aria-labelledby={`${id}-tools-tab`} hidden={tab !== 'tools'}>
       {tools.length ? <div className="chat-tool-list">{tools.map(item => {
@@ -160,6 +160,14 @@ export function ViewContextDialog({ dialog, context, tools }: { dialog: DialogRe
         </section>;
       })}</div> : <p>{t('No tools enabled.')}</p>}
     </div>
+    {skills.length > 0 && <div id={`${id}-skills-panel`} className="chat-skill-cards" role="tabpanel" tabIndex={0}
+      aria-labelledby={`${id}-skills-tab`} hidden={tab !== 'skills'}>
+      {skills.map(({ id, name, description }) => <article key={id} className="chat-tool-card chat-context-skill-card">
+        <h3>{name}</h3>
+        <code>{id}</code>
+        <p>{description}</p>
+      </article>)}
+    </div>}
   </dialog>;
 }
 

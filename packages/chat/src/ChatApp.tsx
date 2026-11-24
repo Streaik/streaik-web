@@ -377,7 +377,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
         }
         if (route?.mode === 'gateway' && gatewayChatEndpoints.includes(route.endpoint)) {
           const stream = await gateway.chatTransport(route.endpoint).sendMessages({ ...request,
-            body: { ...request.body, ...(context && { instructions: requestContextText(context).join('\n') }) } });
+            body: { ...request.body, ...(context && { instructions: requestContextText(context) }) } });
           return withReplyMetadata(stream, model, previous);
         }
         if (route?.mode === 'direct' && direct && nativeChatEndpoints.includes(route.endpoint)) {

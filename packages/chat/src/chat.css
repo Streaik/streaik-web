@@ -173,7 +173,7 @@ body { margin: 0; }
 .chat-settings-header .chat-close { display: inline-grid; place-items: center; padding: 0; width: 2.25rem; height: 2.25rem; }
 .chat-tools-dialog { box-sizing: border-box; width: min(40rem, calc(100% - 1.5rem)); }
 .chat-tools-dialog[open] { display: grid; gap: 1rem; }
-.chat-tool-tabs { display: flex; gap: .25rem; padding: .25rem; width: fit-content; background: var(--surface); border-radius: .55rem; }
+.chat-tool-tabs { display: flex; flex-wrap: wrap; gap: .25rem; padding: .25rem; width: fit-content; max-width: 100%; box-sizing: border-box; background: var(--surface); border-radius: .55rem; }
 .chat-tool-tabs button { border: 1px solid transparent; border-radius: .4rem; background: transparent; color: var(--foreground); font: inherit; padding: .5rem .75rem; cursor: pointer; }
 .chat-tool-tabs button[aria-selected=true] { border-color: var(--border); background: var(--background); font-weight: 650; }
 .chat-tool-tabs button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
@@ -184,6 +184,8 @@ body { margin: 0; }
 .chat-tool-card ul { padding-inline-start: 1.25rem; }
 .chat-tool-card p { color: var(--muted); }
 .chat-tool-list, .chat-skill-cards:not([hidden]) { display: grid; gap: .65rem; }
+.chat-context-skill-card { overflow-wrap: anywhere; }
+.chat-context-skill-card code { font-size: .85em; }
 .chat-tool-badges { display: flex; flex-wrap: wrap; gap: .3rem; }
 .chat-tool-badge { display: inline-block; padding: .12rem .45rem; border-radius: 1rem; border: 1px solid var(--border); color: var(--muted); font-size: .78rem; }
 .chat-tool-value { max-height: 20rem; margin: 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }

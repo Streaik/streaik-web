@@ -40,9 +40,12 @@ function nativeAttachmentMessages(messages: ChatMessage[], endpoint: NativeChatE
 export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (model: string) => NativeTarget): ChatTransport<ChatMessage> {
   return {
     async sendMessages({ messages, body, abortSignal }) {
-      const { model, tools: definitions, instructions } = asRecord(body) ?? {};
+      const { model, tools: definitions, instructions: inputInstructions } = asRecord(body) ?? {};
       if (typeof model !== 'string') throw new GatewayError('Choose a model for this route.');
       const target = resolve(model);
+      const instructions = !target.gateway ? undefined : typeof inputInstructions === 'string' ? inputInstructions
+        : Array.isArray(inputInstructions) && inputInstructions.every(text => typeof text === 'string')
+          ? inputInstructions.map(content => ({ role: 'system' as const, content })) : undefined;
       const direct = target.direct && createDirectMetrics(endpoint, target.direct);
       const baseURL = target.url.slice(0, -(endpoint.length - '/v1'.length));
       // SDKs handle protocol conversions. The scoped fetch owns authentication and
@@ -65,8 +68,7 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
       let gateway: ChatMessageMetadata['gateway'];
       const result = streamText({
         model: adapter, messages: await convertToModelMessages(nativeAttachmentMessages(messages, endpoint), { tools, ignoreIncompleteToolCalls: true }),
-        ...(target.gateway && typeof instructions === 'string' ? { instructions } : {}),
-        tools, abortSignal, maxRetries: 0, includeRawChunks: target.gateway || !!direct,
+        instructions, tools, abortSignal, maxRetries: 0, includeRawChunks: target.gateway || !!direct,
         ...(endpoint === '/v1/responses' ? { providerOptions: { openai: { store: false, passThroughUnsupportedFiles: true } } }
           : endpoint === '/v1/chat/completions' && (target.gateway || model.startsWith('openai/'))
           ? { providerOptions: { openai: { store: false } } } : {}),

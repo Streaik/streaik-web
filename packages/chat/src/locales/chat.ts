@@ -187,6 +187,7 @@ export const chatMessages = {
   'Defaults': ['Standaardwaarden', 'Valores predeterminados'],
   'Delay ({{delay, number}} ms)': ['Vertraging ({{delay, number}} ms)', 'Retraso ({{delay, number}} ms)'],
   'Controls how often streaming text updates. It does not delay sending.': ['Bepaalt hoe vaak de tekst tijdens het streamen wordt bijgewerkt. Het versturen wordt niet vertraagd.', 'Controla con qué frecuencia se actualiza el texto durante la transmisión. No retrasa el envío.'],
+  'Context': ['Context', 'Contexto'],
   'View context': ['Context bekijken', 'Ver contexto'],
   'System context': ['Systeemcontext', 'Contexto del sistema'],
   'User context': ['Gebruikerscontext', 'Contexto del usuario'],
