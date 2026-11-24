@@ -123,6 +123,15 @@ for (const endpoint of nativeChatEndpoints) {
     const legacy = 'Legacy instructions';
     await send(transport, model, { body: { model, instructions: legacy } });
     assert.deepEqual(contextFrom(requests[1]), [legacy]);
+
+    const direct = createDirectChat(providers, provider => keys[provider], async (_url, init) => {
+      const body = JSON.parse(init.body);
+      requests.push(body);
+      return response(endpoint, body.model);
+    });
+    const mcpInstructions = [JSON.stringify({ mcpResourceCatalog: { readTool: 'read_resource' } })];
+    await send(direct.chatTransport(endpoint), model, { body: { model, instructions, mcpInstructions } });
+    assert.deepEqual(contextFrom(requests[2]), mcpInstructions);
   });
 }
 
