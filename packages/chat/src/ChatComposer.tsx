@@ -27,6 +27,8 @@ export function ChatComposer(props: ComposerProps) {
   const media = !!(image || video);
   const convert = !image && !video && props.convert;
   const { t } = useAppTranslation();
+  const mcp = !image && !video ? props.mcp : undefined;
+  const plusLabel = t(mcp ? 'Add to message' : 'Add attachments');
   const id = useId();
   const [localDraft, setLocalDraft] = useState('');
   const [localAttachments, setLocalAttachments] = useState<DraftAttachment[]>([]);
@@ -69,7 +71,7 @@ export function ChatComposer(props: ComposerProps) {
   }, [menuOpen]);
 
   function menuKeys(event: KeyboardEvent<HTMLDivElement>) {
-    const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)'));
     const current = items.indexOf(document.activeElement as HTMLElement);
     const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
       : event.key === 'ArrowDown' ? (current + 1) % items.length
@@ -168,18 +170,22 @@ export function ChatComposer(props: ComposerProps) {
       {preparing && <p className="chat-attachment-notice" role="status">{t('Preparing attachments…')}</p>}
       <div className="chat-composer-actions">
         {!video && <div className="chat-attachment-actions">
-          <span ref={trigger}><Button className="chat-composer-icon" type="button" variant="subtle" aria-label={t('Add attachments')}
-            title={t('Add attachments')} aria-haspopup="menu" aria-expanded={menuOpen} aria-controls={menuOpen ? `${id}-menu` : undefined}
+          <span ref={trigger}><Button className="chat-composer-icon" type="button" variant="subtle" aria-label={plusLabel}
+            title={plusLabel} aria-haspopup="menu" aria-expanded={menuOpen} aria-controls={menuOpen ? `${id}-menu` : undefined}
             disabled={preparing || !!image && busy} onClick={() => setMenuOpen(!menuOpen)} onKeyDown={event => {
               if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setMenuOpen(true); }
             }}><ChatIcon name="add" /></Button></span>
-          {menuOpen && <div ref={menu} id={`${id}-menu`} className="chat-attachment-menu" role="menu" aria-label={t('Add attachments')} onKeyDown={menuKeys}>
+          {menuOpen && <div ref={menu} id={`${id}-menu`} className="chat-attachment-menu" role="menu" aria-label={plusLabel} onKeyDown={menuKeys}>
             <button type="button" role="menuitem" tabIndex={-1} onClick={() => { closeMenu(true); picker.current?.click(); }}><ChatIcon name="attachment" />{t('Files')}</button>
             <button type="button" role="menuitem" tabIndex={-1} onClick={() => {
               closeMenu(true);
               setLinkInput(''); setLinkType(''); setLinkError(false);
               dialog.current?.showModal();
             }}><ChatIcon name="link" />{t('Link')}</button>
+            {mcp && <button type="button" role="menuitem" tabIndex={-1} aria-haspopup="dialog" disabled={mcp.disabled || preparing}
+              onClick={() => { closeMenu(true); mcp.open(); }}><ChatIcon name="tool" />{t('Model Context')}
+              {mcp.count > 0 && <span className="mcp-selected-count" aria-hidden="true">{mcp.count}</span>}
+            </button>}
           </div>}
           <input ref={picker} type="file" multiple hidden accept={image ? 'image/*' : undefined} onChange={event => {
             if (event.currentTarget.files) addFiles(event.currentTarget.files);
@@ -192,10 +198,6 @@ export function ChatComposer(props: ComposerProps) {
             title={t('Chat settings')} aria-haspopup="dialog" onClick={props.onChatSettings}><ChatIcon name="settings" /></Button></span>
           <Button className="chat-composer-icon" type="button" variant="subtle" aria-label={t('View context')}
             title={t('View context')} aria-haspopup="dialog" onClick={props.onViewContext}><ChatIcon name="info" /></Button>
-          {props.mcp && <Tooltip content={t('Choose MCP servers')}><Button className="chat-composer-icon" type="button" variant="subtle"
-            aria-label={t('Choose MCP servers')} aria-haspopup="dialog" disabled={props.mcp.disabled || preparing} onClick={props.mcp.open}>
-            <ChatIcon name="tool" />{props.mcp.count > 0 && <span className="mcp-selected-count" aria-hidden="true">{props.mcp.count}</span>}
-          </Button></Tooltip>}
         </>}
         {busy && onStop ? <Button key="stop" className="chat-send" type="button" aria-label={t('Stop')} title={t('Stop')}
             onClick={onStop}><ChatIcon name="stop" /></Button>

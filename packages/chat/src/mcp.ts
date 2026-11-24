@@ -13,7 +13,7 @@ export type McpOptions = {
   headersForRemote?: (headers: readonly McpRemoteHeader[]) => McpAppAuth | undefined;
 };
 export type McpServer = Pick<McpServerRecord, 'id' | 'title' | 'endpoint'> & {
-  pinned: boolean; reviewExecution: boolean; requestHeaders: RequestHeaders;
+  reviewExecution: boolean; requestHeaders: RequestHeaders;
 };
 export type McpTool = Pick<Tool, 'name' | 'title' | 'description' | 'inputSchema' | 'outputSchema' | 'annotations'> & { server: McpServer; remoteName: string };
 export type McpOutput = { text: string; images: string[] };
@@ -68,30 +68,35 @@ async function withClient<T>(server: McpServer, signal: AbortSignal, action: (cl
   const endpoint = mcpEndpoint(server.endpoint);
   if (!endpoint || endpoint !== server.endpoint) throw new Error('Invalid MCP endpoint.');
   const { Client, StreamableHTTPClientTransport } = await import('@modelcontextprotocol/client');
-  const client = new Client({ name: 'Streaik Web', version: '1.0.0' }, server.pinned ? { versionNegotiation: { mode: { pin: revision } } } : undefined);
+  // Transport compatibility is independent of whether the app trusts this URL with managed credentials.
+  const client = new Client({ name: 'Streaik Web', version: '1.0.0' }, { versionNegotiation: { mode: { pin: revision } } });
   const transport = new StreamableHTTPClientTransport(new URL(endpoint), {
-    protocolVersion: server.pinned ? revision : undefined,
+    protocolVersion: revision,
     requestInit: { redirect: 'error' },
     fetch: async (input, init) => {
       const request = new Request(input, init);
       // Bind credentials to the configured origin AND exact server path. Never follow redirects.
-      if (request.url !== endpoint || (server.pinned ? request.method !== 'POST' : !['POST', 'GET', 'DELETE'].includes(request.method))) {
-        throw new Error('Unexpected MCP request.');
-      }
+      if (request.url !== endpoint || request.method !== 'POST') throw new Error('Unexpected MCP request.');
       const headers = new Headers(request.headers);
       signal.throwIfAborted();
       const credentials = new Headers(await server.requestHeaders());
       credentials.forEach((value, key) => headers.set(key, value));
-      if (server.pinned) headers.set('Mcp-Protocol-Version', revision);
+      if (headers.has('Mcp-Session-Id')) throw new Error('Stateful MCP sessions are not supported.');
+      headers.set('Mcp-Protocol-Version', revision);
       signal.throwIfAborted();
-      return fetch(request, { headers, signal: AbortSignal.any([request.signal, signal]), redirect: 'error', credentials: 'omit',
+      const response = await fetch(request, { headers, signal: AbortSignal.any([request.signal, signal]), redirect: 'error', credentials: 'omit',
         cache: 'no-store', referrerPolicy: 'no-referrer' });
+      if (response.headers.has('Mcp-Session-Id')) {
+        void response.body?.cancel().catch(() => {});
+        throw new Error('Stateful MCP sessions are not supported.');
+      }
+      return response;
     },
   });
   try {
     signal.throwIfAborted();
     await client.connect(transport, { signal });
-    if (server.pinned && client.getNegotiatedProtocolVersion() !== revision) throw new Error('The MCP revision was not negotiated.');
+    if (client.getNegotiatedProtocolVersion() !== revision) throw new Error('The required MCP revision is unavailable.');
     return await action(client);
   } finally { await client.close(); }
 }

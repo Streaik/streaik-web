@@ -59,8 +59,8 @@ export function useMcpServers(scope: string | undefined, options: McpOptions | u
 
   function connection(record: McpServerRecord): McpServer | undefined {
     if (!available) return;
-    const pinned = isMcpRuntime(record.endpoint, options?.base);
-    const server = { id: record.id, title: record.title, endpoint: record.endpoint, pinned, reviewExecution: record.source === 'manual' || !pinned };
+    const server = { id: record.id, title: record.title, endpoint: record.endpoint,
+      reviewExecution: record.source === 'manual' || !isMcpRuntime(record.endpoint, options?.base) };
     if (record.auth === 'app') {
       const auth = mcpAppAuth(options, record);
       if (auth?.ready) return { ...server, requestHeaders: auth.headers };

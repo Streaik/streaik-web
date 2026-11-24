@@ -608,8 +608,8 @@ test('composer attaches picked files, dropped files and links, with opt-in local
   await expectChatModel(page);
 
   const composer = page.getByRole('form', { name: 'Message composer' });
-  const plus = composer.getByRole('button', { name: 'Add attachments' });
-  const menu = page.getByRole('menu', { name: 'Add attachments' });
+  const plus = composer.getByRole('button', { name: 'Add to message' });
+  const menu = page.getByRole('menu', { name: 'Add to message' });
   await plus.press('ArrowDown');
   await expect(menu.getByRole('menuitem', { name: 'Files', exact: true })).toBeFocused();
   expect((await menu.boundingBox())!.y).toBeLessThan((await plus.boundingBox())!.y);

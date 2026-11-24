@@ -47,7 +47,7 @@ import { conversationOpeningText, deleteConversation, listConversations, newConv
 import type { Conversation } from './conversations';
 import { callMcpTool } from './mcp';
 import type { McpOptions } from './mcp';
-import { McpServerEditor, McpServerPicker, McpServersView } from './McpServersView';
+import { McpServerEditor, McpServersView, ModelContextDialog } from './McpServersView';
 import type { McpEditorTarget } from './McpServersView';
 import { useMcpSelection, useMcpServers } from './useMcpServers';
 import type { McpServers } from './useMcpServers';
@@ -448,7 +448,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
     id: conversation.id, messages: conversation.messages, transport, throttle: preferences.delay || undefined,
   });
   useEffect(() => () => { void stop(); }, [stop]);
-  const [mcpPicker, setMcpPicker] = useState(false);
+  const [modelContextOpen, setModelContextOpen] = useState(false);
   const [mcpEditor, setMcpEditor] = useState<McpEditorTarget>();
   const mcpSelection = useMcpSelection(mcpServers);
   const [toolNotice, setToolNotice] = useState('');
@@ -725,7 +725,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
              {progress || (restoringSkills ? t('Loading provider skills…') : t('Loading MCP tools…'))}</>}</div>
           <ChatComposer busy={busy || (status === 'ready' && toolParts.length > 0)} canSend={canSend} onStop={stopTurn}
             convert={preferences.convertAttachmentsToText}
-            mcp={mcpServers.available ? { count: mcpSelection.entries.length, disabled: routesLocked, open: () => setMcpPicker(true) } : undefined}
+            mcp={mcpServers.available ? { count: mcpSelection.entries.length, disabled: routesLocked, open: () => setModelContextOpen(true) } : undefined}
             onChatSettings={() => chatSettings.current?.showModal()} onViewContext={() => contextDialog.current?.showModal()}
             onSend={(parts) => {
               if (!model || !canSend) return;
@@ -739,8 +739,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
       <ViewContextDialog dialog={contextDialog} context={(busy || toolParts.length > 0) && turn ? turn.context : context}
         tools={(busy || toolParts.length > 0) && turn ? turn.tools : enabledTools} />
       {review && <ToolApprovalDialog key={`${review.id}:${review.kind}`} review={review} onAnswer={answerTool} onStop={stopTurn} />}
-      {mcpServers.available && mcpPicker && <McpServerPicker store={mcpServers} selection={mcpSelection} locked={routesLocked}
-        onConfigure={record => setMcpEditor({ record })} close={() => setMcpPicker(false)} onBrowse={() => { setMcpPicker(false); onView('mcp'); }} />}
+      {view === 'chat' && mcpServers.available && modelContextOpen && <ModelContextDialog store={mcpServers} options={connection.mcp}
+        selection={mcpSelection} locked={routesLocked} onEdit={setMcpEditor} close={() => setModelContextOpen(false)} />}
       {mcpServers.available && mcpEditor && <McpServerEditor target={mcpEditor} options={connection.mcp} store={mcpServers} close={() => setMcpEditor(undefined)} />}
        <footer className="chat-disclaimer" hidden={view !== 'chat' || !!locationIssue}>{t('{{appName}} can make mistakes. Check important information.', { appName })}</footer>
       {view === 'images' ? <Suspense fallback={<main className="catalog-main"><p role="status">{t('Loading images…')}</p></main>}>

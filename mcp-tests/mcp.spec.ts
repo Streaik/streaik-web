@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import type { APIRequestContext, APIResponse, Page } from '@playwright/test';
+import type { APIRequestContext, APIResponse, Page, Request } from '@playwright/test';
 import { fetchMcpCatalog, mcpAppAuth } from '../packages/chat/src/mcp';
 import { acceptsEntraMcpToken, readMcpConfig } from '../samples/shared/mcpConfig';
 
@@ -25,7 +25,7 @@ async function setOpenAiKey(page: Page) {
   await page.getByRole('button', { name: 'Close', exact: true }).click();
 }
 
-async function addManualServer(page: Page, title: string, url: string) {
+async function addManualServer(page: Page, title: string, url: string, authorization = auth.openai.Authorization) {
   await page.getByRole('button', { name: 'MCP Servers', exact: true }).click();
   await page.getByRole('button', { name: 'Add by URL' }).click();
   const editor = page.getByRole('dialog', { name: 'Add MCP server' });
@@ -33,14 +33,20 @@ async function addManualServer(page: Page, title: string, url: string) {
   await editor.getByLabel('Server URL').fill(url);
   await editor.getByRole('button', { name: 'Add header' }).click();
   await editor.getByLabel('Header name').fill('Authorization');
-  await editor.getByLabel('Header value').fill(auth.openai.Authorization);
+  await editor.getByLabel('Header value').fill(authorization);
   await editor.getByRole('button', { name: 'Save server' }).click();
   await expect(editor).toHaveCount(0);
 }
 
+async function openModelContext(page: Page) {
+  await page.getByRole('button', { name: 'Add to message' }).click();
+  await page.getByRole('menuitem', { name: 'Model Context', exact: true }).click();
+  return page.getByRole('dialog', { name: 'Model Context' });
+}
+
 async function selectServer(page: Page, name: string, count: number) {
-  await page.getByRole('button', { name: 'Choose MCP servers' }).click();
-  const picker = page.getByRole('dialog', { name: 'MCP servers for this chat' });
+  const picker = await openModelContext(page);
+  await expect(picker.getByRole('tab', { name: 'Installed' })).toHaveAttribute('aria-selected', 'true');
   const toggle = picker.getByRole('switch', { name, exact: true });
   await expect(toggle).not.toBeChecked();
   await toggle.check();
@@ -49,6 +55,9 @@ async function selectServer(page: Page, name: string, count: number) {
 }
 
 async function exerciseChat(page: Page, approve: boolean, manual = false) {
+  const endpoint = `${manual ? delegated : mcp}/openai-images`;
+  const authorization = manual ? 'Bearer test-mcp-token' : auth.openai.Authorization;
+  const toolRequests: Request[] = [];
   const calls: string[] = [];
   const mcpFailures: string[] = [];
   let chatRequests = 0;
@@ -67,11 +76,12 @@ async function exerciseChat(page: Page, approve: boolean, manual = false) {
     return route.fulfill({ json: { answers: [{ name: 'chat_model', type: 'choice', choice: candidate }] } });
   });
   page.on('request', request => {
-    if (request.url().startsWith(mcp) && request.method() === 'POST' && request.postDataJSON().method === 'tools/call')
-      calls.push(request.postDataJSON().params.name);
+    if (request.url() !== endpoint || request.method() === 'OPTIONS') return;
+    toolRequests.push(request);
+    if (request.method() === 'POST' && request.postDataJSON().method === 'tools/call') calls.push(request.postDataJSON().params.name);
   });
   page.on('response', async response => {
-    if (response.url().startsWith(mcp) && response.request().method() === 'POST' && response.request().postDataJSON().method === 'tools/call')
+    if (response.url() === endpoint && response.request().method() === 'POST' && response.request().postDataJSON().method === 'tools/call')
       mcpFailures.push(await response.text().catch(() => `HTTP ${response.status()}`));
   });
   await page.route('**/gateway/api/chat', async route => {
@@ -100,6 +110,7 @@ async function exerciseChat(page: Page, approve: boolean, manual = false) {
       if (approve) expect(reviewed.output).toBe('MCP returned 1 image(s), displayed to the user.');
       else expect(reviewed).not.toHaveProperty('output');
       expect(JSON.stringify(sent)).not.toContain('browser-openai');
+      expect(JSON.stringify(sent)).not.toContain('test-mcp-token');
       expect(JSON.stringify(sent)).not.toContain('iVBOR');
       await route.fulfill({ headers, body: sse([
         { type: 'start', messageId: 'mcp-assistant' }, { type: 'start-step' },
@@ -111,7 +122,7 @@ async function exerciseChat(page: Page, approve: boolean, manual = false) {
 
   await page.goto('/');
   await setOpenAiKey(page);
-  if (manual) await addManualServer(page, 'Manual images', `${mcp}/openai-images`);
+  if (manual) await addManualServer(page, 'Manual images', endpoint, authorization);
   else {
     await page.getByRole('button', { name: 'MCP Servers', exact: true }).click();
     await page.getByRole('button', { name: 'Install OpenAI Images' }).click();
@@ -144,7 +155,7 @@ async function exerciseChat(page: Page, approve: boolean, manual = false) {
   await page.getByRole('button', { name: 'Send', exact: false }).click();
   if (manual) {
     const execution = page.getByRole('dialog', { name: 'Approve tool execution' });
-    await expect(execution.getByText('Arguments go to Manual images on localhost:15281.', { exact: false })).toBeVisible();
+    await expect(execution.getByText(`Arguments go to Manual images on ${new URL(endpoint).host}.`, { exact: false })).toBeVisible();
     expect(calls).toEqual([]);
     await execution.getByRole('button', { name: 'Approve and run' }).click();
   }
@@ -165,11 +176,21 @@ async function exerciseChat(page: Page, approve: boolean, manual = false) {
   expect(calls).toEqual(['OpenAIImages_CreateImage']);
   expect(chatRequests).toBe(2);
   expect(decisions).toBe(routed ? 1 : 0);
+  // The SDK does modern capability discovery on each connection, not a legacy initialize handshake.
+  expect(toolRequests.map(request => request.method())).toEqual(['POST', 'POST', 'POST', 'POST']);
+  expect(toolRequests.map(request => request.postDataJSON().method)).toEqual(['server/discover', 'tools/list', 'server/discover', 'tools/call']);
+  for (const request of toolRequests) {
+    const headers = await request.allHeaders();
+    expect(headers['mcp-protocol-version']).toBe(version);
+    expect(headers['mcp-session-id']).toBeUndefined();
+    expect(headers.authorization).toBe(authorization);
+    expect(request.postDataJSON().params._meta['io.modelcontextprotocol/protocolVersion']).toBe(version);
+  }
 }
 
 test('browser executes once, previews the image in a review modal, and shares the approved result', async ({ page }) => exerciseChat(page, true));
 test('the assigned router runs once and its chosen model continues after an MCP denial', async ({ page }) => exerciseChat(page, false));
-test('a manually added server requires approval before sending tool arguments', async ({ page }) => exerciseChat(page, true, true));
+test('a manual server outside the trusted base uses only stateless MCP and requires execution approval', async ({ page }) => exerciseChat(page, true, true));
 
 test('the registry controls which servers appear in chat and receives no credentials', async ({ page }) => {
   await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: model }] } }));
@@ -191,11 +212,15 @@ test('the registry controls which servers appear in chat and receives no credent
   await page.goto('/');
   await setOpenAiKey(page);
   expect(listings).toBe(0);
-  await page.getByRole('button', { name: 'MCP Servers', exact: true }).click();
-  await expect(page).toHaveURL(/\/mcp$/);
-  await page.getByRole('button', { name: 'Install Images from the configured registry' }).click();
+  const draft = page.getByRole('textbox', { name: 'Message', exact: true });
+  await draft.fill('Keep this draft while browsing');
+  const catalog = await openModelContext(page);
+  await expect(catalog.getByRole('tab', { name: 'Registry', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await catalog.getByRole('button', { name: 'Install Images from the configured registry' }).click();
   expect(discovery).toEqual([]);
-  await page.getByRole('button', { name: 'New chat' }).click();
+  await catalog.getByRole('button', { name: 'Close' }).click();
+  await expect(draft).toHaveValue('Keep this draft while browsing');
+  await expect(page).toHaveURL(new URL('/', page.url()).href);
   await selectServer(page, 'Images from the configured registry', 3);
   expect([...new Set(discovery)]).toEqual([`${mcp}/openai-images`]);
   expect(listings).toBe(1);
@@ -209,8 +234,7 @@ test('manual headers are not persisted, and the disabled toggle has a separate c
   const installed = page.getByRole('region', { name: 'Installed servers' });
   await expect(installed.getByText('Credentials needed')).toBeVisible();
   await page.getByRole('button', { name: 'New chat' }).click();
-  await page.getByRole('button', { name: 'Choose MCP servers' }).click();
-  const picker = page.getByRole('dialog', { name: 'MCP servers for this chat' });
+  const picker = await openModelContext(page);
   const toggle = picker.getByRole('switch', { name: 'Private MCP' });
   await expect(toggle).toBeDisabled();
   await expect(toggle).not.toBeChecked();
@@ -223,6 +247,22 @@ test('manual headers are not persisted, and the disabled toggle has a separate c
   await editor.getByRole('button', { name: 'Save server' }).click();
   await expect(toggle).toBeEnabled();
   await expect(toggle).not.toBeChecked();
+});
+
+test('registry install renders secret template fields when an app credential is unavailable', async ({ page }) => {
+  await page.goto('/mcp');
+  await page.getByRole('button', { name: 'Install OpenAI Images' }).click();
+  const editor = page.getByRole('dialog', { name: 'Install MCP server' });
+  const key = editor.getByLabel(/openai_api_key/);
+  await expect(key).toHaveAttribute('type', 'password');
+  await expect(key).toHaveAttribute('required', '');
+  await key.fill('manual-test-key');
+  await editor.getByRole('button', { name: 'Install server', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Installed servers' }).getByText('OpenAI Images', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'New chat' }).click();
+  const listed = page.waitForRequest(request => request.url() === `${mcp}/openai-images` && request.method() === 'POST');
+  await selectServer(page, 'OpenAI Images', 3);
+  expect((await (await listed).allHeaders()).authorization).toBe('Bearer manual-test-key');
 });
 
 test('catalog is configured separately, and app credentials are not resolved outside the trusted base', async () => {
@@ -253,11 +293,14 @@ test('the bundled header-auth registry is not compatible with the Entra chat cre
   expect(acceptsEntraMcpToken([{ name: 'Authorization', value: 'Bearer {access_token}' }])).toBe(true);
 });
 
-test('the sample registry returns CORS headers only for configured origins', async ({ request }) => {
-  const allowed = await request.get(registryUrl, { headers: { Origin: 'http://localhost:15273' } });
+test('the sample registry allows uncredentialed CORS from the web app', async ({ request }) => {
+  const origin = 'http://localhost:15273';
+  const allowed = await request.get(registryUrl, { headers: { Origin: origin } });
   const denied = await request.get(registryUrl, { headers: { Origin: 'https://unrelated.example.test' } });
-  expect(allowed.headers()['access-control-allow-origin']).toBe('http://localhost:15273');
-  expect(denied.headers()['access-control-allow-origin']).toBeUndefined();
+  const cors = allowed.headers()['access-control-allow-origin'];
+  expect([origin, '*']).toContain(cors);
+  expect(denied.headers()['access-control-allow-origin']).toBe(cors === '*' ? '*' : undefined);
+  for (const response of [allowed, denied]) expect(response.headers()['access-control-allow-credentials']).toBeUndefined();
 });
 
 async function rpc(request: APIRequestContext, host: string, path: string, method: string, params: object = {}, headers: Record<string, string> = {},
