@@ -40,6 +40,21 @@ The chat client supports:
 Documentation: https://ai.streaik.net/scalar  
 App: https://chat.streaik.com
 
+## MCP registry discovery in the chat samples
+
+MCP discovery is off by default. To enable it in the BYOK sample, set the tool base and the full registry list URL in the sample’s Vite environment. For the [local HeaderAuth tool host](../streaik-mcp-servers/README.md) and [standalone registry](../streaik-mcp-registry/README.md), use:
+
+```dotenv
+VITE_MCP_BASE=http://localhost:5087
+VITE_MCP_REGISTRY_URL=http://localhost:5089/v0.1/servers
+```
+
+Set the registry’s default servers base to the tool base above. For a cross-origin registry, configure `McpRegistry__BrowserOrigins__0` on the registry (e.g. `http://localhost:5173` for BYOK), in addition to the tool host’s own browser-origin setting. Restart or rebuild the Vite sample after changing settings. Relative URLs also work with a same-origin proxy.
+
+Chat fetches the listing without credentials. It accepts Streamable HTTP remotes only on the origin and path prefix configured in `VITE_MCP_BASE`. The BYOK sample resolves supported header declarations using its own provider keys, not literal values from the listing.
+
+For the Entra and Fakton samples, leave `VITE_MCP_REGISTRY_URL` unset until a compatible registry advertises your Entra-protected tool host. Then set both URLs and `VITE_ENTRA_MCP_SCOPE` for that MCP API. Compatible remotes omit header declarations or describe a bearer access token in `Authorization`. The bundled registry advertises provider-key authentication only.
+
 ## Local mode
 
 Use [local.streaik.com](https://local.streaik.com) with the standalone Windows runtimes:

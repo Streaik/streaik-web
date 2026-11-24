@@ -14,6 +14,17 @@ const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCA
 
 function sse(events: unknown[]) { return events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n'; }
 
+async function setOpenAiKey(page: Page) {
+  await page.getByRole('button', { name: 'Account menu' }).click();
+  await page.getByRole('menuitem', { name: 'Settings' }).click();
+  await page.getByRole('tab', { name: 'API keys', exact: true }).click();
+  await page.getByRole('button', { name: 'Add API key', exact: true }).click();
+  await page.getByLabel('Provider', { exact: true }).selectOption('openai');
+  await page.getByLabel('OpenAI API key').fill('browser-openai');
+  await page.getByRole('button', { name: 'Save OpenAI key' }).click();
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
+}
+
 async function exerciseChat(page: Page, approve: boolean) {
   const calls: string[] = [];
   const mcpFailures: string[] = [];
@@ -75,14 +86,7 @@ async function exerciseChat(page: Page, approve: boolean) {
   });
 
   await page.goto('/');
-  await page.getByRole('button', { name: 'Account menu' }).click();
-  await page.getByRole('menuitem', { name: 'Settings' }).click();
-  await page.getByRole('tab', { name: 'API keys', exact: true }).click();
-  await page.getByRole('button', { name: 'Add API key', exact: true }).click();
-  await page.getByLabel('Provider', { exact: true }).selectOption('openai');
-  await page.getByLabel('OpenAI API key').fill('browser-openai');
-  await page.getByRole('button', { name: 'Save OpenAI key' }).click();
-  await page.getByRole('button', { name: 'Close', exact: true }).click();
+  await setOpenAiKey(page);
   if (routed) {
     await page.getByRole('button', { name: 'Agents', exact: true }).click();
     await page.getByRole('button', { name: 'Create agent', exact: true }).click();
@@ -146,6 +150,7 @@ test('the registry controls which servers appear in chat and receives no credent
     await route.fulfill({ response, json: { servers: [entry], metadata: { count: 1 } } });
   });
   await page.goto('/');
+  await setOpenAiKey(page);
   await page.getByRole('button', { name: 'Discover MCP tools' }).click();
   const tools = page.getByText('3 MCP tools enabled');
   await expect(tools).toBeVisible();

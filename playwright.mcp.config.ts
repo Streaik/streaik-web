@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const testHost = 'dotnet run --project ../streaik-mcp-servers/tests/Streaik.Mcp.TestHost --no-launch-profile';
-const registryHost = 'dotnet run --project ../streaik-mcp-registry/samples/Streaik.Mcp.Registry.Sample --no-launch-profile';
+const registryHost = 'dotnet run --project ../streaik-mcp-registry/samples/Streaik.Mcp.Registry.Sample --no-launch-profile --artifacts-path ../streaik-mcp-registry/obj/playwright';
 const mcpBase = 'http://localhost:15281';
 const registryUrl = 'http://localhost:15283/v0.1/servers';
 
