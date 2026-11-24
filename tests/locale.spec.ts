@@ -24,6 +24,10 @@ test('detects Dutch, switches to Spanish without losing drafts, and remembers th
   const agents = page.getByRole('button', { name: 'Agents', exact: true });
   await expect(agents).toBeVisible();
   await page.getByRole('textbox', { name: 'Bericht', exact: true }).fill('Keep this draft');
+  await page.getByRole('button', { name: 'Context bekijken', exact: true }).click();
+  const dutchContext = page.getByRole('dialog', { name: 'Context', exact: true });
+  await expect(dutchContext.getByRole('heading', { name: 'Systeemcontext', exact: true })).toBeVisible();
+  await dutchContext.getByRole('button', { name: 'Sluiten', exact: true }).click();
 
   await page.getByRole('button', { name: 'Accountmenu' }).click();
   await page.getByRole('menuitem', { name: 'Instellingen' }).click();
@@ -44,6 +48,10 @@ test('detects Dutch, switches to Spanish without losing drafts, and remembers th
   await close.press('Enter');
   await expect(settings).toBeHidden();
   await expect(page.getByRole('textbox', { name: 'Mensaje', exact: true })).toHaveValue('Keep this draft');
+  await page.getByRole('button', { name: 'Ver contexto', exact: true }).click();
+  const spanishContext = page.getByRole('dialog', { name: 'Contexto', exact: true });
+  await expect(spanishContext.getByRole('heading', { name: 'Contexto del sistema', exact: true })).toBeVisible();
+  await spanishContext.getByRole('button', { name: 'Cerrar', exact: true }).click();
 
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('lang', 'es');

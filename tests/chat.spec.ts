@@ -73,10 +73,16 @@ test('local Skills tabs persist versions and chat progressively discloses approv
   await page.route('**/gateway/v1/skills?*', route => route.fulfill({ json: { data: [], has_more: false } }));
   await page.route('**/gateway/api/chat', async route => {
     const body = route.request().postDataJSON(); requests.push(body);
-    const catalog = JSON.parse(body.messages[0].parts[0].text).availableSkills;
+    const [skills, system, user] = body.messages[0].parts.map(({ text }: { text: string }) => JSON.parse(text));
+    expect(body.messages[0]).toMatchObject({ role: 'system', parts: [{ type: 'text' }, { type: 'text' }, { type: 'text' }] });
+    const catalog = skills.availableSkills;
     const skillId = catalog.skills[0].skill_id;
     expect(skillId).toMatch(/^local:/);
+    expect(catalog).toMatchObject({ activationTool: 'activate_skill', resourceTool: 'read_skill_resource',
+      instructions: expect.any(String), skillIdRequired: true, activationExamples: [expect.stringContaining(skillId)] });
     expect(catalog.skills).toMatchObject([{ name: 'weekly-digest', description }]);
+    expect(system).toEqual({ systemInformation: { appName: expect.any(String), timezone: expect.any(String) } });
+    expect(user).toEqual({ preferredLanguage: 'en', darkMode: expect.any(Boolean) });
     expect(body.tools.map((tool: { name: string }) => tool.name)).toEqual(['activate_skill', 'read_skill_resource']);
     expect(body.clientToolResultApproval).toBe(true);
     const number = requests.length;
@@ -139,10 +145,11 @@ test('local Skills tabs persist versions and chat progressively discloses approv
   await toggle.uncheck();
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
   const viewContext = page.getByRole('button', { name: 'View context', exact: true });
-  const context = page.getByRole('dialog', { name: 'View context', exact: true });
+  const context = page.getByRole('dialog', { name: 'Context', exact: true });
   const system = context.getByRole('tabpanel', { name: 'System', exact: true });
+  const skillsTab = context.getByRole('tab', { name: 'Skills', exact: true });
   await viewContext.click();
-  await expect(system).not.toContainText('weekly-digest');
+  await expect(skillsTab).toHaveCount(0);
   await expect(context.getByRole('tab', { name: 'Tools (0)', exact: true })).toBeVisible();
   await context.getByRole('button', { name: 'Close', exact: true }).click();
 
@@ -151,9 +158,18 @@ test('local Skills tabs persist versions and chat progressively discloses approv
   await toggle.check();
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
   await viewContext.click();
-  await expect(system).toContainText('weekly-digest');
-  await expect(system).toContainText(description);
-  await expect(system).not.toContainText(marker);
+  await expect(system.getByRole('heading')).toHaveText('System context');
+  await expect(system).not.toContainText('weekly-digest');
+  await context.getByRole('tab', { name: 'System', exact: true }).press('End');
+  await expect(skillsTab).toBeFocused();
+  const skillPanel = context.getByRole('tabpanel', { name: 'Skills', exact: true });
+  const skillCard = skillPanel.getByRole('article');
+  await expect(skillCard.getByRole('heading')).toHaveText('weekly-digest');
+  await expect(skillCard.locator('code')).toHaveText(/^local:/);
+  const displayedSkillId = await skillCard.locator('code').textContent();
+  await expect(skillCard.locator('p')).toHaveText(description);
+  await expect(skillPanel).not.toContainText(/activationTool|activate_skill|read_skill_resource/);
+  await expect(skillPanel).not.toContainText(marker);
   await context.getByRole('tab', { name: 'Tools (2)', exact: true }).click();
   await expect(context.getByRole('heading', { name: 'activate_skill', exact: true })).toBeVisible();
   await expect(context.getByRole('heading', { name: 'read_skill_resource', exact: true })).toBeVisible();
@@ -163,6 +179,7 @@ test('local Skills tabs persist versions and chat progressively discloses approv
   await composer.fill('Please write a digest.'); await composer.press('Enter');
   const approve = page.getByRole('button', { name: 'Approve and share' });
   await expect(approve).toBeVisible(); expect(requests).toHaveLength(1);
+  expect(JSON.parse(requests[0].messages[0].parts[0].text).availableSkills.skills[0].skill_id).toBe(displayedSkillId);
   await approve.click();
   await expect.poll(() => requests.length).toBe(2);
   await expect(approve).toBeVisible(); await approve.click();
@@ -267,11 +284,15 @@ test('chat settings list and remember remote skills without downloading until th
   await showSettings(page); await addKey(page); await closeSettings(page);
   await expectChatModel(page);
   await page.getByRole('button', { name: 'View context', exact: true }).click();
-  const context = page.getByRole('dialog', { name: 'View context', exact: true });
-  const system = context.getByRole('tabpanel', { name: 'System' });
-  await expect(system).toContainText(id);
-  await expect(system).not.toContainText(first.name);
-  await expect(system).not.toContainText(instructions);
+  const context = page.getByRole('dialog', { name: 'Context', exact: true });
+  const skillsTab = context.getByRole('tab', { name: 'Skills', exact: true });
+  await skillsTab.click();
+  const cards = context.getByRole('tabpanel', { name: 'Skills', exact: true }).getByRole('article');
+  await expect(cards).toHaveCount(1);
+  await expect(cards.getByRole('heading')).toHaveText(name);
+  await expect(cards.locator('code')).toHaveText(id);
+  await expect(cards.locator('p')).toHaveText(description);
+  await expect(cards).not.toContainText(instructions);
   await context.getByRole('button', { name: 'Close', exact: true }).click();
   expect(cursors).toEqual([null, null, first.id, null, first.id]);
   expect(downloads).toBe(0);
@@ -293,7 +314,7 @@ test('chat settings list and remember remote skills without downloading until th
   await toggle.uncheck();
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
   await page.getByRole('button', { name: 'View context', exact: true }).click();
-  await expect(system).not.toContainText(id);
+  await expect(skillsTab).toHaveCount(0);
   await expect(context.getByRole('tab', { name: 'Tools (0)', exact: true })).toBeVisible();
   expect(downloads).toBe(1);
 });
@@ -721,7 +742,7 @@ test('Gateway chat settings share context and replay catalog and approved text-o
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
 
   await contextButton.click();
-  const context = page.getByRole('dialog', { name: 'View context', exact: true });
+  const context = page.getByRole('dialog', { name: 'Context', exact: true });
   const system = await context.getByRole('tabpanel', { name: 'System' }).locator('pre').textContent();
   await context.getByRole('tab', { name: 'System', exact: true }).press('ArrowRight');
   const user = await context.getByRole('tabpanel', { name: 'User' }).locator('pre').textContent();
@@ -1415,6 +1436,7 @@ test('BYOK can chat and persist Direct performance and cost with every gateway r
     }
     expect(request.url()).toBe('https://api.openai.com/v1/chat/completions');
     expect(request.postDataJSON()).toMatchObject({ model: 'gpt-4.1-mini', stream: true, store: false });
+    expect(request.postDataJSON().messages).not.toContainEqual(expect.objectContaining({ role: 'system' }));
     if (directCalls === 1) expect(JSON.stringify(request.postDataJSON().messages)).toContain('Direct reply 1');
     await route.fulfill({ headers: { ...headers, 'content-type': 'text/event-stream' }, body: nativeChatSse(`Direct reply ${++directCalls}`) });
   });
@@ -1441,6 +1463,11 @@ test('BYOK can chat and persist Direct performance and cost with every gateway r
   await expect(page.getByRole('menuitemradio', { name: '/v1/chat/completions', exact: true })).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByRole('menuitemradio', { name: '/v1/messages', exact: true })).toHaveCount(0);
   await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'View context', exact: true }).click();
+  const context = page.getByRole('dialog', { name: 'Context', exact: true });
+  await expect(context.getByRole('tabpanel', { name: 'System', exact: true })).toContainText('No extra context is sent on Direct routes.');
+  await expect(context.getByRole('tab', { name: 'Skills', exact: true })).toHaveCount(0);
+  await context.getByRole('button', { name: 'Close', exact: true }).click();
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   await composer.fill('Offline first question'); await composer.press('Enter');
   await expect(page.getByText('Direct reply 1', { exact: true })).toBeVisible();
@@ -1484,6 +1511,8 @@ test('BYOK can leave a failed gateway model request and discover directly', asyn
 
 test('switching from API Chat to a native gateway route keeps inline history and Retry uses the selected route', async ({ page }) => {
   await mockModels(page);
+  const skill = { id: 'openai/skill_native-context', name: 'native-context', description: 'A hosted skill for this chat.' };
+  await page.route('**/gateway/v1/skills?*', route => route.fulfill({ json: { data: [skill], has_more: false } }));
   let calls = 0;
   await page.route('**/gateway/api/chat', async route => {
     await route.fulfill({ contentType: 'text/event-stream', body: sse('API Chat reply', 1) });
@@ -1493,8 +1522,13 @@ test('switching from API Chat to a native gateway route keeps inline history and
     expect(await route.request().headerValue('authorization')).toBeNull();
     const body = route.request().postDataJSON();
     expect(body.model).toBe(model);
-    expect(body.messages[0]).toMatchObject({ role: 'system', content: expect.stringContaining('systemInformation') });
-    expect(body.messages[0].content).toContain('preferredLanguage');
+    const context = body.messages.filter(({ role }: { role: string }) => role === 'system').map(({ content }: { content: string }) => JSON.parse(content));
+    expect(context).toEqual([
+      { availableSkills: expect.objectContaining({ activationTool: 'activate_skill', instructions: expect.any(String),
+        skills: [expect.objectContaining(skill)] }) },
+      { systemInformation: { appName: expect.any(String), timezone: expect.any(String) } },
+      { preferredLanguage: 'en', darkMode: expect.any(Boolean) },
+    ]);
     expect(JSON.stringify(body.messages)).toContain('API Chat reply');
     expect(JSON.stringify(body.messages)).toContain('Native continuation');
     if (++calls === 1) return route.fulfill({ status: 429, body: 'private provider error' });
@@ -1503,6 +1537,9 @@ test('switching from API Chat to a native gateway route keeps inline history and
   await page.goto('/');
   await showSettings(page); await addKey(page); await closeSettings(page);
   await expectChatModel(page);
+  const settings = await showChatSkills(page);
+  await settings.getByRole('switch', { name: skill.name, exact: true }).check();
+  await settings.getByRole('button', { name: 'Close', exact: true }).click();
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   await composer.fill('First on API Chat'); await composer.press('Enter');
   await expect(page.getByText('API Chat reply', { exact: true })).toBeVisible();

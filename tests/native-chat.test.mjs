@@ -65,7 +65,8 @@ for (const endpoint of nativeChatEndpoints) {
       };
       const client = direct ? createDirectChat(providers, id => keys[id], fetcher)
         : createGateway(root, ({ provider: id }) => ({ Authorization: 'Bearer entra-token', [`x-selected-${id}`]: 'gateway-only' }), fetcher);
-      const parts = await send(client.chatTransport(endpoint), qualified);
+      const parts = await send(client.chatTransport(endpoint), qualified, direct
+        ? { body: { model: qualified, instructions: ['Gateway-only context'] } } : {});
       assert.equal(request.url, direct ? `https://api.${provider}.com${endpoint}` : `${root.href}${endpoint.slice(1)}`);
       assert.equal(request.headers.get('authorization'), direct ? provider === 'openai' ? 'Bearer openai-key' : null : 'Bearer entra-token');
       assert.equal(request.headers.get('x-api-key'), direct && provider === 'anthropic' ? keys.anthropic : null);
@@ -77,6 +78,7 @@ for (const endpoint of nativeChatEndpoints) {
       assert.equal(request.body.stream, true);
       const history = request.body.input ?? request.body.messages;
       assert.deepEqual(history.map(msg => msg.role), ['user', 'assistant', 'user']);
+      assert.equal(request.body.system, undefined);
       assert.match(JSON.stringify(history), /Earlier reply/);
       if (endpoint === responses) {
         assert.equal(request.body.store, false);
@@ -101,6 +103,27 @@ for (const endpoint of nativeChatEndpoints) {
       } else assert.deepEqual(saved, metrics.gateway);
     });
   }
+
+  test(`Gateway ${endpoint} sends separate system instruction entries and accepts a legacy string`, async () => {
+    const requests = [];
+    const model = endpoint === messagesApi ? 'anthropic/claude-sonnet-4-6' : 'openai/gpt-4.1-mini';
+    const gateway = createGateway(root, () => ({}), async (_url, init) => {
+      requests.push(JSON.parse(init.body));
+      return response(endpoint, model);
+    });
+    const instructions = [JSON.stringify({ availableSkills: { instructions: 'Use the exact skill ID.' } }),
+      JSON.stringify({ systemInformation: { appName: 'Streaik' } }), JSON.stringify({ preferredLanguage: 'en' })];
+    const transport = gateway.chatTransport(endpoint);
+    const contextFrom = body => endpoint === messagesApi ? body.system.map(block => block.text)
+      : (body.input ?? body.messages).filter(message => message.role === 'system').map(message => message.content);
+    const parts = await send(transport, model, { body: { model, instructions } });
+    assert.deepEqual(parts.filter(part => part.type === 'error'), []);
+    assert.deepEqual(contextFrom(requests[0]), instructions);
+
+    const legacy = 'Legacy instructions';
+    await send(transport, model, { body: { model, instructions: legacy } });
+    assert.deepEqual(contextFrom(requests[1]), [legacy]);
+  });
 }
 
 for (const endpoint of nativeChatEndpoints) {
