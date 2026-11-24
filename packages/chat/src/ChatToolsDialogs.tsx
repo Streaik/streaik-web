@@ -172,7 +172,7 @@ export function ViewContextDialog({ dialog, context, tools }: { dialog: DialogRe
 }
 
 export type ToolReview = { id: string; name: string; input: unknown; disabled?: boolean } & (
-  { kind: 'result'; output: unknown; images?: string[] } | { kind: 'execution'; destination?: { server: string; host: string } });
+  { kind: 'result'; output: unknown; images?: string[] } | { kind: 'execution' });
 
 export function ToolApprovalDialog({ review, onAnswer, onStop }: {
   review: ToolReview; onAnswer: (approved: boolean) => void; onStop: () => void;
@@ -192,9 +192,6 @@ export function ToolApprovalDialog({ review, onAnswer, onStop }: {
       <h2 id={`${id}-title`}>{t(review.kind === 'result' ? 'Review tool result' : 'Approve tool execution')}</h2>
     </header>
     <div className="chat-approval-name"><ChatIcon name="tool" /><strong>{review.name}</strong></div>
-    {review.kind === 'execution' && review.destination && <p className="chat-approval-destination">
-      {t('Arguments go to {{server}} on {{host}}. The result is sent back to the chat model.', review.destination)}
-    </p>}
     <DialogTabs id={id} label={t('Tool details')} tabs={review.kind === 'result' ? [[ 'input', t('Input') ], [ 'output', t('Output') ]]
       : [[ 'input', t('Input') ]]} value={tab} onChange={setTab} />
     <div id={`${id}-input-panel`} role="tabpanel" tabIndex={0} aria-labelledby={`${id}-input-tab`} hidden={tab !== 'input'}>

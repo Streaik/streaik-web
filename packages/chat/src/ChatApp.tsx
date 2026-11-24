@@ -45,7 +45,7 @@ import type { AgentsConfig } from './agentCatalog';
 import { agentModels as configuredAgentModels } from './agentDefinition';
 import { conversationOpeningText, deleteConversation, listConversations, newConversation, newestFirst, saveConversation } from './conversations';
 import type { Conversation } from './conversations';
-import { callMcpTool } from './mcp';
+import { callMcpTool, mcpFailure } from './mcp';
 import type { McpOptions } from './mcp';
 import { McpServerEditor, McpServersView, ModelContextDialog } from './McpServersView';
 import type { McpEditorTarget } from './McpServersView';
@@ -502,7 +502,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
       if (part.state !== 'approval-requested' || !tool) {
         setToolNotice('The gateway did not return an approval for this client tool.');
         setTurn(undefined);
-      } else if (!stagedResult && !(tool.source === 'mcp' && tool.tool.server.reviewExecution)) {
+      } else if (!stagedResult) {
         if (turn.automatic.calls >= 8) {
           setToolNotice('Local tool limit reached for this turn.');
           setTurn(undefined);
@@ -513,14 +513,15 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
       }
       return;
     }
-    if (pending?.part.state === 'input-available' && (pending.tool?.source === 'skill' ||
+    if (pending?.part.state === 'input-available' && (pending.tool?.source === 'skill' || pending.tool?.source === 'mcp' ||
         (pending.tool?.source === 'local' && !pending.tool.plugin.approval))) {
+      if (stagedResult) return;
       if (turn.automatic.calls >= 8) {
         setToolNotice('Local tool limit reached for this turn.');
         setTurn(undefined);
       } else {
         turn.automatic.calls++;
-        void completeTool(pending.part, pending.tool, 'run');
+        void completeTool(pending.part, pending.tool, pending.tool.source === 'mcp' ? 'stage' : 'run');
       }
       return;
     }
@@ -544,15 +545,12 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
       } else if (tool.source === 'skill') {
         output = await resolveSkillTool(tool.definition.name, part.input, turn.skills, turn.remoteSkills, controller.signal);
       } else {
-        output = 'The user declined to run this MCP tool.';
-        if (action !== 'decline') {
-          try {
-            if (!mcpServers.available) throw new Error('MCP is unavailable.');
-            const result = await callMcpTool(tool.tool, part.input, controller.signal);
-            output = result.text;
-            images = result.images;
-          } catch { output = 'The MCP tool could not be completed.'; }
-        }
+        if (!mcpServers.available) output = 'MCP is unavailable.';
+        else try {
+          const result = await callMcpTool(tool.tool, part.input, controller.signal);
+          output = result.text;
+          images = result.images;
+        } catch (error) { output = mcpFailure(error); }
       }
       if (controller.signal.aborted) return;
       if (action === 'stage') setStaged({ turn, callId: part.toolCallId, result: { output, images } });
@@ -575,21 +573,24 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
     const { part, tool } = pending;
     if (turn.resolved.has(part.toolCallId)) return;
     if (!isApiChat(turn.route)) {
-      if (tool) void completeTool(part, tool, approved ? 'run' : 'decline');
+      if (tool?.source === 'mcp') {
+        if (!stagedResult || part.state !== 'input-available') return;
+        turn.resolved.add(part.toolCallId);
+        setStaged(undefined);
+        if (approved && stagedResult.images?.length) setToolImages(stagedResult.images);
+        void addToolOutput({ tool: tool.definition.name, toolCallId: part.toolCallId,
+          output: approved ? stagedResult.output : 'The user declined to share this tool result.' });
+      } else if (tool) void completeTool(part, tool, approved ? 'run' : 'decline');
       return;
     }
     const result = stagedResult;
-    if (part.state !== 'approval-requested') return;
-    if (!result) {
-      if (tool?.source !== 'mcp' || !tool.tool.server.reviewExecution) return;
-      if (approved) { void completeTool(part, tool, 'stage'); return; }
-    }
+    if (part.state !== 'approval-requested' || !result) return;
     turn.resolved.add(part.toolCallId);
     setStaged(undefined);
-    if (approved && result?.images?.length) setToolImages(result.images);
+    if (approved && result.images?.length) setToolImages(result.images);
     // Apply the decision and approved output atomically, preserving a signature when provided.
     const approval = { ...part.approval, approved };
-    const answered: Invocation = approved && result
+    const answered: Invocation = approved
       ? { ...part, state: 'output-available', approval: { ...approval, approved: true }, output: result.output }
       : { ...part, state: 'approval-responded', approval, output: undefined };
     setMessages(current => current.map(message => message.id === last.id ? { ...message,
@@ -620,14 +621,9 @@ function ChatSession({ appName, gateway, connection, conversation, history, stor
     const { tool, part } = pending;
     const name = tool?.source === 'mcp' ? tool.tool.title || tool.tool.remoteName : invocationName(part);
     const details = { id: part.toolCallId, name, input: part.input, disabled: toolBusy || !connection.ready };
-    const destination = tool?.source === 'mcp' ? { server: tool.tool.server.title, host: new URL(tool.tool.server.endpoint).host } : undefined;
-    if (isApiChat(turn.route)) {
-      if (part.state === 'approval-requested') {
-        if (stagedResult) return { ...details, kind: 'result', ...stagedResult };
-        if (tool?.source === 'mcp' && tool.tool.server.reviewExecution) return { ...details, kind: 'execution', destination };
-      }
-    } else if (part.state === 'input-available' && (tool?.source === 'mcp' || (tool?.source === 'local' && tool.plugin.approval))) {
-      return { ...details, kind: 'execution', destination };
+    if (stagedResult) return { ...details, kind: 'result', ...stagedResult };
+    if (!isApiChat(turn.route) && part.state === 'input-available' && tool?.source === 'local' && tool.plugin.approval) {
+      return { ...details, kind: 'execution' };
     }
   }
   const review = pendingReview();

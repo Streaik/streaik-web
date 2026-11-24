@@ -122,6 +122,7 @@ function InstalledServers({ store, selection, locked, onEdit }: ServerSectionsPr
     <div className="mcp-section-heading"><h2>{t('Installed servers')}</h2><Button type="button" disabled={disabled} onClick={() => onEdit({})}>
       <ChatIcon name="add" /> {t('Add by URL')}
     </Button></div>
+    {selection && store.records.length > 0 && <p>{t('Only enable servers you trust. Tool inputs are sent when a tool runs; approval controls sharing the result with the chat model.')}</p>}
     {error && <p role="alert" className="chat-error">{t('Could not remove this MCP server.')}</p>}
       {store.records.length ? <ul className="mcp-list">{store.records.map(record => {
         const entry = selection?.entries.find(entry => entry.record === record);

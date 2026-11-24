@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { discoverMcpTools, isMcpRuntime, mcpAppAuth } from './mcp';
+import { discoverMcpTools, mcpAppAuth } from './mcp';
 import type { McpOptions, McpServer, McpTool } from './mcp';
 import { maxMcpServers, parseMcpServer, resolveMcpHeaders } from './mcpConfiguration';
 import type { McpHeaderRow, McpServerRecord } from './mcpConfiguration';
@@ -59,8 +59,7 @@ export function useMcpServers(scope: string | undefined, options: McpOptions | u
 
   function connection(record: McpServerRecord): McpServer | undefined {
     if (!available) return;
-    const server = { id: record.id, title: record.title, endpoint: record.endpoint,
-      reviewExecution: record.source === 'manual' || !isMcpRuntime(record.endpoint, options?.base) };
+    const server = { id: record.id, title: record.title, endpoint: record.endpoint };
     if (record.auth === 'app') {
       const auth = mcpAppAuth(options, record);
       if (auth?.ready) return { ...server, requestHeaders: auth.headers };

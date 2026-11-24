@@ -56,7 +56,7 @@ test('MCP fails closed when a remote only supports an earlier protocol revision'
       code: -32022, message: 'Unsupported protocol revision', data: { supported: ['2025-11-25'] },
     } }, { status: 400 });
   });
-  await assert.rejects(discoverMcpTools({ id: 'remote', title: 'Remote', endpoint, reviewExecution: true, requestHeaders: () => ({}) },
+  await assert.rejects(discoverMcpTools({ id: 'remote', title: 'Remote', endpoint, requestHeaders: () => ({}) },
     new AbortController().signal));
   assert.deepEqual(attempts, [['POST', 'server/discover', '2026-07-28', '2026-07-28']]);
 });

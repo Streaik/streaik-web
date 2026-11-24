@@ -13,10 +13,15 @@ export type McpOptions = {
   headersForRemote?: (headers: readonly McpRemoteHeader[]) => McpAppAuth | undefined;
 };
 export type McpServer = Pick<McpServerRecord, 'id' | 'title' | 'endpoint'> & {
-  reviewExecution: boolean; requestHeaders: RequestHeaders;
+  requestHeaders: RequestHeaders;
 };
 export type McpTool = Pick<Tool, 'name' | 'title' | 'description' | 'inputSchema' | 'outputSchema' | 'annotations'> & { server: McpServer; remoteName: string };
 export type McpOutput = { text: string; images: string[] };
+class McpRequestError extends Error {}
+
+export function mcpFailure(error: unknown): string {
+  return error instanceof McpRequestError ? error.message : 'The MCP request could not be completed.';
+}
 export type McpCatalogServer = { name: string; title: string; description?: string; version?: string;
   remotes: Pick<McpServerRecord, 'endpoint' | 'declarations'>[] };
 
@@ -86,6 +91,10 @@ async function withClient<T>(server: McpServer, signal: AbortSignal, action: (cl
       signal.throwIfAborted();
       const response = await fetch(request, { headers, signal: AbortSignal.any([request.signal, signal]), redirect: 'error', credentials: 'omit',
         cache: 'no-store', referrerPolicy: 'no-referrer' });
+      if (!response.ok) {
+        void response.body?.cancel().catch(() => {});
+        throw new McpRequestError(`The MCP endpoint rejected the ${headers.get('Mcp-Method') === 'tools/call' ? 'tool call' : 'connection'} (HTTP ${response.status}).`);
+      }
       if (response.headers.has('Mcp-Session-Id')) {
         void response.body?.cancel().catch(() => {});
         throw new Error('Stateful MCP sessions are not supported.');
@@ -123,7 +132,7 @@ export async function discoverMcpTools(server: McpServer, signal: AbortSignal): 
 }
 
 export async function callMcpTool(tool: McpTool, input: unknown, signal: AbortSignal): Promise<McpOutput> {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('The tool input was not a JSON object.');
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new McpRequestError('The MCP tool input must be a JSON object.');
   const result = await withClient(tool.server, signal, client => client.callTool({
     name: tool.remoteName, arguments: input as Record<string, unknown>,
   }, { signal, timeout: 130_000 }));
