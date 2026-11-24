@@ -4,7 +4,7 @@ A browser-based AI chat client with streaming, provider switching, Agents, [MCP]
 
 Connect compatible AI APIs, agent runtimes and MCP servers directly from the client.
 
-[![streaik-web](https://achappey.github.io/aihappey-chat/images/screenshot_chat.png)](https://chat.streaik.com)
+[![streaik-web](https://raw.githubusercontent.com/Streaik/streaik-web/main/assets/logo.png)](https://chat.streaik.com)
 
 The chat client supports:
 
