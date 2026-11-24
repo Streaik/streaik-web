@@ -144,7 +144,7 @@ const Message = memo(function Message({ message }: { message: ChatMessage }) {
           : <Suspense key={group.start} fallback={<div className="chat-user-text">{group.text}</div>}><AssistantMarkdown text={group.text} /></Suspense>;
       })}
     </div>
-    {!user && <MessageActions message={message} />}
+    <MessageActions message={message} userText={user ? groups.flatMap(group => group.type === 'text' ? [group.text] : []).join('\n\n') : undefined} />
   </article>;
 });
 
@@ -189,8 +189,7 @@ export function ChatApp({ appName = 'Streaik', gateway, connection, agents }: { 
       <HistoryChat key={JSON.stringify([scope, mcpSession])} appName={appName} gateway={gateway} connection={connection} scope={scope} models={models} mcpSession={mcpSession}
         route={route} onRoute={setRoute} decisions={decisions} images={images} transcriptions={transcriptions} onSettings={() => settings.current?.showModal()}
         preferences={preferences} onPreferences={updatePreferences} />
-      <SettingsDialog dialog={settings} apiKeySettings={connection.apiKeySettings} accountSettings={connection.settings} images={gateway.historyScope !== 'direct' ? images : undefined}
-        transcriptions={gateway.historyScope !== 'direct' ? transcriptions : undefined}
+      <SettingsDialog dialog={settings} apiKeySettings={connection.apiKeySettings} accountSettings={connection.settings}
         convertAttachmentsToText={preferences.convertAttachmentsToText}
         onConvertAttachmentsToTextChange={convertAttachmentsToText => updatePreferences({ ...preferences, convertAttachmentsToText })} />
     </AgentsProvider>
@@ -403,7 +402,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const chatSettings = useRef<HTMLDialogElement>(null);
   const contextDialog = useRef<HTMLDialogElement>(null);
   const [menuContainer, setMenuContainer] = useState<HTMLDivElement | null>(null);
-  const [agentToolbar, setAgentToolbar] = useState<HTMLDivElement | null>(null);
+  const [catalogToolbar, setCatalogToolbar] = useState<HTMLDivElement | null>(null);
   const [mediaToolbar, setMediaToolbar] = useState<HTMLDivElement | null>(null);
   const saved = useRef(conversation.messages);
   const nameRequest = useRef<TextAppRequest>(undefined);
@@ -732,12 +731,12 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           pinnedViews: preferences.pinnedViews.includes(key) ? preferences.pinnedViews.filter(view => view !== key) : [...preferences.pinnedViews, key] })}
         toggle={toggleNav} onNew={onNew} onOpen={onSwitch}
         onPin={onPin} onDelete={onDelete} onSettings={onSettings} routes={routeMenu} />
-      <header className="chat-toolbar" hidden={view !== 'chat' && view !== 'agents' && view !== 'skills' && !mediaView && !connection.signIn}>
+      <header className="chat-toolbar" hidden={view !== 'chat' && view !== 'agents' && view !== 'skills' && view !== 'mcp' && !mediaView && !connection.signIn}>
         {view === 'chat' && !locationIssue && <ModelPicker models={compatible} selected={selected} multiple={!!router}
           loading={connection.ready && !result} disabled={routesLocked} onChange={setSelectedIds} />}
         {mediaView && <div className="chat-image-toolbar" ref={setMediaToolbar} />}
         {connection.signIn && <div className="chat-account">{connection.signIn}</div>}
-        {(view === 'agents' || view === 'skills') && <div ref={setAgentToolbar} />}
+        {(view === 'agents' || view === 'skills' || view === 'mcp') && <div ref={setCatalogToolbar} />}
       </header>
       {locationIssue && <main className="catalog-main"><div className="catalog-content">
         <p role="status">{t(locationIssue)}</p>
@@ -794,13 +793,13 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         <TranscriptionsView gateway={gateway} scope={scope} route={transcriptions.selected} toolbar={mediaToolbar} catalog={mediaModels?.catalog}
           menuContainer={menuContainer} loading={hasGateway && connection.ready && !mediaModels} status={mediaStatus} />
       </Suspense> : view !== 'chat' && <main className="catalog-main">
-        {view === 'mcp' ? <McpServersView store={mcpServers} options={connection.mcp} locked={routesLocked} onEdit={setMcpEditor} />
+        {view === 'mcp' ? <McpServersView store={mcpServers} options={connection.mcp} locked={routesLocked} onEdit={setMcpEditor} toolbar={catalogToolbar} />
           : view === 'models' ? <ModelsView models={result?.error ? undefined : result?.catalog}
           status={!connection.ready ? connection.emptyMessage : !result ? t('Loading models…') : result.error}
            refresh={connection.ready && result ? reload : undefined} /> : view === 'agents'
           ? <AgentsView catalog={agentModels?.catalog ?? []} catalogStatus={agentModelStatus}
-            toolbar={agentToolbar} menuContainer={menuContainer} /> : view === 'skills'
-          ? <SkillsView store={localSkills} gateway={gateway} remote={remoteSkills} toolbar={agentToolbar} menuContainer={menuContainer} />
+            toolbar={catalogToolbar} menuContainer={menuContainer} /> : view === 'skills'
+          ? <SkillsView store={localSkills} gateway={gateway} remote={remoteSkills} toolbar={catalogToolbar} menuContainer={menuContainer} />
           : <ProvidersView appName={appName} />}
       </main>}
   </div>;

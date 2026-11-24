@@ -170,7 +170,6 @@ export function AgentRealtimeFields({ draft, initial, patch, catalog, catalogSta
   const speech = catalog.filter(({ type, tags }) => type === 'speech' || (type === 'audio' && tags.includes('realtime-speech')));
   const change = (update: Partial<AgentDraft['speech']>) => patch({ speech: { ...draft.speech, ...update } });
   return <>
-    <p className="agent-hint">{t('Configure audio models for this agent. Saving settings does not start an audio session.')}</p>
     <CatalogStatus status={catalogStatus} />
     <Group title={t('Transcription')}>
       <AudioModelField label={t('Transcription model')} models={transcription} saved={draft.transcription} initial={initial.transcription}

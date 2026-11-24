@@ -614,6 +614,7 @@ test('tooltips follow the theme without changing trigger names or modal layering
 });
 
 test('composer attaches picked files, dropped files and links, with opt-in local conversion and replay', async ({ page }) => {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   const requests: { messages: { role: string; parts: Record<string, unknown>[] }[] }[] = [];
   await mockModels(page);
   await page.route('**/gateway/api/chat', async route => {
@@ -644,6 +645,7 @@ test('composer attaches picked files, dropped files and links, with opt-in local
   await expect(composer.getByRole('link', { name: 'example.test/report.pdf' })).toBeVisible();
   await composer.getByRole('button', { name: 'Send' }).click();
   await expect(page.getByText('Attachment reply 1')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Copy user message', exact: true })).toHaveCount(0);
   expect(requests[0].messages.find(message => message.role === 'user')?.parts).toEqual([
     { type: 'file', filename: 'notes.txt', mediaType: 'text/plain', url: 'data:text/plain;base64,cmF3IG5vdGVz' },
     { type: 'file', filename: 'example.test/report.pdf', mediaType: 'application/pdf', url: 'https://example.test/report.pdf' },
@@ -676,15 +678,22 @@ test('composer attaches picked files, dropped files and links, with opt-in local
   await composer.getByRole('button', { name: 'Remove discard.txt' }).click();
   await expect(composer.getByText('As text')).toBeVisible();
   await expect(composer.getByText('Original file')).toBeVisible();
+  await composer.getByRole('textbox', { name: 'Message', exact: true }).fill('Summarize these documents.');
   await composer.getByRole('button', { name: 'Send' }).click();
   await expect(page.getByText('Attachment reply 2')).toBeVisible();
   expect(requests[1].messages.find(message => message.role === 'user')?.parts)
     .toEqual(requests[0].messages.find(message => message.role === 'user')?.parts);
   expect(requests[1].messages.at(-1)?.parts).toEqual([
+    { type: 'text', text: 'Summarize these documents.' },
     { type: 'text', text: '\n\nFile: "document.md"\nMarkdown body', providerMetadata: { streaik: { attachmentName: 'document.md' } } },
     { type: 'file', filename: 'document.pdf', mediaType: 'application/pdf', url: 'data:application/pdf;base64,JVBERg==' },
   ]);
   await expect(page.getByRole('region', { name: 'Conversation' }).getByText('document.md', { exact: true })).toBeVisible();
+  const copy = page.getByRole('article', { name: 'You', exact: true }).last().getByRole('button', { name: 'Copy user message', exact: true });
+  await expect(copy).toHaveText('');
+  await expect(copy.locator('svg')).toBeVisible();
+  await copy.click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('Summarize these documents.');
 });
 
 test('model picker groups and searches compatible models on a narrow screen, with keyboard selection', async ({ page }) => {
@@ -1148,8 +1157,9 @@ test('Images uses explicit routes and persists compatible records only for the c
   await expect(page.getByRole('menuitem', { name: /^(Gateway|Direct|Images)$/ })).toHaveCount(0);
   await page.keyboard.press('Escape');
   const defaultSettings = await showSettings(page);
-  const imageRoute = defaultSettings.getByLabel('Image route', { exact: true });
-  await expect(imageRoute).toHaveValue('/api/images');
+  const general = defaultSettings.getByRole('tabpanel', { name: 'General', exact: true });
+  await expect(general.getByLabel('Image route', { exact: true })).toHaveCount(0);
+  await expect(general.getByLabel('Transcription route', { exact: true })).toHaveCount(0);
   await closeSettings(page);
   await top.getByRole('textbox', { name: 'Image prompt' }).fill('An orchard');
   await expect(page.getByRole('textbox', { name: 'Image prompt' })).toHaveCount(1);
@@ -1919,6 +1929,12 @@ test('model tabs browse the shared catalog without changing the chat picker, dra
   await page.getByRole('searchbox', { name: 'Search models' }).fill('no-match');
   await expect(page.getByText('No models match these filters.')).toBeVisible();
   expect(lists).toBe(1);
+  const refresh = page.getByRole('button', { name: 'Refresh models', exact: true });
+  await expect(refresh).toHaveText('');
+  await expect(refresh.locator('svg')).toBeVisible();
+  await refresh.click();
+  await expect.poll(() => lists).toBe(2);
+  await expect(refresh).toBeVisible();
   await conversation.click();
   await expect(composer).toHaveValue('A draft to keep');
   await modelPicker(page).click();

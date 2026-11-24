@@ -131,7 +131,11 @@ export function ModelsView({ models, status, refresh }: { models?: CatalogModel[
     <div className="catalog-filters">
       <Search label={t('Search models')} value={search} change={setSearch} />
       <Filter label={t('Provider')} all={t('All providers')} value={selectedProvider} options={options} display={providerName} change={setProvider} />
-      {refresh && <Button onClick={refresh}>{t('Refresh models')}</Button>}
+      {refresh && <Tooltip content={t('Refresh models')} visualOnly>
+        <Button className="catalog-refresh" type="button" variant="subtle" aria-label={t('Refresh models')} onClick={refresh}>
+          <ChatIcon name="refresh" />
+        </Button>
+      </Tooltip>}
     </div>
     {models && <>
       <div className="catalog-tabs catalog-model-tabs" role="tablist" aria-label={t('Model capabilities')}>

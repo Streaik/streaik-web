@@ -157,6 +157,7 @@ body { margin: 0; }
 .chat-message[data-role=user] > .chat-message-time { display: block; padding-bottom: .25rem; text-align: end; }
 .chat-provider-logo { display: block; width: auto; height: 1.2rem; padding: .15rem .3rem; border-radius: .25rem; background: white; }
 .chat-message-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin-top: .45rem; color: var(--muted); font-size: .75rem; }
+.chat-message[data-role=user] .chat-message-actions { justify-content: flex-end; }
 .chat-badge {
   display: inline-flex; align-items: center; gap: .25rem; padding: .15rem .5rem;
   background: var(--soft); border-radius: 1rem; color: var(--foreground); font-variant-numeric: tabular-nums; font-weight: 550;
@@ -284,6 +285,7 @@ body { margin: 0; }
 .catalog-heading h1 { font-size: clamp(1.9rem, 4.5vw, 3rem); margin: .2em 0; line-height: 1.12; }
 .catalog-heading p { color: var(--muted); line-height: 1.5; margin: 0 auto; max-width: 38rem; }
 .catalog-filters { display: flex; flex-wrap: wrap; gap: .75rem; align-items: end; margin-bottom: 1rem; }
+.catalog-refresh.ui-button { display: inline-grid; place-items: center; min-width: 0; width: 2.6rem; height: 2.6rem; padding: 0; }
 .catalog-field { flex: 1 1 10rem; min-width: 0; display: grid; gap: .35rem; font-size: .85rem; font-weight: 650; }
 .catalog-field:first-child { flex: 2 1 15rem; }
 .catalog-filters :is(input, select) {

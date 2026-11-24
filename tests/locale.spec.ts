@@ -27,7 +27,8 @@ test('localizes the MCP overview tabs and uses matching cards for registry and i
   await expect(registry).toBeHidden();
   expect(requests).toBe(0);
 
-  const add = installed.getByRole('button', { name: 'Toevoegen via URL' });
+  const add = page.locator('.chat-toolbar').getByRole('button', { name: 'Toevoegen via URL', exact: true });
+  await expect(installed.getByRole('button', { name: 'Toevoegen via URL', exact: true })).toHaveCount(0);
   await expect(add).toHaveText('');
   await expect(add.locator('svg')).toBeVisible();
   await add.press('Enter');
@@ -39,6 +40,7 @@ test('localizes the MCP overview tabs and uses matching cards for registry and i
   await expect(registryTab).toBeFocused();
   await expect(registryTab).toHaveAttribute('aria-selected', 'true');
   await expect(installed).toBeHidden();
+  await expect(add).toBeVisible();
   const search = registry.getByRole('searchbox', { name: 'MCP-servers zoeken' });
   const card = registry.getByRole('article').filter({ has: page.getByRole('heading', { name: 'Fixture Tools' }) });
   await expect(card).toHaveClass(/\bcatalog-card\b/);

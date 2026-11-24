@@ -24,11 +24,13 @@ function Badge({ icon, label, value, format, unit = '', details }: {
     aria-label={`${label}: ${text}${details ? ` (${details})` : ''}`}><ChatIcon name={icon} />{text}</span></Tooltip>;
 }
 
-export function MessageActions({ message }: { message: ChatMessage }) {
+export function MessageActions({ message, userText }: { message: ChatMessage; userText?: string }) {
   const { t } = useAppTranslation();
   const [copyStatus, setCopyStatus] = useState('');
-  const reply = message.parts.flatMap(part => part.type === 'text' && part.text ? [part.text] : []).join('\n\n');
-  const { usage, providerMetadata, gateway } = message.metadata ?? {};
+  const user = message.role === 'user';
+  const text = user ? userText : message.parts.flatMap(part => part.type === 'text' && part.text ? [part.text] : []).join('\n\n');
+  if (user && !text) return null;
+  const { usage, providerMetadata, gateway } = (user ? undefined : message.metadata) ?? {};
   const metrics = providerMetadata?.gateway ?? gateway;
   const costLabel = metrics?.source === 'direct'
     ? metrics.estimated ? 'Estimated direct cost (USD)' : 'Provider-reported cost (USD)'
@@ -39,8 +41,8 @@ export function MessageActions({ message }: { message: ChatMessage }) {
   const breakdown = [input !== undefined ? t('{{count, number}} input', { count: input }) : '', output !== undefined ? t('{{count, number}} output', { count: output }) : '']
     .filter(Boolean).join(' · ');
   return <div className="chat-message-actions">
-    {reply && <Button variant="subtle" className="chat-copy" aria-label={t('Copy assistant message')} title={t('Copy')} onClick={async () => {
-      try { await navigator.clipboard.writeText(reply); setCopyStatus('Copied'); }
+    {text && <Button variant="subtle" className="chat-copy" aria-label={t(user ? 'Copy user message' : 'Copy assistant message')} title={t('Copy')} onClick={async () => {
+      try { await navigator.clipboard.writeText(text); setCopyStatus('Copied'); }
       catch { setCopyStatus('Copy failed'); }
     }}><ChatIcon name={copyStatus === 'Copied' ? 'check' : 'copy'} /></Button>}
     <Badge icon="tokens" label={t(tokens !== undefined ? 'Total tokens' : input !== undefined ? 'Input tokens' : 'Output tokens')}

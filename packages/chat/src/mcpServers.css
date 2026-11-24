@@ -4,7 +4,6 @@
 .mcp-section-heading, .mcp-actions { display: flex; align-items: center; gap: .35rem; }
 .mcp-section-heading { justify-content: space-between; flex-wrap: wrap; }
 .mcp-actions { justify-content: flex-end; flex-wrap: wrap; }
-.mcp-installed-toolbar { margin-bottom: 1rem; }
 .mcp-page .mcp-registry-toolbar { flex-wrap: nowrap; align-items: center; }
 .mcp-page .mcp-registry-toolbar input { flex: 1; }
 .mcp-dialog.mcp-catalog-dialog { width: min(54rem, 100vw - 1.5rem); }

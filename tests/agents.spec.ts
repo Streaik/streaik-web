@@ -278,6 +278,7 @@ test('catalog-backed models and Realtime settings persist without starting audio
   await editor.getByRole('button', { name: 'Move anthropic/router up' }).click();
   const realtime = editor.getByRole('tab', { name: 'Realtime', exact: true });
   await realtime.click();
+  await expect(editor.getByText(/Configure audio models/)).toHaveCount(0);
   const transcription = editor.getByRole('button', { name: 'Transcription model', exact: true });
   await transcription.click();
   await expect(editor.getByRole('option')).toHaveText(['None', 'Live transcription (openai/live-transcribe)']);

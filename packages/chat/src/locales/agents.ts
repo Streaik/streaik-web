@@ -41,7 +41,6 @@ export const agentMessages = {
   'Add icon': ['Pictogram toevoegen', 'Añadir icono'],
   'None': ['Geen', 'Ninguno'],
   '{{model}} (saved, unavailable)': ['{{model}} (opgeslagen, niet beschikbaar)', '{{model}} (guardado, no disponible)'],
-  'Configure audio models for this agent. Saving settings does not start an audio session.': ['Stel audiomodellen in voor deze agent. Opslaan start geen audiosessie.', 'Configura los modelos de audio de este agente. Guardar la configuración no inicia una sesión de audio.'],
   'Transcription model': ['Transcriptiemodel', 'Modelo de transcripción'],
   'No realtime transcription models are available from the gateway.': ['Er zijn geen realtime transcriptiemodellen beschikbaar via de gateway.', 'No hay modelos de transcripción en tiempo real disponibles en la puerta de enlace.'],
   'Speech model': ['Spraakmodel', 'Modelo de voz'],

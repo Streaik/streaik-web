@@ -1,25 +1,20 @@
 import { Button, ColorModeSettings, ThemeSettings, Tooltip } from '@streaik/themes';
-import { gatewayImageEndpoints, gatewayTranscriptionEndpoints, isImageEndpoint, isTranscriptionEndpoint } from '@streaik/gateway';
 import type { IconName } from '@streaik/themes';
 import { useId, useState } from 'react';
 import type { ReactNode, RefObject } from 'react';
 import { useAgents } from './AgentsProvider';
 import { AgentSettings } from './AgentSettings';
 import { ChatIcon } from './ChatIcon';
-import type { ImageRouteSetting } from './imageRoute';
-import type { TranscriptionRouteSetting } from './transcriptionPreferences';
 import { languages, useAppTranslation } from './i18n';
 
 type SettingsTab = { id: string; label: string; icon: IconName; content: ReactNode };
 
-export function SettingsDialog({ dialog, apiKeySettings, accountSettings, convertAttachmentsToText, onConvertAttachmentsToTextChange, images, transcriptions }: {
+export function SettingsDialog({ dialog, apiKeySettings, accountSettings, convertAttachmentsToText, onConvertAttachmentsToTextChange }: {
   dialog: RefObject<HTMLDialogElement | null>;
   apiKeySettings?: ReactNode;
   accountSettings?: ReactNode;
   convertAttachmentsToText: boolean;
   onConvertAttachmentsToTextChange: (value: boolean) => void;
-  images?: ImageRouteSetting;
-  transcriptions?: TranscriptionRouteSetting;
 }) {
   const { t, i18n } = useAppTranslation();
   const id = useId();
@@ -34,22 +29,6 @@ export function SettingsDialog({ dialog, apiKeySettings, accountSettings, conver
         </select>
       </div>
       <ColorModeSettings translate={t} />
-      {images && <div className="appearance-row"><label htmlFor={`${id}-image-route`}>{t('Image route')}</label>
-        <select id={`${id}-image-route`} value={images.selected} onChange={event => {
-          const value = event.currentTarget.value;
-          if (isImageEndpoint(value)) images.onSelect(value);
-        }}>
-          {gatewayImageEndpoints.map(endpoint => <option key={endpoint} value={endpoint}>{endpoint}</option>)}
-        </select>
-      </div>}
-      {transcriptions && <div className="appearance-row"><label htmlFor={`${id}-transcription-route`}>{t('Transcription route')}</label>
-        <select id={`${id}-transcription-route`} value={transcriptions.selected} onChange={event => {
-          const value = event.currentTarget.value;
-          if (isTranscriptionEndpoint(value)) transcriptions.onSelect(value);
-        }}>
-          {gatewayTranscriptionEndpoints.map(endpoint => <option key={endpoint} value={endpoint}>{endpoint}</option>)}
-        </select>
-      </div>}
     </div>,
   }, { id: 'theme', label: t('Theme'), icon: 'palette', content:
     <div className="chat-settings-section">

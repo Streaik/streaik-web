@@ -299,6 +299,12 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
     : !taggedLive ? 'The selected model does not support real-time transcription.'
     : !liveModel ? 'This app cannot start a live session for the selected model.'
     : canCapture && !canLive ? 'Real-time transcription is not supported in this browser.' : '';
+  const liveReason = !live && enabled && catalog && !busy && liveIssue ? t(liveIssue) : undefined;
+  const liveButton = <Button className="chat-composer-icon" type="button" aria-label={liveLabel} aria-description={liveReason}
+    title={liveReason ? undefined : liveModel ? `${liveLabel} · ${liveModel.name}` : liveLabel} aria-pressed={live} variant={live ? 'primary' : 'subtle'}
+    disabled={live ? phase === 'finishing' : busy || !enabled || !canLive} onClick={() => void microphone()}>
+    <ChatIcon name={live ? 'stop' : 'speed'} />
+  </Button>;
   const options = ['finished', 'streaming'] as const;
   return <main className="catalog-main images-main" aria-labelledby={`${id}-heading`}>
     {toolbar && createPortal(<ModelPicker models={models} selected={selectedModel ? [selectedModel] : []} multiple={false} loading={loading}
@@ -333,12 +339,11 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
               disabled={dictating ? phase === 'dictate-finishing' : busy || !enabled || !dictateModel || !canRecord} onClick={dictate}>
               <ChatIcon name={dictating ? 'stop' : 'mic'} />
             </Button>
-            <Button className="chat-composer-icon" type="button" aria-label={liveLabel}
-              aria-describedby={enabled && catalog && !busy && liveIssue ? `${id}-live-issue` : undefined}
-              title={liveModel ? `${liveLabel} · ${liveModel.name}` : liveLabel} aria-pressed={live} variant={live ? 'primary' : 'subtle'}
-              disabled={live ? phase === 'finishing' : busy || !enabled || !canLive} onClick={() => void microphone()}>
-              <ChatIcon name={live ? 'stop' : 'speed'} />
-            </Button>
+            {liveReason ? <Tooltip content={liveReason} visualOnly>
+              <span className="transcription-disabled-action" tabIndex={0} role="group" aria-label={liveLabel} aria-description={liveReason}>
+                {liveButton}
+              </span>
+            </Tooltip> : liveButton}
             {phase === 'upload' ? <Button key="stop" type="button" className="chat-send" aria-label={t('Stop')} title={t('Stop')}
                 onClick={() => operation.current?.abort.abort()}><ChatIcon name="stop" /></Button>
               : <Button key="send" type="submit" className="chat-send" variant="primary" aria-label={t('Send')} title={t('Send')}
@@ -350,7 +355,6 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
       {!status && catalog && !fileModel && <p className="chat-attachment-notice" role="status">
         {t(fileModels.length ? 'The selected model does not support file transcription on this route.' : 'No models support this file transcription route.')}
       </p>}
-      {enabled && catalog && !busy && liveIssue && <p id={`${id}-live-issue`} className="chat-attachment-notice">{t(liveIssue)}</p>}
       {enabled && catalog && !busy && (!canCapture ? <p className="chat-attachment-notice">{t('Microphone access requires a secure browser context.')}</p> : <>
         {(!dictateModel || !canRecord) && <p className="chat-attachment-notice">{t(!dictateModel ? 'Dictate needs a file transcription model.' : 'Dictate recording is not supported in this browser.')}</p>}
       </>)}

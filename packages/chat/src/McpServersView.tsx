@@ -1,6 +1,7 @@
 import { Button, Tooltip } from '@streaik/themes';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { ChatIcon } from './ChatIcon';
 import { DialogTabs } from './ChatToolsDialogs';
 import { useAppTranslation } from './i18n';
@@ -165,10 +166,10 @@ function InstalledServers({ store, selection, locked, onEdit }: ServerSectionsPr
     </li>;
   });
   return <section aria-label={t('Installed')}>
-    <div className={selection ? 'mcp-section-heading' : 'mcp-actions mcp-installed-toolbar'}>{selection && <h2>{t('Installed')}</h2>}
+    {selection && <div className="mcp-section-heading"><h2>{t('Installed')}</h2>
       <Tooltip content={addLabel}><Button type="button" variant="subtle" className="chat-composer-icon" aria-label={addLabel}
         aria-haspopup="dialog" disabled={disabled} onClick={() => onEdit({})}><ChatIcon name="link" /></Button></Tooltip>
-    </div>
+    </div>}
     {selection && servers.length > 0 && <p>{t('Only enable servers you trust. Tool inputs are sent when a tool runs; approval controls sharing the result with the chat model.')}</p>}
     {error && <p role="alert" className="chat-error">{t('Could not remove this MCP server.')}</p>}
     {servers.length === 0 ? <p>{t('No MCP servers installed yet.')}</p>
@@ -280,9 +281,12 @@ export function ModelContextDialog({ close, ...props }: ServerSectionsProps & { 
   return <McpDialog title={t('Model Context')} close={close} wide>{() => <McpServerTabs {...props} />}</McpDialog>;
 }
 
-export function McpServersView(props: ServerSectionsProps) {
+export function McpServersView({ toolbar, ...props }: ServerSectionsProps & { toolbar: HTMLElement | null }) {
   const { t } = useAppTranslation();
+  const addLabel = t('Add by URL');
   return <div className="catalog-content mcp-page">
+    {toolbar && createPortal(<Button className="agent-create" type="button" variant="primary" aria-label={addLabel} title={addLabel}
+      aria-haspopup="dialog" disabled={props.locked || !props.store.available} onClick={() => props.onEdit({})}><ChatIcon name="add" /></Button>, toolbar)}
     <header><h1>{t('MCP Servers')}</h1></header>
     {!props.store.available && <p role="status">{t('Sign in or unlock this profile to manage MCP servers.')}</p>}
     <McpServerTabs {...props} />
