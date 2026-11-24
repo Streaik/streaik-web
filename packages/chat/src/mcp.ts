@@ -19,6 +19,9 @@ export type McpServer = Pick<McpServerRecord, 'id' | 'title' | 'endpoint'> & {
 };
 export type McpTool = Pick<Tool, 'name' | 'title' | 'description' | 'inputSchema' | 'outputSchema' | 'annotations'> & { server: McpServer; remoteName: string };
 export type McpOutput = { text: string; images: string[] };
+export type McpResource = Awaited<ReturnType<Client['listResources']>>['resources'][number];
+export type McpResourceTemplate = Awaited<ReturnType<Client['listResourceTemplates']>>['resourceTemplates'][number];
+export type McpPrompt = Awaited<ReturnType<Client['listPrompts']>>['prompts'][number];
 class McpRequestError extends Error {}
 
 export function mcpFailure(error: unknown): string {
@@ -125,40 +128,65 @@ async function withClient<T>(server: McpServer, signal: AbortSignal, action: (cl
   } finally { await client.close(); }
 }
 
-export async function discoverMcpTools(server: McpServer, signal: AbortSignal): Promise<McpTool[]> {
-  const bounded = AbortSignal.any([signal, AbortSignal.timeout(20_000)]);
-  return withClient(server, bounded, async client => {
-    if (!client.getServerCapabilities()?.tools) return [];
-    const result = new Map<string, McpTool>();
-    let cursor: string | undefined;
-    for (let page = 0; page < 4; page++) {
-      const { tools, nextCursor } = await client.listTools(cursor ? { cursor } : undefined, { signal: bounded });
-      for (const tool of tools) {
-        const name = `mcp_${server.id}_${tool.name}`;
-        if (!/^[\w-]+$/.test(tool.name) || name.length > 64 || result.has(name)) continue;
-        result.set(name, { server, name, remoteName: tool.name, title: tool.title, description: tool.description,
-          inputSchema: tool.inputSchema, outputSchema: tool.outputSchema, annotations: tool.annotations });
-        if (result.size >= 64) break;
-      }
-      if (!nextCursor || nextCursor === cursor || result.size >= 64) break;
-      cursor = nextCursor;
+async function listMcpEntries<T>(fetchPage: (cursor?: string) => Promise<readonly [readonly T[], string?]>,
+  key: (item: T) => string, accept: (item: T) => boolean = () => true): Promise<T[]> {
+  const result = new Map<string, T>();
+  const cursors = new Set<string>();
+  let cursor: string | undefined;
+  for (let page = 0; page < 4; page++) {
+    const [items, nextCursor] = await fetchPage(cursor);
+    for (const item of items) {
+      if (accept(item) && !result.has(key(item))) result.set(key(item), item);
+      if (result.size === 64) return [...result.values()];
     }
-    return [...result.values()];
-  });
+    if (!nextCursor || nextCursor.length > 2048 || cursors.has(nextCursor)) break;
+    cursors.add(nextCursor);
+    cursor = nextCursor;
+  }
+  return [...result.values()];
 }
 
-export function discoverMcpCapabilities(server: McpServer, signal: AbortSignal) {
+export function discoverMcpServer(server: McpServer, signal: AbortSignal) {
   const bounded = AbortSignal.any([signal, AbortSignal.timeout(25_000)]);
   return withClient(server, bounded, async client => {
     const caps = client.getServerCapabilities();
     const options = { signal: bounded };
-    const [{ resources }, { resourceTemplates }, { prompts }] = await Promise.all([
-      caps?.resources ? client.listResources(undefined, options) : { resources: [] },
-      caps?.resources ? client.listResourceTemplates(undefined, options) : { resourceTemplates: [] },
-      caps?.prompts ? client.listPrompts(undefined, options) : { prompts: [] },
+    const [toolsResult, resourcesResult, templatesResult, promptsResult] = await Promise.allSettled([
+      caps?.tools ? listMcpEntries(async cursor => {
+        const { tools, nextCursor } = await client.listTools(cursor ? { cursor } : undefined, options);
+        return [tools, nextCursor];
+      }, (tool: Tool) => tool.name, tool => /^[\w-]+$/.test(tool.name) && `mcp_${server.id}_${tool.name}`.length <= 64) : [],
+      caps?.resources ? listMcpEntries(async cursor => {
+        const { resources, nextCursor } = await client.listResources(cursor ? { cursor } : undefined, options);
+        return [resources, nextCursor];
+      }, (resource: McpResource) => resource.uri, resource => validMcpResourceUri(resource.uri)) : [],
+      caps?.resources ? listMcpEntries(async cursor => {
+        const { resourceTemplates, nextCursor } = await client.listResourceTemplates(cursor ? { cursor } : undefined, options);
+        return [resourceTemplates, nextCursor];
+      }, (template: McpResourceTemplate) => template.uriTemplate, template => template.uriTemplate.length <= 8192) : [],
+      caps?.prompts ? listMcpEntries(async cursor => {
+        const { prompts, nextCursor } = await client.listPrompts(cursor ? { cursor } : undefined, options);
+        return [prompts, nextCursor];
+      }, (prompt: McpPrompt) => prompt.name, prompt => prompt.name.length <= 512) : [],
     ]);
-    return { resources: resources.slice(0, 64), resourceTemplates: resourceTemplates.slice(0, 64), prompts: prompts.slice(0, 64) };
+    signal.throwIfAborted();
+    if (toolsResult.status === 'rejected' && !caps?.resources && !caps?.prompts) throw toolsResult.reason;
+    const tools: McpTool[] = toolsResult.status === 'fulfilled' ? toolsResult.value.map(tool => {
+        const name = `mcp_${server.id}_${tool.name}`;
+        return { server, name, remoteName: tool.name, title: tool.title, description: tool.description,
+          inputSchema: tool.inputSchema, outputSchema: tool.outputSchema, annotations: tool.annotations };
+    }) : [];
+    return { tools, hasResources: !!caps?.resources, hasPrompts: !!caps?.prompts,
+      resources: resourcesResult.status === 'fulfilled' ? resourcesResult.value : [],
+      resourceTemplates: templatesResult.status === 'fulfilled' ? templatesResult.value : [],
+      prompts: promptsResult.status === 'fulfilled' ? promptsResult.value : [], promptsFailed: promptsResult.status === 'rejected' };
   });
+}
+
+export type McpDiscovery = Awaited<ReturnType<typeof discoverMcpServer>>;
+
+export function validMcpResourceUri(uri: unknown): uri is string {
+  return typeof uri === 'string' && uri.length <= 8192 && /^[a-z][a-z\d+.-]*:[^\s]*$/i.test(uri);
 }
 
 export function mcpTemplateSlots(template: string): string[] | undefined {
@@ -178,16 +206,33 @@ export function expandMcpResource(template: string, values: Record<string, strin
   return uri;
 }
 
-export function readMcpCapability(server: McpServer, item: { uri: string } | { name: string; arguments: Record<string, string> }, signal: AbortSignal) {
+export function readMcpResource(server: McpServer, uri: string, signal: AbortSignal): Promise<McpOutput> {
+  if (!validMcpResourceUri(uri)) throw new McpRequestError('Use an absolute MCP resource URI.');
   const bounded = AbortSignal.any([signal, AbortSignal.timeout(45_000)]);
   return withClient(server, bounded, async client => {
-    if ('uri' in item) {
-      const { contents } = await client.readResource(item, { signal: bounded });
-      return contents.flatMap(content => 'text' in content && typeof content.text === 'string' ? [content.text] : []).join('\n\n').slice(0, 256 * 1024);
-    }
-    const { messages } = await client.getPrompt(item, { signal: bounded });
-    return messages.flatMap(message => message.content.type === 'text' ? [message.content.text] : []).join('\n\n').slice(0, 256 * 1024);
+    // A resource URI is an opaque RPC argument, not a browser fetch destination.
+    const { contents } = await client.readResource({ uri }, { signal: bounded });
+    return mcpOutput(contents.map(content => 'text' in content ? { type: 'text', text: content.text }
+      : { type: 'image', mimeType: content.mimeType, data: content.blob }));
   });
+}
+
+export function getMcpPrompt(server: McpServer, name: string, args: Record<string, string>, signal: AbortSignal) {
+  const bounded = AbortSignal.any([signal, AbortSignal.timeout(45_000)]);
+  return withClient(server, bounded, async client => {
+    const { messages } = await client.getPrompt({ name, arguments: args }, { signal: bounded });
+    // Like AI Happy, use the prompt as a user turn, never as trusted system instructions.
+    return messages.flatMap(({ content }) => content.type === 'text' ? [content.text]
+      : content.type === 'resource' && 'text' in content.resource ? [content.resource.text] : []).join('\n\n').slice(0, 128 * 1024);
+  });
+}
+
+function mcpOutput(content: readonly { type: string; text?: string; mimeType?: string; data?: string }[]): McpOutput {
+  const text = content.flatMap(block => block.type === 'text' && block.text ? [block.text] : []).join('\n\n').slice(0, 128 * 1024);
+  const images = content.flatMap(block => block.type === 'image' && block.data && block.mimeType &&
+    ['image/png', 'image/jpeg', 'image/webp'].includes(block.mimeType) && block.data.length <= 7_000_000 && /^[A-Za-z0-9+/=]+$/.test(block.data)
+    ? [`data:${block.mimeType};base64,${block.data}`] : []).slice(0, 4);
+  return { text, images };
 }
 
 export async function callMcpTool(tool: McpTool, input: unknown, signal: AbortSignal): Promise<McpOutput> {
@@ -195,10 +240,7 @@ export async function callMcpTool(tool: McpTool, input: unknown, signal: AbortSi
   const result = await withClient(tool.server, signal, client => client.callTool({
     name: tool.remoteName, arguments: input as Record<string, unknown>,
   }, { signal, timeout: 130_000 }));
-  const text = result.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n\n').slice(0, 128 * 1024);
+  const { text, images } = mcpOutput(result.content);
   if (result.isError) return { text: `MCP tool failed: ${text || 'The server returned an error.'}`, images: [] };
-  const images = result.content.flatMap(block => block.type === 'image' &&
-    ['image/png', 'image/jpeg', 'image/webp'].includes(block.mimeType) && /^[A-Za-z0-9+/=]+$/.test(block.data) && block.data.length <= 7_000_000
-    ? [`data:${block.mimeType};base64,${block.data}`] : []).slice(0, 4);
   return { text: [text, images.length ? `MCP returned ${images.length} image(s), displayed to the user.` : ''].filter(Boolean).join('\n') || 'MCP tool completed.', images };
 }

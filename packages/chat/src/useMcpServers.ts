@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { discoverMcpTools, mcpAppAuth } from './mcp';
-import type { McpOptions, McpServer, McpTool } from './mcp';
+import { discoverMcpServer, mcpAppAuth } from './mcp';
+import type { McpDiscovery, McpOptions, McpServer } from './mcp';
 import { maxMcpServers, parseMcpServer, resolveMcpHeaders } from './mcpConfiguration';
 import type { McpHeaderRow, McpServerRecord } from './mcpConfiguration';
 
@@ -78,7 +78,7 @@ export function useMcpServers(scope: string | undefined, options: McpOptions | u
 }
 
 export type McpServers = ReturnType<typeof useMcpServers>;
-type Selection = { record: McpServerRecord; state: 'loading' | 'ready' | 'error'; tools?: McpTool[] };
+type Selection = { record: McpServerRecord } & ({ state: 'loading' | 'error' } | { state: 'ready'; discovery: McpDiscovery });
 
 /** Selection belongs to the conversation, not the installed-server library. */
 export function useMcpSelection(store: McpServers) {
@@ -118,16 +118,17 @@ export function useMcpSelection(store: McpServers) {
     requests.current.set(record.id, controller);
     function update(entry: Selection) { setSelected(previous => new Map(previous).set(record.id, entry)); }
     update({ record, state: 'loading' });
-    void discoverMcpTools(server, controller.signal).then(
-      tools => { if (!controller.signal.aborted) update({ record, state: 'ready', tools }); },
+    void discoverMcpServer(server, controller.signal).then(
+      discovery => { if (!controller.signal.aborted) update({ record, state: 'ready', discovery }); },
       () => { if (!controller.signal.aborted) update({ record, state: 'error' }); },
     ).finally(() => {
       if (requests.current.get(record.id) === controller) requests.current.delete(record.id);
     });
   }
 
-  return { entries: current, loading: current.some(entry => entry.state === 'loading'),
-    tools: current.flatMap(entry => entry.tools ?? []).filter((tool, index, tools) => tools.findIndex(other => other.name === tool.name) === index), set };
+  const connected = current.filter(entry => entry.state === 'ready');
+  return { entries: current, connected, loading: current.some(entry => entry.state === 'loading'),
+    tools: connected.flatMap(entry => entry.discovery.tools).filter((tool, index, tools) => tools.findIndex(other => other.name === tool.name) === index), set };
 }
 
 export type McpSelection = ReturnType<typeof useMcpSelection>;
