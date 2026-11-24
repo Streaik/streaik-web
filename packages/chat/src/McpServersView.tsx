@@ -119,8 +119,8 @@ function InstalledServers({ store, selection, locked, onEdit }: ServerSectionsPr
   const [error, setError] = useState(false);
   const disabled = locked || !store.available;
   const addLabel = t('Add by URL');
-  return <section aria-label={t('Installed servers')}>
-    <div className="mcp-section-heading"><h2>{t('Installed servers')}</h2>
+  return <section aria-label={t('Installed')}>
+    <div className="mcp-section-heading"><h2>{t('Installed')}</h2>
       <Tooltip content={addLabel}><Button type="button" variant="subtle" className="chat-composer-icon" aria-label={addLabel}
         aria-haspopup="dialog" disabled={disabled} onClick={() => onEdit({})}><ChatIcon name="link" /></Button></Tooltip>
     </div>
