@@ -7,13 +7,20 @@ export type McpOptions = {
   headers: (provider: McpProvider) => HeadersInit | Promise<HeadersInit>;
 };
 type McpProvider = 'openai' | 'google' | 'anthropic';
-type McpServer = { id: string; title: string; path: string; provider: McpProvider };
+type McpServer = { id: string; title: string; provider: McpProvider };
 export type McpTool = Pick<Tool, 'name' | 'title' | 'description' | 'inputSchema' | 'outputSchema' | 'annotations'> & { server: McpServer; remoteName: string };
 export type McpOutput = { text: string; images: string[] };
 
+// The samples discover tools at known routes on a trusted base, not at URLs from a public registry.
+const builtInServers: readonly McpServer[] = [
+  { id: 'openai-images', title: 'OpenAI Images', provider: 'openai' },
+  { id: 'google-images', title: 'Google Images', provider: 'google' },
+  { id: 'anthropic-skills', title: 'Anthropic Skills', provider: 'anthropic' },
+];
+
 async function useClient<T>(options: McpOptions, server: McpServer, signal: AbortSignal, action: (client: Client) => Promise<T>): Promise<T> {
   const { Client, StreamableHTTPClientTransport } = await import('@modelcontextprotocol/client');
-  const endpoint = new URL(server.path.slice(1), options.base).href;
+  const endpoint = new URL(server.id, options.base).href;
   const client = new Client({ name: 'Streaik Web', version: '1.0.0' }, { versionNegotiation: { mode: { pin: revision } } });
   const transport = new StreamableHTTPClientTransport(new URL(endpoint), {
     protocolVersion: revision,
@@ -41,20 +48,7 @@ async function useClient<T>(options: McpOptions, server: McpServer, signal: Abor
 
 export async function discoverMcpTools(options: McpOptions, signal: AbortSignal): Promise<McpTool[]> {
   signal.throwIfAborted();
-  const response = await fetch(new URL('catalog.json', options.base), { signal, redirect: 'error', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' });
-  if (!response.ok) throw new Error('The MCP catalog is unavailable.');
-  const catalog = await response.json();
-  if (catalog?.schemaVersion !== 1 || catalog.protocolVersion !== revision || !Array.isArray(catalog.servers) || catalog.servers.length > 16)
-    throw new Error('Invalid MCP catalog.');
-  const seen = new Set<string>();
-  const servers: McpServer[] = catalog.servers.map((server: Partial<McpServer> | null) => {
-    if (!server || typeof server.id !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(server.id) || seen.has(server.id) ||
-        server.path !== `/${server.id}` || typeof server.title !== 'string' ||
-        (server.provider !== 'openai' && server.provider !== 'google' && server.provider !== 'anthropic')) throw new Error('Invalid MCP catalog entry.');
-    seen.add(server.id);
-    return { id: server.id, title: server.title, path: server.path, provider: server.provider };
-  });
-  const tools = (await Promise.all(servers.map(server => useClient(options, server, signal, async client => {
+  const tools = (await Promise.all(builtInServers.map(server => useClient(options, server, signal, async client => {
     const { tools } = await client.listTools(undefined, { signal });
     return tools.filter(tool => /^[a-zA-Z0-9_-]+$/.test(tool.name)).map(tool => ({
       server, name: `mcp_${server.id.replaceAll('-', '_')}_${tool.name}`, remoteName: tool.name,

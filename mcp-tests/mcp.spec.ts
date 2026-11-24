@@ -147,10 +147,12 @@ async function rpcBody(response: APIResponse) {
     : JSON.parse(text);
 }
 
-test('catalog and routes are isolated, stateless, and enforce the exact protocol version', async ({ request }) => {
-  const catalog = await (await request.get(`${mcp}/catalog.json`)).json();
-  expect(catalog.protocolVersion).toBe(version);
-  expect(catalog.servers.map(({ id }: { id: string }) => id)).toEqual(['openai-images', 'google-images', 'anthropic-skills']);
+test('tool hosts do not serve discovery and enforce isolated, stateless, versioned routes', async ({ request }) => {
+  for (const host of [mcp, delegated]) {
+    for (const path of ['/catalog.json', '/v0.1/servers', '/v1/servers']) {
+      expect((await request.get(`${host}${path}`)).status()).toBe(404);
+    }
+  }
   for (const versionHeader of [null, '2025-11-25', '2099-01-01']) {
     const response = await rpc(request, mcp, 'openai-images', 'tools/list', {}, {}, versionHeader);
     expect(response.status()).toBe(400);
