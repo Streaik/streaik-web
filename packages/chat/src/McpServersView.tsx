@@ -4,7 +4,7 @@ import type { FormEvent, ReactNode } from 'react';
 import { ChatIcon } from './ChatIcon';
 import { DialogTabs } from './ChatToolsDialogs';
 import { useAppTranslation } from './i18n';
-import { fetchMcpCatalog, mcpAppAuth } from './mcp';
+import { fetchMcpCatalog, mcpAppAuth, preferredMcpRemote } from './mcp';
 import type { McpCatalogServer, McpOptions } from './mcp';
 import { mcpEndpoint, mcpHeaderFields, resolveMcpHeaders } from './mcpConfiguration';
 import type { McpHeaderRow, McpServerRecord } from './mcpConfiguration';
@@ -151,11 +151,11 @@ function InstalledServers({ store, selection, locked, onEdit }: ServerSectionsPr
   </section>;
 }
 
-function CatalogCard({ item, installed, disabled, install }: { item: McpCatalogServer; installed: ReadonlySet<string>; disabled: boolean;
+function CatalogCard({ item, installed, disabled, options, install }: { item: McpCatalogServer; installed: ReadonlySet<string>; disabled: boolean; options?: McpOptions;
   install: (item: McpCatalogServer, remote: McpCatalogServer['remotes'][number]) => void }) {
   const { t } = useAppTranslation();
   const [selected, setSelected] = useState('');
-  const remote = item.remotes.find(choice => choice.endpoint === selected) ?? item.remotes[0];
+  const remote = item.remotes.find(choice => choice.endpoint === selected) ?? preferredMcpRemote(item.remotes, options);
   const isInstalled = remote && installed.has(remote.endpoint);
   return <article className="catalog-card">
     <div className="catalog-card-title"><span className="catalog-mark"><ChatIcon name="tool" /></span>
@@ -220,7 +220,7 @@ function McpRegistry({ store, options, locked, onEdit }: ServerSectionsProps) {
           onChange={event => setQuery(event.target.value)} /></div>
         {request && <p role="status">{t('Loading MCP servers…')}</p>}
         {registryError && <p role="alert" className="chat-error">{t('Could not load the MCP registry.')}</p>}
-        {results.length ? <div className="catalog-grid">{results.map(item => <CatalogCard key={item.name} item={item} installed={installed} disabled={disabled} install={install} />)}</div>
+        {results.length ? <div className="catalog-grid">{results.map(item => <CatalogCard key={item.name} item={item} installed={installed} disabled={disabled} options={options} install={install} />)}</div>
           : !request && !registryError && <p>{t(term ? 'No matching MCP servers.' : 'No MCP servers found in the registry.')}</p>}
         {cursor && <Button type="button" className="catalog-more" disabled={!!request} onClick={() => setRequest({ cursor })}>{t('Load more servers')}</Button>}
       </>}

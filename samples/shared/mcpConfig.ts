@@ -23,6 +23,7 @@ export function byokMcpProvider(headers: readonly McpRemoteHeader[]): 'openai' |
   if (name === 'x-api-key') return 'anthropic';
 }
 
+// The Fakton sample still supports the legacy direct-Entra runtime.
 export function acceptsEntraMcpToken(headers: readonly McpRemoteHeader[]): boolean {
   const [header] = headers;
   return headers.length === 0 || (headers.length === 1 && !!header && !header.manualOnly && header.name.toLowerCase() === 'authorization' &&

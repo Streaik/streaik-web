@@ -5,12 +5,12 @@ export type { McpRemoteHeader } from './mcpConfiguration.ts';
 
 const revision = '2026-07-28';
 
-type RequestHeaders = () => HeadersInit | Promise<HeadersInit>;
+type RequestHeaders = (signal?: AbortSignal) => HeadersInit | Promise<HeadersInit>;
 export type McpAppAuth = { ready: boolean; headers: RequestHeaders };
 export type McpOptions = {
   base?: URL;
   registryUrl?: URL;
-  headersForRemote?: (headers: readonly McpRemoteHeader[]) => McpAppAuth | undefined;
+  headersForRemote?: (headers: readonly McpRemoteHeader[], endpoint: string) => McpAppAuth | undefined;
 };
 export type McpServer = Pick<McpServerRecord, 'id' | 'title' | 'endpoint'> & {
   requestHeaders: RequestHeaders;
@@ -34,7 +34,12 @@ export function isMcpRuntime(endpoint: string, base?: URL) {
 
 export function mcpAppAuth(options: McpOptions | undefined, server: Pick<McpServerRecord, 'source' | 'endpoint' | 'declarations'>) {
   if (server.source !== 'registry' || !isMcpRuntime(server.endpoint, options?.base) || server.declarations.some(header => header.manualOnly)) return;
-  return options?.headersForRemote?.(server.declarations);
+  return options?.headersForRemote?.(server.declarations, server.endpoint);
+}
+
+export function preferredMcpRemote(remotes: McpCatalogServer['remotes'], options: McpOptions | undefined) {
+  return remotes.find(remote => mcpAppAuth(options, { ...remote, source: 'registry' })?.ready) ??
+    remotes.find(remote => isMcpRuntime(remote.endpoint, options?.base)) ?? remotes[0];
 }
 
 export async function fetchMcpCatalog(registryUrl: URL, signal: AbortSignal, cursor?: string) {
@@ -84,7 +89,7 @@ async function withClient<T>(server: McpServer, signal: AbortSignal, action: (cl
       if (request.url !== endpoint || request.method !== 'POST') throw new Error('Unexpected MCP request.');
       const headers = new Headers(request.headers);
       signal.throwIfAborted();
-      const credentials = new Headers(await server.requestHeaders());
+      const credentials = new Headers(await server.requestHeaders(signal));
       credentials.forEach((value, key) => headers.set(key, value));
       if (headers.has('Mcp-Session-Id')) throw new Error('Stateful MCP sessions are not supported.');
       headers.set('Mcp-Protocol-Version', revision);

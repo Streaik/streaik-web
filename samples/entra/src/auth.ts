@@ -4,15 +4,26 @@ import { GatewayError } from '@streaik/gateway';
 
 const guid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const delegatedScope = (value: string) => /^(api:\/\/|https:\/\/)[^\s]+\/[\w.-]+$/.test(value) && !value.endsWith('/.default');
+const profileName = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
 type MsalClient = Pick<PublicClientApplication, 'initialize' | 'getAllAccounts' | 'getActiveAccount' | 'setActiveAccount' | 'loginPopup' | 'logoutPopup' | 'clearCache' | 'acquireTokenSilent'>;
 
-export async function createEntraAuth(config: { tenantId: string; clientId: string; scope: string; mcpScope?: string }, site: URL,
+export function readMcpScopes(value?: string): Record<string, string> | undefined {
+  if (!value?.trim()) return;
+  const scopes: unknown = JSON.parse(value);
+  if (!scopes || typeof scopes !== 'object' || Array.isArray(scopes) || Object.entries(scopes).some(([profile, scope]) =>
+    !profileName.test(profile) || typeof scope !== 'string' || !delegatedScope(scope))) throw new Error('Configure MCP scopes by profile.');
+  return scopes as Record<string, string>;
+}
+
+export async function createEntraAuth(config: { tenantId: string; clientId: string; scope: string; mcpScope?: string; mcpScopes?: Record<string, string> }, site: URL,
   createClient: (config: Configuration) => MsalClient = (options) => new PublicClientApplication(options)) {
   const { tenantId, clientId, scope, mcpScope } = config;
   if (!guid.test(tenantId) || !guid.test(clientId) || !delegatedScope(scope) || (mcpScope !== undefined && !delegatedScope(mcpScope))) {
     throw new Error('Configure the tenant ID, SPA client ID, and a delegated gateway API scope.');
   }
+  const mcpScopes = new Map(Object.entries({ ...(mcpScope ? { default: mcpScope } : {}), ...config.mcpScopes }));
+  if ([...mcpScopes].some(([profile, value]) => !profileName.test(profile) || !delegatedScope(value))) throw new Error('Configure MCP scopes by profile.');
   const scopes = [scope];
   const msal = createClient({
     auth: { clientId, authority: `https://login.microsoftonline.com/${tenantId}`, redirectUri: new URL('auth-redirect.html', site).href },
@@ -27,10 +38,14 @@ export async function createEntraAuth(config: { tenantId: string; clientId: stri
   msal.setActiveAccount(current);
 
   return {
+    clientId,
     getAccount: () => current,
-    hasMcpScope: !!mcpScope,
+    sessionVersion: () => revision,
+    hasMcpScope: mcpScopes.size > 0,
+    mcpScopeFor: (profile: string) => mcpScopes.get(profile),
     async signIn() {
-      const result = await msal.loginPopup({ scopes, prompt: 'select_account', extraScopesToConsent: mcpScope ? [mcpScope] : undefined });
+      const result = await msal.loginPopup({ scopes, prompt: 'select_account',
+        extraScopesToConsent: mcpScopes.size ? [...new Set(mcpScopes.values())] : undefined });
       if (result.account.tenantId.toLowerCase() !== tenantId.toLowerCase()) {
         throw new GatewayError('Sign in with an account in the configured Microsoft Entra tenant.');
       }
@@ -66,9 +81,10 @@ export async function createEntraAuth(config: { tenantId: string; clientId: stri
         throw new GatewayError('Could not obtain a gateway access token. Try signing in again.');
       }
     },
-    async mcpHeaders(): Promise<HeadersInit> {
+    async mcpHeaders(profile = 'default'): Promise<HeadersInit> {
       const account = current;
       const started = revision;
+      const mcpScope = mcpScopes.get(profile);
       if (!account || !mcpScope) throw new GatewayError('Sign in with Microsoft and configure the MCP API scope.');
       try {
         const { accessToken } = await msal.acquireTokenSilent({ account, scopes: [mcpScope] });

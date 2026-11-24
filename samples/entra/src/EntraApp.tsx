@@ -4,9 +4,9 @@ import { createGateway, GatewayError } from '@streaik/gateway';
 import { Button } from '@streaik/themes';
 import { useRef, useState } from 'react';
 import { appAgents } from '../../shared/appAgents';
-import { acceptsEntraMcpToken } from '../../shared/mcpConfig';
 import type { McpConfig } from '../../shared/mcpConfig';
 import type { EntraAuth } from './auth';
+import { createEntraMcpHeaders } from './mcpAuth';
 
 export function EntraApp({ appName, base, auth, mcpConfig }: { appName: string; base: URL; auth: EntraAuth; mcpConfig?: McpConfig }) {
   const { t } = useAppTranslation();
@@ -16,9 +16,12 @@ export function EntraApp({ appName, base, auth, mcpConfig }: { appName: string; 
   const [issue, setIssue] = useState('');
   const working = useRef(false);
   const [gateway] = useState(() => createGateway(base, auth.headers));
-  const [mcp] = useState<McpOptions | undefined>(() => mcpConfig && { ...mcpConfig,
-    headersForRemote: (headers) => auth.hasMcpScope && acceptsEntraMcpToken(headers)
-      ? { ready: !!auth.getAccount(), headers: auth.mcpHeaders } : undefined });
+  const [mcp] = useState<McpOptions | undefined>(() => {
+    if (!mcpConfig?.base || !auth.hasMcpScope) return mcpConfig;
+    const headersFor = createEntraMcpHeaders(mcpConfig.base, auth, auth.clientId);
+    return { ...mcpConfig, headersForRemote: (headers, endpoint) => headers.length === 0
+      ? { ready: !!auth.getAccount(), headers: (signal) => headersFor(endpoint, signal) } : undefined };
+  });
 
   async function authenticate(signOut = false) {
     if (working.current) return;
