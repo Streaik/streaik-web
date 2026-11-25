@@ -32,10 +32,23 @@ async function create(page: Page, name: string) {
   return editor;
 }
 
-test('agent tool configuration edits the portable blueprint without contacting an uninstalled MCP endpoint', async ({ page }) => {
-  let unauthorized = 0;
-  await page.route('https://inventory.example/mcp', route => { unauthorized++; return route.abort(); });
+test('agent tool configuration preserves portable fields and auto-attaches only after MCP installation', async ({ page }) => {
+  await mockTextAgentModels(page);
+  let discoveries = 0;
+  await page.route('**/mcp-agent-inventory', route => {
+    const { id, method } = route.request().postDataJSON();
+    const reply = (result: unknown) => route.fulfill({ json: { jsonrpc: '2.0', id, result } });
+    if (method === 'server/discover') {
+      discoveries++;
+      return reply({ supportedVersions: ['2026-07-28'], capabilities: { tools: {} } });
+    }
+    expect(method).toBe('tools/list');
+    return reply({ resultType: 'complete', ttlMs: 0, cacheScope: 'private', tools: ['lookup', 'excluded'].map(name => ({ name,
+      inputSchema: { type: 'object', properties: {} } })) });
+  });
   await page.goto('/');
+  const url = new URL('/mcp-agent-inventory', page.url()).href;
+  await enableOpenAI(page);
   await agents(page).click();
   const editor = await create(page, 'Inventory helper');
   await editor.getByRole('tab', { name: 'Tools', exact: true }).click();
@@ -43,10 +56,11 @@ test('agent tool configuration edits the portable blueprint without contacting a
   await tools.getByRole('checkbox', { name: 'Tool search', exact: true }).check();
   const addServer = tools.getByRole('group', { name: 'Add MCP server', exact: true });
   await addServer.getByLabel('Server name').fill('Inventory');
-  await addServer.getByLabel('MCP URL').fill('https://inventory.example/mcp');
+  await addServer.getByLabel('MCP URL').fill(url);
   await addServer.getByRole('button', { name: 'Add MCP server' }).click();
   const server = tools.getByRole('group', { name: 'Inventory', exact: true });
   await server.getByRole('checkbox', { name: 'Namespace', exact: true }).check();
+  await server.getByRole('checkbox', { name: 'Required', exact: true }).check();
   await server.getByRole('checkbox', { name: 'Search', exact: true }).check();
   await server.getByRole('checkbox', { name: 'Restrict allowed tools' }).check();
   await server.getByLabel('Allowed tool names (one per line)').fill('lookup');
@@ -62,8 +76,44 @@ test('agent tool configuration edits the portable blueprint without contacting a
     return key ? JSON.parse(localStorage.getItem(key)!).local.find((item: { definition: { name: string } }) => item.definition.name === 'Inventory helper')?.definition : undefined;
   });
   expect(saved).toMatchObject({ tools: [{ type: 'tool_search' }, { type: 'function', name: 'lookup', allowed_callers: ['direct'], defer_loading: false }],
-    mcpServers: { Inventory: { type: 'http', url: 'https://inventory.example/mcp', allowed_tools: ['lookup'], namespace: true, defer_loading: true } } });
-  expect(unauthorized).toBe(0);
+    mcpServers: { Inventory: { type: 'http', url, allowed_tools: ['lookup'], required: true, namespace: true, defer_loading: true } } });
+
+  const roles = await settings(page);
+  await roles.getByRole('combobox', { name: 'Chat', exact: true }).selectOption({ label: 'Inventory helper' });
+  await roles.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.getByRole('button', { name: 'New chat', exact: true }).click();
+  const picker = page.getByRole('button', { name: 'Model', exact: true });
+  await picker.click();
+  await page.getByRole('option', { name: 'Answer model', exact: true }).click();
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('Look up inventory');
+  await expect(page.getByText(/Install, authorize, or reconnect the agent’s MCP servers.*Inventory/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+  expect(discoveries).toBe(0);
+
+  await page.getByRole('button', { name: 'Add to message', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Model Context', exact: true }).click();
+  const context = page.getByRole('dialog', { name: 'Model Context', exact: true });
+  await context.getByRole('tab', { name: 'Installed', exact: true }).click();
+  await context.getByRole('button', { name: 'Add by URL' }).click();
+  const install = page.getByRole('dialog', { name: 'Add MCP server' });
+  await install.getByLabel('Server name').fill('Authorized Inventory');
+  await install.getByLabel('Server URL').fill(url);
+  await install.getByRole('button', { name: 'Save server' }).click();
+  await context.getByRole('button', { name: 'Close', exact: true }).click();
+
+  await page.route('**/gateway/api/chat', route => {
+    const body = route.request().postDataJSON();
+    expect(body.clientToolResultApproval).toBe(true);
+    expect(body.providerMetadata.openai.tools).toMatchObject([{ type: 'namespace', name: 'inventory', tools: [
+      { name: expect.stringMatching(/lookup$/), allowed_callers: ['direct'] },
+    ] }]);
+    expect(body.providerMetadata.openai.tools[0].tools[0]).not.toHaveProperty('defer_loading');
+    return finishText(route, 'Inventory attached');
+  });
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page.getByText('Inventory attached', { exact: true })).toBeVisible();
+  expect(discoveries).toBeGreaterThan(0);
 });
 
 const textAgentModel = 'openai/gpt-6-luna';
