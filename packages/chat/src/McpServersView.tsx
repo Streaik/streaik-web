@@ -1,5 +1,5 @@
 import { Button, Tooltip, useColorScheme } from '@streaik/themes';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { CatalogMark } from './CatalogMark';
@@ -7,12 +7,13 @@ import { ChatIcon } from './ChatIcon';
 import { DialogTabs } from './DialogTabs';
 import { websiteFavicon } from './favicons';
 import { useAppTranslation } from './i18n';
-import { fetchMcpCatalog, filterMcpCatalog, mcpAppAuth, preferredMcpRemote } from './mcp';
+import { mcpAppAuth, preferredMcpRemote } from './mcp';
 import type { McpCatalogServer, McpOptions } from './mcp';
 import { mcpEndpoint, mcpHeaderFields, resolveMcpHeaders } from './mcpConfiguration';
 import type { McpHeaderRow, McpServerRecord } from './mcpConfiguration';
 import { ProtocolLinks } from './ProtocolLinks';
 import { useCatalogSearch } from './useCatalogSearch';
+import { useMcpRegistry } from './useMcpRegistry';
 import type { McpSelection, McpServers } from './useMcpServers';
 import { VersionBadge } from './VersionBadge';
 import './mcpServers.css';
@@ -126,10 +127,16 @@ function registrySearchDocument({ title, name, description, remotes }: McpCatalo
   return { title, text: [name, description, ...remotes.map(remote => remote.endpoint)].join('\n') };
 }
 
-function McpServerCard({ title, name, description, version, icons, endpoint, actions, inDialog }: {
-  title: string; name?: string; description?: string; version?: string; icons?: readonly string[];
+function McpServerCard({ title, name, version, registryEntry, endpoint, actions, inDialog }: {
+  title: string; name?: string; version?: string; registryEntry?: McpCatalogServer;
   endpoint?: ReactNode; actions: ReactNode; inDialog?: boolean;
 }) {
+  const scheme = useColorScheme();
+  const registryIcons = registryEntry?.icons ?? [];
+  const icons = [...registryIcons.filter(icon => icon.theme === scheme), ...registryIcons.filter(icon => !icon.theme)].map(icon => icon.src);
+  const favicon = websiteFavicon(registryEntry?.websiteUrl);
+  if (favicon) icons.push(favicon);
+  const description = registryEntry?.description;
   const Heading = inDialog ? 'h3' : 'h2';
   return <article className="catalog-card mcp-card">
     <div className="catalog-card-title"><CatalogMark name={title} icons={icons} fallback={<ChatIcon name="tool" />} />
@@ -144,7 +151,9 @@ function McpServerCard({ title, name, description, version, icons, endpoint, act
   </article>;
 }
 
-function InstalledServers({ store, selection, locked, onEdit, active }: ServerSectionsProps & { selection?: McpSelection; active: boolean }) {
+function InstalledServers({ store, selection, locked, onEdit, active, byEndpoint }: ServerSectionsProps & {
+  selection?: McpSelection; active: boolean; byEndpoint: ReadonlyMap<string, McpCatalogServer>;
+}) {
   const { t } = useAppTranslation();
   const id = useId();
   const [error, setError] = useState(false);
@@ -171,7 +180,8 @@ function InstalledServers({ store, selection, locked, onEdit, active }: ServerSe
     const endpoint = <small className="mcp-endpoint">{record.endpoint}</small>;
     const statusId = `${id}-${record.id}`;
     const statusText = status && <small id={statusId} role="status">{status}</small>;
-    if (!selection) return <McpServerCard key={record.id} title={record.title} endpoint={endpoint} actions={<>{statusText}{actions}</>} />;
+    if (!selection) return <McpServerCard key={record.id} title={record.title} registryEntry={byEndpoint.get(record.endpoint)}
+      endpoint={endpoint} actions={<>{statusText}{actions}</>} />;
     return <li className="mcp-row" key={record.id}>
       <label className="mcp-toggle"><input type="checkbox" role="switch" checked={!!entry} aria-describedby={status ? statusId : undefined}
         disabled={!ready || disabled} onChange={event => selection.set(record, event.target.checked)} /><span>{record.title}</span></label>
@@ -210,10 +220,6 @@ function CopyServerUrl({ endpoint }: { endpoint: string }) {
 function CatalogCard({ item, installed, disabled, options, install, inDialog }: { item: McpCatalogServer; installed: ReadonlySet<string>; disabled: boolean; options?: McpOptions;
   install: (item: McpCatalogServer, remote: McpCatalogServer['remotes'][number]) => void; inDialog: boolean }) {
   const { t } = useAppTranslation();
-  const scheme = useColorScheme();
-  const icons = [...item.icons.filter(icon => icon.theme === scheme), ...item.icons.filter(icon => !icon.theme)].map(icon => icon.src);
-  const favicon = websiteFavicon(item.websiteUrl);
-  if (favicon) icons.push(favicon);
   const [selected, setSelected] = useState('');
   const remote = item.remotes.find(choice => choice.endpoint === selected) ?? preferredMcpRemote(item.remotes, options);
   const isInstalled = remote && installed.has(remote.endpoint);
@@ -224,38 +230,19 @@ function CatalogCard({ item, installed, disabled, options, install, inDialog }: 
   const actions = !remote ? <small>{t('No compatible Streamable HTTP endpoint')}</small> : isInstalled ? <small>{t('Installed')}</small>
     : <Tooltip content={installLabel}><Button type="button" variant="subtle" className="chat-composer-icon" aria-label={installLabel}
       disabled={disabled} onClick={() => install(item, remote)}><ChatIcon name="download" /></Button></Tooltip>;
-  return <McpServerCard title={item.title} name={item.name} description={item.description} version={item.version} icons={icons}
+  return <McpServerCard title={item.title} name={item.name} version={item.version} registryEntry={item}
     endpoint={endpoint} actions={<>{remote && <CopyServerUrl key={remote.endpoint} endpoint={remote.endpoint} />}{actions}</>} inDialog={inDialog} />;
 }
 
-function McpRegistry({ store, options, locked, onEdit, inDialog, active }: ServerSectionsProps & { inDialog: boolean; active: boolean }) {
+function McpRegistry({ store, options, locked, onEdit, inDialog, active, registry }: ServerSectionsProps & {
+  inDialog: boolean; active: boolean; registry: ReturnType<typeof useMcpRegistry>;
+}) {
   const { t } = useAppTranslation();
-  const [catalog, setCatalog] = useState<McpCatalogServer[]>([]);
-  const [cursor, setCursor] = useState<string>();
-  const [request, setRequest] = useState<{ cursor?: string }>();
-  const [registryError, setRegistryError] = useState(false);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const registryUrl = options?.registryUrl;
-  useEffect(() => { setCatalog([]); setCursor(undefined); setRegistryError(false); setRequest(registryUrl ? {} : undefined); }, [registryUrl]);
-  useEffect(() => {
-    if (!registryUrl || !request) return;
-    const controller = new AbortController();
-    void fetchMcpCatalog(registryUrl, controller.signal, request.cursor).then(page => {
-      if (controller.signal.aborted) return;
-      setCatalog(previous => [...new Map([...(request.cursor ? previous : []), ...page.servers].map(item => [item.name, item])).values()]);
-      setCursor(page.cursor);
-      setRegistryError(false);
-    }, () => { if (!controller.signal.aborted) setRegistryError(true); }).finally(() => {
-      if (!controller.signal.aborted) setRequest(undefined);
-    });
-    return () => controller.abort();
-  }, [registryUrl, request]);
-
   const installed = new Set(store.records.map(record => record.endpoint));
-  const filter = options?.filterRegistryRemote;
-  const eligible = useMemo(() => filterMcpCatalog(catalog, filter), [catalog, filter]);
-  const { results, message: searchMessage } = useCatalogSearch(eligible, active && registryUrl ? query : '', registrySearchDocument);
+  const { results, message: searchMessage } = useCatalogSearch(registry.servers, active && registryUrl ? query : '', registrySearchDocument);
   const disabled = locked || !store.available;
   const refreshLabel = t('Refresh registry');
 
@@ -274,7 +261,7 @@ function McpRegistry({ store, options, locked, onEdit, inDialog, active }: Serve
 
   const refresh = registryUrl && <Tooltip content={refreshLabel}>
     <Button type="button" variant="subtle" className="chat-composer-icon" aria-label={refreshLabel}
-      disabled={!!request} onClick={() => setRequest({})}><ChatIcon name="refresh" /></Button>
+      disabled={registry.loading} onClick={registry.refresh}><ChatIcon name="refresh" /></Button>
   </Tooltip>;
   return <section aria-label={t('MCP registry')}>
     {inDialog && <div className="mcp-section-heading"><h2>{t('Registry')}</h2>{refresh}</div>}
@@ -282,12 +269,12 @@ function McpRegistry({ store, options, locked, onEdit, inDialog, active }: Serve
       {!registryUrl ? <p>{t('No MCP registry is configured. You can still add servers by URL.')}</p> : <>
         <div className="catalog-filters mcp-registry-toolbar"><input type="search" aria-label={t('Search MCP servers')} placeholder={t('Search MCP servers')}
           value={query} onChange={event => setQuery(event.target.value)} />{!inDialog && refresh}</div>
-        {request && <p role="status">{t('Loading MCP servers…')}</p>}
-        {registryError && <p role="alert" className="chat-error">{t('Could not load the MCP registry.')}</p>}
+        {registry.loading && <p role="status">{t('Loading MCP servers…')}</p>}
+        {registry.error && <p role="alert" className="chat-error">{t('Could not load the MCP registry.')}</p>}
         {results.length ? <div className="catalog-grid">{results.map(item => <CatalogCard key={item.name} item={item} installed={installed}
           disabled={disabled} options={options} install={install} inDialog={inDialog} />)}</div>
-          : !request && !registryError && <p role="status">{t(searchMessage ?? (query.trim() ? 'No matching MCP servers.' : 'No MCP servers found in the registry.'))}</p>}
-        {cursor && <Button type="button" className="catalog-more" disabled={!!request} onClick={() => setRequest({ cursor })}>{t('Load more servers')}</Button>}
+          : !registry.loading && !registry.error && <p role="status">{t(searchMessage ?? (query.trim() ? 'No matching MCP servers.' : 'No MCP servers found in the registry.'))}</p>}
+        {registry.hasMore && <Button type="button" className="catalog-more" disabled={registry.loading} onClick={registry.loadMore}>{t('Load more servers')}</Button>}
       </>}
   </section>;
 }
@@ -297,15 +284,16 @@ function McpServerTabs({ selection, ...props }: ServerSectionsProps & { selectio
   const id = useId();
   const [tab, setTab] = useState<'installed' | 'registry'>(() => selection && !props.store.records.length ? 'registry' : 'installed');
   const [registryOpened, setRegistryOpened] = useState(tab === 'registry');
+  const registry = useMcpRegistry(props.options, registryOpened, !selection && tab === 'installed' ? props.store.records : undefined);
   return <>
     <DialogTabs id={id} label={t('MCP Servers')} tabs={[[ 'installed', t('Installed') ], [ 'registry', t('Registry') ]]} value={tab}
       className={selection ? undefined : 'catalog-tabs'}
       onChange={next => { setTab(next); if (next === 'registry') setRegistryOpened(true); }} />
     <div id={`${id}-installed-panel`} aria-labelledby={`${id}-installed-tab`} role="tabpanel" tabIndex={0} hidden={tab !== 'installed'}>
-      <InstalledServers {...props} selection={selection} active={tab === 'installed'} />
+      <InstalledServers {...props} selection={selection} active={tab === 'installed'} byEndpoint={registry.byEndpoint} />
     </div>
     <div id={`${id}-registry-panel`} aria-labelledby={`${id}-registry-tab`} role="tabpanel" tabIndex={0} hidden={tab !== 'registry'}>
-      {registryOpened && <McpRegistry {...props} inDialog={!!selection} active={tab === 'registry'} />}
+      {registryOpened && <McpRegistry {...props} inDialog={!!selection} active={tab === 'registry'} registry={registry} />}
     </div>
   </>;
 }
