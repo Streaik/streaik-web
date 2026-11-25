@@ -5,6 +5,7 @@ import { faviconEndpoint, iconResponse } from './icon-fixtures';
 const app = 'http://localhost:15175';
 const model = 'openai/gpt-6-luna';
 const key = 'test-provider-key';
+const endpoints = ['/api/chat', '/v1/responses', '/v1/messages', '/v1/chat/completions'];
 
 function stream(text: string) {
   const chunks = [{ type: 'start' }, { type: 'text-start', id: 'text' }, { type: 'text-delta', id: 'text', delta: text },
@@ -13,14 +14,15 @@ function stream(text: string) {
     body: chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n' };
 }
 
-const chatMode = (page: Page, name: string) => page.getByRole('group', { name: 'Chat mode' }).getByRole('button', { name, exact: true });
+const chatMode = (page: Page, name: 'Model' | 'Agent') => page.getByRole('group', { name: 'Chat mode' })
+  .getByRole('button', { name: `${name} chat`, exact: true });
 const agentPicker = (page: Page) => page.getByRole('button', { name: 'Agent', exact: true });
 
 async function start(page: Page) {
   await page.route(faviconEndpoint, route => route.fulfill(iconResponse));
   await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: model }] } }));
   await page.goto(app);
-  await expect(chatMode(page, 'Chat')).toHaveAttribute('aria-pressed', 'true');
+  await expect(chatMode(page, 'Model')).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: 'Account menu' }).click();
   await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
   await page.getByRole('tab', { name: 'API keys', exact: true }).click();
@@ -31,7 +33,7 @@ async function start(page: Page) {
   await panel.getByRole('button', { name: 'Save OpenAI key' }).click();
   await expect(panel.getByRole('status')).toHaveText('Provider key saved.');
   await page.getByRole('button', { name: 'Close', exact: true }).click();
-  await chatMode(page, 'Agents').click();
+  await chatMode(page, 'Agent').click();
   await expect(agentPicker(page)).toBeEnabled();
 }
 
@@ -39,6 +41,11 @@ async function routeGroup(page: Page, name: string) {
   await page.getByRole('button', { name: 'Account menu' }).click();
   await page.getByRole('menuitem', { name: 'Route', exact: true }).press('ArrowRight');
   await page.getByRole('menuitem', { name, exact: true }).press('ArrowRight');
+}
+
+async function expectConversationalRoutes(page: Page) {
+  await expect(page.getByRole('menuitemradio')).toHaveCount(endpoints.length);
+  for (const name of endpoints) await expect(page.getByRole('menuitemradio', { name, exact: true })).toBeVisible();
 }
 
 async function send(page: Page, text: string) {
@@ -63,11 +70,11 @@ test('agent mode prefers hosted API Chat and offers four hosted routes', async (
   await expect(agentPicker(page)).toHaveText('ChatAgent');
   await routeGroup(page, 'Agents');
   await expect(page.getByRole('menuitemradio', { name: '/api/chat', exact: true })).toHaveAttribute('aria-checked', 'true');
-  await expect(page.getByRole('menuitemradio')).toHaveText(['/api/chat', '/v1/responses', '/v1/messages', '/v1/chat/completions']);
+  await expectConversationalRoutes(page);
   await page.getByRole('menuitemradio', { name: '/api/chat', exact: true }).click();
   await send(page, 'Run the hosted agent');
   await expect(page.getByText('Hosted reply', { exact: true })).toBeVisible();
-  await chatMode(page, 'Chat').click();
+  await chatMode(page, 'Model').click();
   await expect(page.getByRole('button', { name: 'Model', exact: true })).toBeVisible();
 });
 
@@ -85,7 +92,7 @@ test('agent mode falls back to browser-run Gateway when the configured agent bac
   await expect(page.getByText('Agent backend unavailable. Using a browser route.')).toBeVisible();
   await routeGroup(page, 'Gateway');
   await expect(page.getByRole('menuitemradio', { name: '/api/chat', exact: true })).toHaveAttribute('aria-checked', 'true');
-  await expect(page.getByRole('menuitemradio')).toHaveText(['/api/chat', '/v1/responses', '/v1/messages', '/v1/chat/completions']);
+  await expectConversationalRoutes(page);
   await page.getByRole('menuitemradio', { name: '/api/chat', exact: true }).click();
   await send(page, 'Run the browser agent');
   await expect(page.getByText('Browser reply', { exact: true })).toBeVisible();

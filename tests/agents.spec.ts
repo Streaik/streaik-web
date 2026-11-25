@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { Page, Route } from '@playwright/test';
+import { appAgents } from '../samples/shared/appAgents';
 import { faviconEndpoint, iconResponse, openAiFavicon } from './icon-fixtures';
 
 test.beforeEach(async ({ page }) => {
@@ -155,7 +156,7 @@ test('welcome app agent shows a skeleton and falls back to Welcome on failure or
     expect(body.tools).toBeUndefined();
     expect(await route.request().headerValue('x-openai-key')).toBe(agentTestKey);
     expect(body.messages.map(({ role }: { role: string }) => role)).toEqual(['system', 'user']);
-    expect(body.messages[0].parts[0].text).toContain('Write a friendly, professional welcome message');
+    expect(body.messages[0].parts[0].text).toContain(appAgents.defaults.find(({ id }) => id === 'welcome-message')!.definition.instructions);
     if (++requests === 1) {
       await greeting.promise;
       await finishText(route, 'Good to see you');
@@ -648,7 +649,7 @@ for (const theme of ['html', 'fluent']) {
     await general.press('ArrowRight');
     await expect(editor.getByRole('tab', { name: 'Details', exact: true })).toBeFocused();
     await page.keyboard.press('End');
-    await expect(editor.getByRole('tabpanel', { name: 'Realtime', exact: true })).toBeVisible();
+    await expect(editor.getByRole('tabpanel', { name: 'Tool configuration', exact: true })).toBeVisible();
     await page.keyboard.press('Home');
     await expect(general).toBeFocused();
     await expect(editor.getByLabel('Instructions', { exact: true })).toHaveValue('Write something helpful.');

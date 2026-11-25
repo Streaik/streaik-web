@@ -9,7 +9,7 @@ export function ChatModeButtons({ agentMode, disabled, onChange }: {
   return <div className="chat-mode-buttons" role="group" aria-label={t('Chat mode')}>
     {([{ agents: false, label: 'Chat', icon: 'brain' }, { agents: true, label: 'Agents', icon: 'agents' }] as const).map(({ agents, label, icon }) =>
       <Tooltip key={label} content={t(label)}><Button type="button" className="chat-mode-button" variant="subtle"
-        aria-label={t(label)} aria-pressed={agentMode === agents} disabled={disabled} onClick={() => onChange(agents)}>
+        aria-label={t(agents ? 'Agent chat' : 'Model chat')} aria-pressed={agentMode === agents} disabled={disabled} onClick={() => onChange(agents)}>
         <ChatIcon name={icon} />
       </Button></Tooltip>)}
   </div>;

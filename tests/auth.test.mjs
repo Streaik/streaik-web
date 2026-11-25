@@ -64,29 +64,33 @@ test('Entra uses a delegated gateway scope, sends only the access token, and dis
   await assert.rejects(auth.headers(), /Sign in with Microsoft/);
 });
 
-test('Entra acquires MCP and chat tokens for their separate audiences', async () => {
+test('Entra acquires MCP, agent and gateway tokens for their separate audiences', async () => {
   const tenantId = '11111111-1111-1111-1111-111111111111';
   const clientId = '22222222-2222-2222-2222-222222222222';
   const scope = 'api://33333333-3333-3333-3333-333333333333/access_as_user';
   const mcpScope = 'api://44444444-4444-4444-4444-444444444444/mcp_access';
+  const agentScope = 'api://55555555-5555-5555-5555-555555555555/agent_access';
   const account = { tenantId, homeAccountId: 'mock-account' };
   let active = null;
-  const auth = await createEntraAuth({ tenantId, clientId, scope, mcpScope }, new URL('https://example.invalid/'), () => ({
+  const auth = await createEntraAuth({ tenantId, clientId, scope, mcpScope, agentScope }, new URL('https://example.invalid/'), () => ({
     initialize: async () => {}, getAllAccounts: () => [], getActiveAccount: () => active,
     setActiveAccount: (item) => { active = item; },
-    loginPopup: async (request) => { assert.deepEqual(request.scopes, [scope]); assert.deepEqual(request.extraScopesToConsent, [mcpScope]); return { account }; },
+    loginPopup: async (request) => { assert.deepEqual(request.scopes, [scope]); assert.deepEqual(request.extraScopesToConsent, [mcpScope, agentScope]); return { account }; },
     logoutPopup: async () => {},
     acquireTokenSilent: async (request) => {
       assert.equal(request.account, account);
       assert.equal(request.scopes.length, 1);
-      assert.ok([scope, mcpScope].includes(request.scopes[0]));
-      return { accessToken: request.scopes[0] === scope ? 'chat-token' : 'mcp-token' };
+      assert.ok([scope, mcpScope, agentScope].includes(request.scopes[0]));
+      return { accessToken: request.scopes[0] === scope ? 'chat-token' : request.scopes[0] === agentScope ? 'agent-token' : 'mcp-token' };
     },
   }));
   await assert.rejects(auth.mcpHeaders(), /Sign in/);
+  await assert.rejects(auth.agentHeaders(), /Sign in/);
   await auth.signIn();
   assert.deepEqual(await auth.headers(), { Authorization: 'Bearer chat-token' });
   assert.deepEqual(await auth.mcpHeaders(), { Authorization: 'Bearer mcp-token' });
+  assert.deepEqual(await auth.agentHeaders(), { Authorization: 'Bearer agent-token' });
   await auth.signOut();
   await assert.rejects(auth.mcpHeaders(), /Sign in/);
+  await assert.rejects(auth.agentHeaders(), /Sign in/);
 });
