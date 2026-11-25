@@ -357,10 +357,7 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
         </div>
       </form>
       {(status || phaseLabel) && <p className="chat-attachment-notice" role="status">{status || t(phaseLabel)}</p>}
-      {!status && catalog && !fileModel && <p className="chat-attachment-notice" role="status">
-        {t(fileModels.length ? 'The selected model does not support file transcription on this route.' : 'No models support this file transcription route.')}
-      </p>}
-      {enabled && catalog && !busy && (!canCapture ? <p className="chat-attachment-notice">{t('Microphone access requires a secure browser context.')}</p> : <>
+      {enabled && selectedModel && !busy && (!canCapture ? <p className="chat-attachment-notice">{t('Microphone access requires a secure browser context.')}</p> : <>
         {(!dictateModel || !canRecord) && <p className="chat-attachment-notice">{t(!dictateModel ? 'Dictate needs a file transcription model.' : 'Dictate recording is not supported in this browser.')}</p>}
       </>)}
       {error && <p className="chat-attachment-notice" role="alert">{t(error)}</p>}

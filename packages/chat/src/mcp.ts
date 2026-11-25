@@ -2,6 +2,7 @@ import type { Client, Tool } from '@modelcontextprotocol/client';
 import { defaultMcpPreferences } from './mcpPreferences.ts';
 import type { McpPreferences } from './mcpPreferences.ts';
 import type { RequestElicitation } from './elicitation.ts';
+import { publicWebUrl } from './favicons.ts';
 import { isObject, mcpDeclarations, mcpEndpoint } from './mcpConfiguration.ts';
 import type { McpRemoteHeader, McpServerRecord } from './mcpConfiguration.ts';
 import { maxMcpImagePreviews, mcpImagePreview } from './toolOutputContent.ts';
@@ -35,8 +36,20 @@ class McpRequestError extends Error {}
 export function mcpFailure(error: unknown): string {
   return error instanceof McpRequestError ? error.message : 'The MCP request could not be completed.';
 }
-export type McpCatalogServer = { name: string; title: string; description?: string; version?: string;
+type McpCatalogIcon = { src: string; theme?: 'light' | 'dark' };
+export type McpCatalogServer = { name: string; title: string; description?: string; version?: string; websiteUrl?: string;
+  icons: McpCatalogIcon[];
   remotes: (Pick<McpServerRecord, 'endpoint' | 'declarations'> & { requiresEntra?: true })[] };
+
+function catalogIcons(value: unknown): McpCatalogIcon[] {
+  return Array.isArray(value) ? value.flatMap(icon => {
+    if (!isObject(icon) || typeof icon.src !== 'string') return [];
+    const src = icon.src.trim();
+    if (!publicWebUrl(src) && !/^data:image\/[\w.+-]+(?:;[\w=.+-]+)*,/i.test(src)) return [];
+    const theme = icon.theme === 'light' || icon.theme === 'dark' ? icon.theme : undefined;
+    return [{ src, theme }];
+  }) : [];
+}
 
 export function isMcpRuntime(endpoint: string, base?: URL) {
   if (!base || mcpEndpoint(endpoint) !== endpoint) return false;
@@ -77,7 +90,7 @@ export async function fetchMcpCatalog(registryUrl: URL, signal: AbortSignal, cur
   const names = new Set<string>();
   for (const item of listing.servers) {
     if (!isObject(item) || !isObject(item.server)) continue;
-    const { name, title, description, version, remotes, _meta } = item.server;
+    const { name, title, description, version, websiteUrl, icons, remotes, _meta } = item.server;
     if (typeof name !== 'string' || !name.trim() || name.length > 240 || names.has(name)) continue;
     const protectedUrls = isObject(_meta) ? _meta[entraProtectedRemotes] : undefined;
     const protectedEndpoints = new Set(Array.isArray(protectedUrls) ? protectedUrls.flatMap(url => {
@@ -96,6 +109,7 @@ export async function fetchMcpCatalog(registryUrl: URL, signal: AbortSignal, cur
     names.add(name);
     servers.push({ name, title: (typeof title === 'string' && title.trim() || name.split('/').at(-1) || name).slice(0, 160),
       description: typeof description === 'string' ? description.slice(0, 1600) : undefined,
+      websiteUrl: typeof websiteUrl === 'string' ? websiteUrl : undefined, icons: catalogIcons(icons),
       version: typeof version === 'string' ? version.slice(0, 80) : undefined, remotes: choices });
   }
   const next = isObject(listing.metadata) ? listing.metadata.nextCursor : undefined;

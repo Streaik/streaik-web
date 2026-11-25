@@ -46,8 +46,6 @@ export const chatMessages = {
   'No compatible Real-time transcription model is available.': ['Er is geen geschikt model voor real-time transcriptie beschikbaar.', 'No hay ningún modelo compatible con la transcripción en tiempo real.'],
   'The selected model does not support real-time transcription.': ['Het geselecteerde model ondersteunt geen realtime transcriptie.', 'El modelo seleccionado no admite la transcripción en tiempo real.'],
   'This app cannot start a live session for the selected model.': ['Deze app kan geen livesessie starten voor het geselecteerde model.', 'Esta aplicación no puede iniciar una sesión en directo con el modelo seleccionado.'],
-  'The selected model does not support file transcription on this route.': ['Het geselecteerde model kan via deze route geen audiobestanden transcriberen.', 'El modelo seleccionado no puede transcribir archivos de audio en esta ruta.'],
-  'No models support this file transcription route.': ['Geen modellen kunnen via deze route audiobestanden transcriberen.', 'Ningún modelo admite la transcripción de archivos en esta ruta.'],
   'Real-time transcription is not supported in this browser.': ['Deze browser ondersteunt geen real-time transcriptie.', 'Este navegador no admite la transcripción en tiempo real.'],
   'Microphone access requires a secure browser context.': ['Microfoontoegang vereist een beveiligde browserverbinding.', 'El acceso al micrófono requiere un contexto seguro en el navegador.'],
   'Allow microphone access to start transcription.': ['Geef toegang tot de microfoon om de transcriptie te starten.', 'Permite el acceso al micrófono para iniciar la transcripción.'],

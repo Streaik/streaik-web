@@ -1,9 +1,11 @@
-import { Button, Tooltip } from '@streaik/themes';
+import { Button, Tooltip, useColorScheme } from '@streaik/themes';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { CatalogMark } from './CatalogMark';
 import { ChatIcon } from './ChatIcon';
 import { DialogTabs } from './DialogTabs';
+import { websiteFavicon } from './favicons';
 import { useAppTranslation } from './i18n';
 import { fetchMcpCatalog, filterMcpCatalog, mcpAppAuth, preferredMcpRemote } from './mcp';
 import type { McpCatalogServer, McpOptions } from './mcp';
@@ -124,12 +126,13 @@ function registrySearchDocument({ title, name, description, remotes }: McpCatalo
   return { title, text: [name, description, ...remotes.map(remote => remote.endpoint)].join('\n') };
 }
 
-function McpServerCard({ title, name, description, version, endpoint, actions, inDialog }: {
-  title: string; name?: string; description?: string; version?: string; endpoint?: ReactNode; actions: ReactNode; inDialog?: boolean;
+function McpServerCard({ title, name, description, version, icons, endpoint, actions, inDialog }: {
+  title: string; name?: string; description?: string; version?: string; icons?: readonly string[];
+  endpoint?: ReactNode; actions: ReactNode; inDialog?: boolean;
 }) {
   const Heading = inDialog ? 'h3' : 'h2';
   return <article className="catalog-card mcp-card">
-    <div className="catalog-card-title"><span className="catalog-mark"><ChatIcon name="tool" /></span>
+    <div className="catalog-card-title"><CatalogMark name={title} icons={icons} fallback={<ChatIcon name="tool" />} />
       <div className="mcp-card-title-details"><Heading>{title}</Heading>
         {version && <VersionBadge version={version} />}{name && <small>{name}</small>}
       </div></div>
@@ -207,6 +210,10 @@ function CopyServerUrl({ endpoint }: { endpoint: string }) {
 function CatalogCard({ item, installed, disabled, options, install, inDialog }: { item: McpCatalogServer; installed: ReadonlySet<string>; disabled: boolean; options?: McpOptions;
   install: (item: McpCatalogServer, remote: McpCatalogServer['remotes'][number]) => void; inDialog: boolean }) {
   const { t } = useAppTranslation();
+  const scheme = useColorScheme();
+  const icons = [...item.icons.filter(icon => icon.theme === scheme), ...item.icons.filter(icon => !icon.theme)].map(icon => icon.src);
+  const favicon = websiteFavicon(item.websiteUrl);
+  if (favicon) icons.push(favicon);
   const [selected, setSelected] = useState('');
   const remote = item.remotes.find(choice => choice.endpoint === selected) ?? preferredMcpRemote(item.remotes, options);
   const isInstalled = remote && installed.has(remote.endpoint);
@@ -217,7 +224,7 @@ function CatalogCard({ item, installed, disabled, options, install, inDialog }: 
   const actions = !remote ? <small>{t('No compatible Streamable HTTP endpoint')}</small> : isInstalled ? <small>{t('Installed')}</small>
     : <Tooltip content={installLabel}><Button type="button" variant="subtle" className="chat-composer-icon" aria-label={installLabel}
       disabled={disabled} onClick={() => install(item, remote)}><ChatIcon name="download" /></Button></Tooltip>;
-  return <McpServerCard title={item.title} name={item.name} description={item.description} version={item.version}
+  return <McpServerCard title={item.title} name={item.name} description={item.description} version={item.version} icons={icons}
     endpoint={endpoint} actions={<>{remote && <CopyServerUrl key={remote.endpoint} endpoint={remote.endpoint} />}{actions}</>} inDialog={inDialog} />;
 }
 

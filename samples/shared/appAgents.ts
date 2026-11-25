@@ -43,7 +43,7 @@ const definitions = [
     instructions: 'Chat',
   }],
   ['image', 'Create an image', {
-    name: 'mageAgent', description: 'Creates images.',
+    name: 'ImageAgent', description: 'Creates images.',
     models: [{ id: 'openai/gpt-image-2.6-sunburst' },
     { id: 'openai/gpt-image-2.6-flare' }],
     instructions: 'Create images',
