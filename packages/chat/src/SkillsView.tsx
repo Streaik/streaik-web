@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { CatalogMark } from './CatalogMark';
 import { ChatIcon } from './ChatIcon';
 import { useAppTranslation } from './i18n';
+import { ProtocolLinks } from './ProtocolLinks';
 import { defaultSkillVersion, importSkillZip, saveSkillVersion } from './skillBundles';
 import type { LocalSkill, SkillBundle, SkillVersion } from './skillBundles';
 import { LocalSkillDetails, RemoteSkillDetails, SkillDialog, SkillEditor, SkillTabs, SkillUploadDialog, skillError } from './SkillDialogs';
@@ -151,8 +152,9 @@ export function SkillsView({ store, gateway, remote, toolbar, menuContainer }: {
   </Menu.Root>;
   return <section className="catalog-content" aria-labelledby="skills-title">
     {toolbar && createPortal(addMenu, toolbar)}
-    <header className="agent-overview-header"><h1 id="skills-title">{t('Skills')}</h1>
-      <p>{t('Create Agent Skills in your browser, or download and transfer skills from providers.')}</p></header>
+    <header className="catalog-overview-header">
+      <h1 id="skills-title">{t('Skills')}</h1><ProtocolLinks protocol="skills" />
+    </header>
     <div className="skill-toolbar">
       {!toolbar && addMenu}
       <input ref={search} className="ui-input agent-input skill-search" type="search" aria-label={t('Search skills')} placeholder={t('Search skills…')}

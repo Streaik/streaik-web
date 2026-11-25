@@ -89,8 +89,8 @@ export function AgentsView({ catalog, catalogStatus, toolbar, menuContainer }: {
   return <section className="catalog-content" aria-labelledby="agents-title">
     {toolbar && createPortal(<Button className="agent-create" variant="primary" aria-label={t('Create agent')} title={t('Create agent')}
       onClick={(event) => start({ kind: 'create' }, event.currentTarget)}><ChatIcon name="add" /></Button>, toolbar)}
-    <header className="agent-overview-header">
-      <h1 id="agents-title">{t('Agents')}</h1><p>{t('Manage agent definitions in this browser. Agent chat is not available yet.')}</p>
+    <header className="catalog-overview-header">
+      <h1 id="agents-title">{t('Agents')}</h1>
     </header>
     {store.notice && <p className="chat-notice" role="status">{t(store.notice)}</p>}
     <input ref={search} className="ui-input agent-input" aria-label={t('Search agents')} type="search" placeholder={t('Search agents…')}

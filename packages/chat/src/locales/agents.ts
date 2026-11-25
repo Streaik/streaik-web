@@ -59,7 +59,6 @@ export const agentMessages = {
   'Enter a valid icon URL, such as an HTTPS image URL, or remove the icon.': ['Voer een geldige pictogram-URL in, bijvoorbeeld een HTTPS-afbeeldings-URL, of verwijder het pictogram.', 'Introduce una URL de icono válida, por ejemplo una URL de imagen HTTPS, o elimina el icono.'],
   'Every selected model needs a model ID.': ['Elk geselecteerd model heeft een model-ID nodig.', 'Cada modelo seleccionado necesita un identificador.'],
   'Could not create an agent ID.': ['Kan geen agent-ID maken.', 'No se pudo crear un identificador de agente.'],
-  'Manage agent definitions in this browser. Agent chat is not available yet.': ['Beheer agentdefinities in deze browser. Chatten met agents is nog niet beschikbaar.', 'Gestiona las definiciones de los agents en este navegador. El chat con agents aún no está disponible.'],
   'Search agents': ['Agents zoeken', 'Buscar agents'],
   'Search agents…': ['Agents zoeken…', 'Buscar agents…'],
   'No matching agents.': ['Geen overeenkomende agents.', 'No se encontraron agents coincidentes.'],

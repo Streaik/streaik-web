@@ -1,5 +1,5 @@
 .mcp-page, .mcp-form, .mcp-fields { display: grid; gap: 1rem; }
-.mcp-page h1 { margin: 0; }
+.mcp-page > .catalog-overview-header { margin-bottom: 0; }
 .mcp-page > .catalog-tabs ~ [role=tabpanel] { margin-top: 0; min-width: 0; }
 .mcp-section-heading, .mcp-actions { display: flex; align-items: center; gap: .35rem; }
 .mcp-section-heading { justify-content: space-between; flex-wrap: wrap; }

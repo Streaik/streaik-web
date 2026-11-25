@@ -9,6 +9,7 @@ import { fetchMcpCatalog, filterMcpCatalog, mcpAppAuth, preferredMcpRemote } fro
 import type { McpCatalogServer, McpOptions } from './mcp';
 import { mcpEndpoint, mcpHeaderFields, resolveMcpHeaders } from './mcpConfiguration';
 import type { McpHeaderRow, McpServerRecord } from './mcpConfiguration';
+import { ProtocolLinks } from './ProtocolLinks';
 import { useCatalogSearch } from './useCatalogSearch';
 import type { McpSelection, McpServers } from './useMcpServers';
 import { VersionBadge } from './VersionBadge';
@@ -313,7 +314,9 @@ export function McpServersView({ toolbar, ...props }: ServerSectionsProps & { to
   return <div className="catalog-content mcp-page">
     {toolbar && createPortal(<Button className="agent-create" type="button" variant="primary" aria-label={addLabel} title={addLabel}
       aria-haspopup="dialog" disabled={props.locked || !props.store.available} onClick={() => props.onEdit({})}><ChatIcon name="add" /></Button>, toolbar)}
-    <header><h1>{t('MCP Servers')}</h1></header>
+    <header className="catalog-overview-header">
+      <h1>{t('MCP Servers')}</h1><ProtocolLinks protocol="mcp" />
+    </header>
     {!props.store.available && <p role="status">{t('Sign in or unlock this profile to manage MCP servers.')}</p>}
     <McpServerTabs {...props} />
   </div>;
