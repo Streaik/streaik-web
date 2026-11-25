@@ -1,8 +1,58 @@
-import type { ChatMessage, ChatMessageMetadata, Gateway } from '@streaik/gateway';
+import type { CatalogModel, ChatMessage, ChatMessageMetadata, Gateway } from '@streaik/gateway';
 
 type Transport = ReturnType<Gateway['chatTransport']>;
 type ReplyStream = Awaited<ReturnType<Transport['sendMessages']>>;
 type ReplyChunk = ReplyStream extends ReadableStream<infer Chunk> ? Chunk : never;
+
+export function nonnegativeNumber(value: unknown): number | undefined {
+  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
+  return typeof parsed === 'number' && Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+export function messageTokens(metadata?: ChatMessageMetadata) {
+  const input = nonnegativeNumber(metadata?.usage?.promptTokens);
+  const output = nonnegativeNumber(metadata?.usage?.completionTokens);
+  const total = nonnegativeNumber(metadata?.usage?.totalTokens) ?? nonnegativeNumber(metadata?.totalTokens) ??
+    (input !== undefined && output !== undefined ? input + output : undefined);
+  return { input, output, total };
+}
+
+export function conversationGatewayCost(messages: readonly ChatMessage[]): number | undefined {
+  let total = 0;
+  let count = 0;
+  function add(value: unknown) {
+    const cost = nonnegativeNumber(value);
+    if (cost === undefined) return;
+    total += cost;
+    count++;
+  }
+  for (const { role, metadata, parts } of messages) {
+    if (role !== 'assistant') continue;
+    const reported = metadata?.providerMetadata?.gateway;
+    const legacy = metadata?.gateway;
+    if (reported?.source !== 'direct' && legacy?.source !== 'direct') add(reported?.cost ?? legacy?.cost ?? metadata?.cost);
+    for (const part of parts) {
+      if (!('toolCallId' in part) || part.state !== 'output-available') continue;
+      const tool = part.output as { _meta?: { gateway?: ChatMessageMetadata['gateway'] } } | undefined;
+      if (tool?._meta?.gateway?.source !== 'direct') add(tool?._meta?.gateway?.cost);
+    }
+  }
+  return count > 1 && Number.isFinite(total) ? total : undefined;
+}
+
+export function latestContextUsage(messages: readonly ChatMessage[], models: readonly Pick<CatalogModel, 'id' | 'contextWindow' | 'maxTokens'>[]) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const { role, metadata } = messages[i];
+    if (role !== 'assistant') continue;
+    const { total } = messageTokens(metadata);
+    if (total === undefined || !Number.isFinite(total)) continue;
+    // A routed reply can use a different model than the first selected candidate.
+    const model = models.find(({ id }) => id === metadata?.model);
+    const window = model?.contextWindow;
+    if (window && window > 0 && Number.isFinite(window)) return { used: total, window, maxOutput: model.maxTokens };
+    return undefined;
+  }
+}
 
 export function messageTime(timestamp: unknown): number | undefined {
   if (typeof timestamp !== 'string') return;

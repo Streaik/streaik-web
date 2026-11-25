@@ -19,12 +19,12 @@ export function providerLogo(provider: string) {
   return logos.get(provider.toLowerCase());
 }
 
-export function AssistantSpeaker({ model }: { model?: string }) {
+export function AssistantSpeaker({ model, showProviderLogo }: { model?: string; showProviderLogo: boolean }) {
   const { t } = useAppTranslation();
   const [failed, setFailed] = useState<string>();
   const [loaded, setLoaded] = useState<string>();
   const slash = model?.indexOf('/') ?? -1;
-  const logo = model && slash > 0 && providerLogo(model.slice(0, slash));
+  const logo = showProviderLogo && model && slash > 0 && providerLogo(model.slice(0, slash));
   const showLogo = !!logo && failed !== logo;
   return <Tooltip content={model} visualOnly><span className="chat-speaker">
     {logo && showLogo && <img key={logo} src={logo} alt="" className="chat-provider-logo"

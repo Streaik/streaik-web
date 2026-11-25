@@ -90,6 +90,12 @@ body { margin: 0; }
 .chat-main[data-empty=true] .chat-dock { margin-block: auto; }
 .chat-column { width: min(100% - 2rem, 62rem); margin-inline: auto; }
 .chat-dock { padding-block: .7rem .25rem; }
+.chat-composer-usage { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .3rem .55rem; margin-block-end: .35rem; }
+.chat-context-usage { display: inline-flex; align-items: center; gap: .4rem; color: var(--muted); font-size: .75rem; font-variant-numeric: tabular-nums; }
+.chat-context-usage progress { appearance: none; width: clamp(3rem, 12vw, 5.5rem); height: .32rem; border: 0; border-radius: 1rem; overflow: hidden; background: var(--soft); }
+.chat-context-usage progress::-webkit-progress-bar { background: var(--soft); }
+.chat-context-usage progress::-webkit-progress-value { background: var(--muted); border-radius: 1rem; }
+.chat-context-usage progress::-moz-progress-bar { background: var(--muted); border-radius: 1rem; }
 .chat-dock h1 { font-size: clamp(1.4rem, 3.3vw, 2.4rem); text-align: center; line-height: 1.15; margin: 0 0 1.1rem; text-wrap: balance; }
 .chat-welcome-skeleton { display: block; width: min(65%, 12ch); height: .75em; margin-inline: auto;
   border-block: .2em solid transparent; box-sizing: content-box; border-radius: .45em; background: currentColor; background-clip: padding-box; opacity: .14; }
@@ -226,6 +232,8 @@ body { margin: 0; }
 .chat-activity-body summary, .chat-tool-card summary { cursor: pointer; }
 .chat-tool-card input[type=range] { width: 100%; margin: 0; }
 .chat-tool-switches { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); gap: .5rem; }
+.chat-preference-cards { display: grid; gap: .9rem; }
+.chat-preference-cards .chat-tool-switches { grid-template-columns: minmax(0, 1fr); gap: .1rem; }
 .chat-tool-switches label { display: flex; gap: .55rem; min-height: 2.25rem; align-items: center; overflow-wrap: anywhere; }
 .chat-tool-switches input { appearance: none; position: relative; flex: none; width: 2.25rem; height: 1.25rem; margin: 0; border: 1px solid var(--muted); border-radius: 1rem; background: var(--background); cursor: pointer; }
 .chat-tool-switches input::before { content: ''; position: absolute; inset: .125rem auto .125rem .125rem; aspect-ratio: 1; border-radius: 50%; background: var(--muted); }

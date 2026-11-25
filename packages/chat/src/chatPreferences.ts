@@ -4,25 +4,50 @@ import type { LocalPluginId } from './localPlugins.ts';
 export const pinnableViews = ['models', 'providers'] as const;
 export type PinnableView = (typeof pinnableViews)[number];
 
+const toolOutputDefaults = { text: true, links: true, images: false, audio: false, video: false, documents: false };
+export type ToolOutputPreferences = typeof toolOutputDefaults;
+
 export type ChatPreferences = {
   delay: number;
   plugins: LocalPluginId[];
   remoteSkillIds: string[];
   convertAttachmentsToText: boolean;
   pinnedViews: PinnableView[];
+  dictate: boolean;
+  showContextSize: boolean;
+  showMessageTokens: boolean;
+  showProviderLogo: boolean;
+  showMetrics: boolean;
+  toolOutput: ToolOutputPreferences;
 };
-export const defaultChatPreferences: ChatPreferences = { delay: 40, plugins: [], remoteSkillIds: [], convertAttachmentsToText: false, pinnedViews: [] };
+export const composerToolDefaults: Pick<ChatPreferences, 'delay' | 'plugins' | 'remoteSkillIds'> = { delay: 40, plugins: [], remoteSkillIds: [] };
+export const defaultChatPreferences: ChatPreferences = { ...composerToolDefaults, convertAttachmentsToText: false, pinnedViews: [],
+  dictate: true, showContextSize: true, showMessageTokens: true, showProviderLogo: true, showMetrics: false, toolOutput: toolOutputDefaults };
 
-export function normalizeChatPreferences(value: Partial<ChatPreferences> | null | undefined): ChatPreferences {
+type StoredPreferences = Partial<Omit<ChatPreferences, 'toolOutput'> & { toolOutput: Partial<ToolOutputPreferences> }>;
+
+const booleanPreference = (value: unknown, fallback: boolean) => typeof value === 'boolean' ? value : fallback;
+
+export function normalizeChatPreferences(value: StoredPreferences | null | undefined): ChatPreferences {
   const delay = value?.delay;
   const plugins = value?.plugins;
   const pinned = value?.pinnedViews;
+  const toolOutput = { ...toolOutputDefaults };
+  for (const key of Object.keys(toolOutput) as (keyof ToolOutputPreferences)[]) {
+    toolOutput[key] = booleanPreference(value?.toolOutput?.[key], toolOutputDefaults[key]);
+  }
   return {
-    delay: typeof delay === 'number' && Number.isFinite(delay) ? Math.round(Math.max(0, Math.min(1000, delay)) / 10) * 10 : 40,
+    delay: typeof delay === 'number' && Number.isFinite(delay) ? Math.round(Math.max(0, Math.min(1000, delay)) / 10) * 10 : composerToolDefaults.delay,
     plugins: localPlugins.filter(({ id }) => Array.isArray(plugins) && plugins.includes(id)).map(({ id }) => id),
     remoteSkillIds: Array.isArray(value?.remoteSkillIds) ? [...new Set(value.remoteSkillIds.filter(id => typeof id === 'string' && id.trim()))] : [],
     convertAttachmentsToText: value?.convertAttachmentsToText === true,
     pinnedViews: pinnableViews.filter(view => Array.isArray(pinned) && pinned.includes(view)),
+    dictate: booleanPreference(value?.dictate, defaultChatPreferences.dictate),
+    showContextSize: booleanPreference(value?.showContextSize, defaultChatPreferences.showContextSize),
+    showMessageTokens: booleanPreference(value?.showMessageTokens, defaultChatPreferences.showMessageTokens),
+    showProviderLogo: booleanPreference(value?.showProviderLogo, defaultChatPreferences.showProviderLogo),
+    showMetrics: booleanPreference(value?.showMetrics, defaultChatPreferences.showMetrics),
+    toolOutput,
   };
 }
 

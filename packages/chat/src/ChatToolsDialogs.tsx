@@ -3,7 +3,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { ChatIcon } from './ChatIcon';
 import { ToolValue } from './ChatActivity';
-import { defaultChatPreferences } from './chatPreferences';
+import { composerToolDefaults } from './chatPreferences';
 import type { ChatPreferences } from './chatPreferences';
 import type { RequestContext } from './chatContext';
 import { localPlugins } from './localPlugins';
@@ -116,8 +116,7 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hasHistor
       </section>
     </div>
     <footer className="chat-tool-footer">
-      <Button variant="subtle" disabled={locked} onClick={() => onChange({ ...defaultChatPreferences,
-        convertAttachmentsToText: value.convertAttachmentsToText, pinnedViews: value.pinnedViews })}>{t('Defaults')}</Button>
+      <Button variant="subtle" disabled={locked} onClick={() => onChange({ ...value, ...composerToolDefaults })}>{t('Defaults')}</Button>
       <Button onClick={() => dialog.current?.close()}>{t('Close')}</Button>
     </footer>
   </dialog>;

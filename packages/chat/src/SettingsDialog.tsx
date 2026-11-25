@@ -5,16 +5,23 @@ import type { ReactNode, RefObject } from 'react';
 import { useAgents } from './AgentsProvider';
 import { AgentSettings } from './AgentSettings';
 import { ChatIcon } from './ChatIcon';
+import type { ChatPreferences, ToolOutputPreferences } from './chatPreferences';
 import { languages, useAppTranslation } from './i18n';
 
 type SettingsTab = { id: string; label: string; icon: IconName; content: ReactNode };
+const toolOutputLabels = { text: 'Text', links: 'Links', images: 'Images', audio: 'Audio', video: 'Video', documents: 'Documents' } as const;
 
-export function SettingsDialog({ dialog, apiKeySettings, accountSettings, convertAttachmentsToText, onConvertAttachmentsToTextChange }: {
+function SettingSwitch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
+  return <label><input type="checkbox" role="switch" checked={checked} onChange={event => onChange(event.currentTarget.checked)} />
+    <span>{label}</span></label>;
+}
+
+export function SettingsDialog({ dialog, apiKeySettings, accountSettings, preferences, onPreferences }: {
   dialog: RefObject<HTMLDialogElement | null>;
   apiKeySettings?: ReactNode;
   accountSettings?: ReactNode;
-  convertAttachmentsToText: boolean;
-  onConvertAttachmentsToTextChange: (value: boolean) => void;
+  preferences: ChatPreferences;
+  onPreferences: (value: ChatPreferences) => void;
 }) {
   const { t, i18n } = useAppTranslation();
   const id = useId();
@@ -38,13 +45,39 @@ export function SettingsDialog({ dialog, apiKeySettings, accountSettings, conver
   }];
   if (apiKeySettings) tabs.push({ id: 'api-keys', label: t('API keys'), icon: 'key', content: apiKeySettings });
   if (accountSettings) tabs.push({ id: 'account', label: t('Account'), icon: 'user', content: accountSettings });
+  function preference(key: 'dictate' | 'showContextSize' | 'showMessageTokens' | 'showProviderLogo' | 'showMetrics' | 'convertAttachmentsToText', label: string) {
+    return <SettingSwitch label={t(label)} checked={preferences[key]} onChange={value => onPreferences({ ...preferences, [key]: value })} />;
+  }
+  tabs.push({ id: 'chat', label: t('Chat'), icon: 'agents', content:
+    <div className="chat-preference-cards">
+      <section className="chat-tool-card" aria-labelledby={`${id}-input`}>
+        <h3 id={`${id}-input`}>{t('Input')}</h3>
+        <div className="chat-tool-switches">
+          {preference('dictate', 'Dictate')}
+          {preference('showContextSize', 'Show context size')}
+        </div>
+      </section>
+      <section className="chat-tool-card" aria-labelledby={`${id}-output`}>
+        <h3 id={`${id}-output`}>{t('Output')}</h3>
+        <div className="chat-tool-switches">
+          {preference('showMessageTokens', 'Show tokens per message')}
+          {preference('showProviderLogo', 'Show provider logo')}
+          {preference('showMetrics', 'Show metrics')}
+        </div>
+      </section>
+      <section className="chat-tool-card" aria-labelledby={`${id}-tool-output`}>
+        <h3 id={`${id}-tool-output`}>{t('Tool output')}</h3>
+        <div className="chat-tool-switches">
+          {(Object.keys(toolOutputLabels) as (keyof ToolOutputPreferences)[]).map(key =>
+            <SettingSwitch key={key} label={t(toolOutputLabels[key])} checked={preferences.toolOutput[key]}
+              onChange={value => onPreferences({ ...preferences, toolOutput: { ...preferences.toolOutput, [key]: value } })} />)}
+        </div>
+      </section>
+    </div>,
+  });
   if (agents?.config.roles?.length) tabs.push({ id: 'agents', label: t('Agents'), icon: 'agents', content: <AgentSettings /> });
   tabs.push({ id: 'attachments', label: t('Attachments'), icon: 'attachment', content:
-    <div className="chat-tool-switches"><label>
-      <input type="checkbox" role="switch" checked={convertAttachmentsToText}
-        onChange={event => onConvertAttachmentsToTextChange(event.currentTarget.checked)} />
-      <span>{t('Convert files to text')}</span>
-    </label></div>,
+    <div className="chat-tool-switches">{preference('convertAttachmentsToText', 'Convert files to text')}</div>,
   });
   const active = tabs.some((tab) => tab.id === selected) ? selected : 'general';
 
