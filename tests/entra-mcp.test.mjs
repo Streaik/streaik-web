@@ -151,7 +151,7 @@ test('the web MCP client lists and reads delegated data with the resource-bound 
   const headers = createEntraMcpHeaders(base, auth, 'spa-client-id');
   const server = { id: 'calendar', title: 'Calendar', endpoint, challengeOnly: true, requestHeaders: signal => headers(endpoint, signal) };
   const signal = new AbortController().signal;
-  assert.deepEqual(await discoverMcpServer(server, signal), { tools: [], hasResources: true, hasPrompts: false,
+  assert.deepEqual(await discoverMcpServer(server, signal), { tools: [], hasResources: true, hasPrompts: false, hasCompletions: false,
     resources: [], resourceTemplates: [template], prompts: [], promptsFailed: false });
   assert.deepEqual(await readMcpResource(server, resource, signal), { contents: [{ uri: resource, text: 'calendar data' }], text: 'calendar data', images: [] });
   assert.deepEqual(calls, ['images']);

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { callMcpTool, discoverMcpServer, mcpAppAuth } from '../packages/chat/src/mcp.ts';
+import { callMcpTool, completeMcpArgument, discoverMcpServer, mcpAppAuth } from '../packages/chat/src/mcp.ts';
 import { mcpDeclarations, mcpEndpoint, mcpHeaderFields, parseMcpServer, resolveMcpHeaders } from '../packages/chat/src/mcpConfiguration.ts';
 
 test('MCP endpoints accept HTTPS and local HTTP without credentials or ambiguous paths', () => {
@@ -59,6 +59,38 @@ test('MCP fails closed when a remote only supports an earlier protocol revision'
   await assert.rejects(discoverMcpServer({ id: 'remote', title: 'Remote', endpoint, requestHeaders: () => ({}) },
     new AbortController().signal));
   assert.deepEqual(attempts, [['POST', 'server/discover', '2026-07-28', '2026-07-28']]);
+});
+
+test('MCP discovers and rechecks completion support before requesting argument values', async (t) => {
+  const server = { id: 'fixture', title: 'Fixture', endpoint: 'https://mcp.example.org/complete', requestHeaders: () => ({ Authorization: 'Bearer fixture' }) };
+  const signal = new AbortController().signal;
+  const prompt = { ref: { type: 'ref/prompt', name: 'compare' }, argument: { name: 'second', value: '' } };
+  const template = { ref: { type: 'ref/resource', uri: 'fixture://{group}/{name}' }, argument: { name: 'name', value: 'par' },
+    context: { arguments: { group: 'Example' } } };
+  const calls = [];
+  let advertised = true;
+  t.mock.method(globalThis, 'fetch', async (request, init) => {
+    const post = new Request(request, init);
+    assert.equal(post.url, server.endpoint);
+    assert.equal(post.headers.get('Authorization'), 'Bearer fixture');
+    const { id, method, params } = await post.json();
+    if (method === 'server/discover') return Response.json({ jsonrpc: '2.0', id,
+      result: { supportedVersions: ['2026-07-28'], capabilities: advertised ? { completions: {} } : {} } });
+    assert.equal(method, 'completion/complete');
+    assert.ok(advertised);
+    const { _meta, ...args } = params;
+    calls.push(args);
+    return Response.json({ jsonrpc: '2.0', id, result: { resultType: 'complete', completion: {
+      values: ['Paris', '', 'Paris', 'line\nbreak', 'a'.repeat(2049), 'Parma'], hasMore: true,
+    } } });
+  });
+  assert.equal((await discoverMcpServer(server, signal)).hasCompletions, true);
+  assert.deepEqual(await completeMcpArgument(server, prompt, signal), ['Paris', 'Parma']);
+  assert.deepEqual(await completeMcpArgument(server, template, signal), ['Paris', 'Parma']);
+  advertised = false;
+  assert.equal((await discoverMcpServer(server, signal)).hasCompletions, false);
+  assert.deepEqual(await completeMcpArgument(server, prompt, signal), []);
+  assert.deepEqual(calls, [prompt, template]);
 });
 
 for (const protect of [false, true]) {

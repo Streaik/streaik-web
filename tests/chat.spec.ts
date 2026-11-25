@@ -1242,7 +1242,7 @@ for (const approved of [true, false]) test(`MCP composer discovers resources and
   await expect(resources.getByRole('button', { name: /User guide/ })).toBeVisible();
   await expect(resources.getByRole('button', { name: /Assistant guide/ })).toHaveCount(0);
   await resources.getByRole('button', { name: /Project template/ }).click();
-  await resources.getByLabel('slug', { exact: true }).fill('road map');
+  await resources.getByRole('textbox', { name: 'slug', exact: true }).fill('road map');
   await resources.getByRole('button', { name: 'Add resource', exact: true }).click();
   await expect(page.getByRole('list', { name: 'Attachments' }).getByText('Project template')).toBeVisible();
   expect(requests).toBe(0);
@@ -1251,7 +1251,7 @@ for (const approved of [true, false]) test(`MCP composer discovers resources and
   await page.getByRole('menuitem', { name: 'Prompts', exact: true }).click();
   const prompts = page.getByRole('dialog', { name: 'Prompts', exact: true });
   await prompts.getByRole('button', { name: /Topic prompt/ }).click();
-  await prompts.getByLabel('topic', { exact: true }).fill('waterfalls');
+  await prompts.getByRole('textbox', { name: 'topic', exact: true }).fill('waterfalls');
   await prompts.getByRole('button', { name: 'Run prompt', exact: true }).click();
   const review = page.getByRole('dialog', { name: 'Review tool result' });
   await expect(review.getByRole('tabpanel', { name: 'Output' })).toContainText(privateText);
@@ -1264,6 +1264,116 @@ for (const approved of [true, false]) test(`MCP composer discovers resources and
   await openMenu();
   await expect(page.getByRole('menuitem', { name: 'Prompts', exact: true })).toHaveCount(0);
   await expect(page.getByRole('menuitem', { name: 'Resources', exact: true })).toHaveCount(0);
+});
+
+test('MCP argument completions are optional, contextual, and debounced for prompts and templates', async ({ page }) => {
+  await mockModels(page);
+  const serverName = 'Suggestions fixture';
+  const template = 'fixture://projects/{slug}';
+  const complete = { resultType: 'complete', ttlMs: 0, cacheScope: 'private' };
+  const calls: { ref: unknown; argument: { name: string; value: string }; context?: { arguments: Record<string, string> } }[] = [];
+  const releaseOld = Promise.withResolvers<void>();
+  const finishedOld = Promise.withResolvers<void>();
+  await page.route('**/mcp-suggestions-fixture', async route => {
+    const { id, method, params } = route.request().postDataJSON();
+    const reply = (result: unknown) => route.fulfill({ json: { jsonrpc: '2.0', id, result } });
+    if (method === 'server/discover') return reply({ supportedVersions: ['2026-07-28'], capabilities: { resources: {}, prompts: {}, completions: {} } });
+    if (method === 'resources/list') return reply({ ...complete, resources: [] });
+    if (method === 'resources/templates/list') return reply({ ...complete, resourceTemplates: [{ name: 'Project', uriTemplate: template }] });
+    if (method === 'prompts/list') return reply({ ...complete, prompts: [{ name: 'make-prompt', title: 'Topic prompt',
+      arguments: [{ name: 'topic', required: true }, { name: 'style' }] }] });
+    if (method === 'completion/complete') {
+      const { ref, argument, context } = params;
+      calls.push({ ref, argument, context });
+      const { name, value } = argument;
+      if (name === 'slug') return reply({ ...complete, completion: { values: ['road map'] } });
+      if (name === 'style' && value) return route.fulfill({ json: { jsonrpc: '2.0', id, error: { code: -32603, message: 'Fixture unavailable' } } });
+      if (name === 'style') return reply({ ...complete, completion: { values: context?.arguments.topic === 'Spring trail' ? ['Scenic'] : [] } });
+      if (value === 'old') {
+        await releaseOld.promise;
+        try { await reply({ ...complete, completion: { values: ['Outdated'] } }); }
+        finally { finishedOld.resolve(); }
+        return;
+      }
+      return reply({ ...complete, completion: { values: value === 'spring' ? ['Spring trail'] : ['Alpine'] } });
+    }
+    if (method === 'resources/read') {
+      expect(params.uri).toBe('fixture://projects/road%20map');
+      return reply({ ...complete, contents: [{ uri: params.uri, text: 'Attached project' }] });
+    }
+    if (method === 'prompts/get') {
+      expect(params.arguments).toEqual({ topic: 'Spring trail', style: 'my own style' });
+      return reply({ ...complete, messages: [{ role: 'user', content: { type: 'text', text: 'Prompt with a custom style' } }] });
+    }
+    throw new Error(`Unexpected MCP method: ${method}`);
+  });
+  await page.route('**/gateway/api/chat', route => route.fulfill({ contentType: 'text/event-stream',
+    headers: { 'x-vercel-ai-ui-message-stream': 'v1' }, body: sse('Prompt complete', 1) }));
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await expectChatModel(page);
+  const openMenuItem = async (name: string) => {
+    await page.getByRole('button', { name: 'Add to message', exact: true }).click();
+    await page.getByRole('menuitem', { name, exact: true }).click();
+    return page.getByRole('dialog', { name, exact: true });
+  };
+  const context = await openMenuItem('Model Context');
+  await context.getByRole('tab', { name: 'Installed', exact: true }).click();
+  await context.getByRole('button', { name: 'Add by URL' }).click();
+  const editor = page.getByRole('dialog', { name: 'Add MCP server' });
+  await editor.getByLabel('Server name').fill(serverName);
+  await editor.getByLabel('Server URL').fill(new URL('/mcp-suggestions-fixture', page.url()).href);
+  await editor.getByRole('button', { name: 'Save server' }).click();
+  await context.getByRole('switch', { name: serverName }).check();
+  await expect(context.getByText('Connected', { exact: true })).toBeVisible();
+  await context.getByRole('button', { name: 'Close', exact: true }).click();
+  expect(calls).toEqual([]);
+
+  const resources = await openMenuItem('Resources');
+  await resources.getByRole('button', { name: /Project/ }).click();
+  const slug = resources.getByRole('combobox', { name: 'slug' });
+  await expect(slug).toHaveValue('');
+  await resources.getByRole('option', { name: 'road map' }).click();
+  await expect(slug).toHaveValue('road map');
+  expect(calls[0]).toMatchObject({ ref: { type: 'ref/resource', uri: template }, argument: { name: 'slug', value: '' } });
+  await resources.getByRole('button', { name: 'Add resource' }).click();
+  await expect(page.getByRole('list', { name: 'Attachments' }).getByText('Project')).toBeVisible();
+
+  const prompts = await openMenuItem('Prompts');
+  await prompts.getByRole('button', { name: /Topic prompt/ }).click();
+  const topic = prompts.getByRole('combobox', { name: 'topic' });
+  const style = prompts.getByRole('combobox', { name: 'style' });
+  await expect(prompts.getByRole('option', { name: 'Alpine' })).toBeVisible();
+  await expect(topic).toHaveValue('');
+  await expect.poll(() => calls.filter(call => call.argument.value === '').map(call => call.argument.name).sort()).toEqual(['slug', 'style', 'topic']);
+  try {
+    await topic.fill('old');
+    await expect.poll(() => calls.some(call => call.argument.value === 'old')).toBe(true);
+    const aborted = page.waitForEvent('requestfailed', request => request.url().endsWith('/mcp-suggestions-fixture') &&
+      request.postDataJSON()?.params?.argument?.value === 'old');
+    await topic.fill('spr');
+    await topic.fill('spring');
+    await aborted;
+    await expect(prompts.getByRole('option', { name: 'Spring trail' })).toBeVisible();
+    expect(calls.filter(call => call.argument.name === 'topic').map(call => call.argument.value)).toEqual(['', 'old', 'spring']);
+  } finally { releaseOld.resolve(); }
+  await finishedOld.promise;
+  await expect(prompts.getByRole('option', { name: 'Outdated' })).toHaveCount(0);
+  await topic.press('ArrowDown');
+  await topic.press('Enter');
+  await expect(topic).toHaveValue('Spring trail');
+  await style.focus();
+  await expect(prompts.getByRole('option', { name: 'Scenic' })).toBeVisible();
+  expect(calls.at(-1)).toMatchObject({ ref: { type: 'ref/prompt', name: 'make-prompt' }, argument: { name: 'style', value: '' },
+    context: { arguments: { topic: 'Spring trail' } } });
+  const failed = page.waitForResponse(response => response.url().endsWith('/mcp-suggestions-fixture') &&
+    response.request().postDataJSON()?.params?.argument?.value === 'my own style');
+  await style.fill('my own style');
+  await failed;
+  await expect(style).toHaveValue('my own style');
+  await expect(prompts.getByRole('listbox')).toHaveCount(0);
+  await prompts.getByRole('button', { name: 'Run prompt' }).click();
+  await expect(page.getByText('Prompt complete', { exact: true })).toBeVisible();
 });
 
 test('Gateway chat settings share context and replay catalog and approved text-only history tools once', async ({ page }) => {

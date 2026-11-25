@@ -17,7 +17,7 @@ The chat client supports:
 - **Realtime agents** with bidirectional audio, interruptions, streaming playback and tool execution
 - **Decisions** with intelligent multi-model and agent routing based on user input and configurable decision models
 - **Agent Plugins** combining Skills, MCP servers and supporting resources
-- **MCP** tools, resources, prompts, elicitation and tasks
+- **MCP** tools, resources, prompts, elicitation and tasks. Prompt and resource template arguments stay free-form and offer suggestions when the server advertises completions.
 - **Tool execution** with parallel tool calls, human-in-the-loop approvals and execution activity
 - **Server-side tools** with provider-native web search, code execution, MCP and other supported capabilities
 - **Skills** with reusable instructions and supporting files
