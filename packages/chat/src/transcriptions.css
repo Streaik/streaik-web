@@ -6,6 +6,7 @@
 .transcription-queue li { min-width: 0; display: flex; justify-content: space-between; align-items: center; gap: .5rem; overflow-wrap: anywhere; }
 .transcription-queue small { display: block; color: var(--muted); }
 .transcription-queue button { border: 0; background: transparent; color: inherit; cursor: pointer; }
+.transcription-search { box-sizing: border-box; margin-block: .75rem; color: inherit; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
 .transcription-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: 1rem; }
 .transcription-card { display: grid; align-content: start; gap: .7rem; min-width: 0; padding: 1rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 .transcription-card-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: .5rem; }

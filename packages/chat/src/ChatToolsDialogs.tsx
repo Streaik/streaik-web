@@ -60,7 +60,7 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hasHistor
     </div>
     <div id={`${id}-tools-panel`} role="tabpanel" aria-labelledby={`${id}-tools-tab`} hidden={tab !== 'tools'}>
       <section className="chat-tool-card">
-        <h3>{t('Local tools')}</h3>
+        <h3>{t('Local')}</h3>
         {!gateway && <p>{t('Local plugins are available only on Gateway routes.')}</p>}
         <div className="chat-tool-switches">
           {localPlugins.map(plugin => <label key={plugin.id}>
@@ -76,7 +76,7 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hasHistor
     </div>
     <div id={`${id}-skills-panel`} className="chat-skill-cards" role="tabpanel" aria-labelledby={`${id}-skills-tab`} hidden={tab !== 'skills'}>
       <section className="chat-tool-card" aria-labelledby={`${id}-local-skills`}>
-        <h3 id={`${id}-local-skills`}>{t('Local skills')}</h3>
+        <h3 id={`${id}-local-skills`}>{t('Local')}</h3>
         {!gateway && <p>{t('Skills are available only on Gateway routes.')}</p>}
         {!localSkills.ready ? <p role="status">{t('Loading local skills…')}</p> : !localSkills.skills.length
           ? <p>{t('No local skills yet.')}</p> : <div className="chat-tool-switches">
@@ -92,7 +92,7 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hasHistor
         {localSkills.notice && <p role="status">{t(localSkills.notice)}</p>}
       </section>
       <section className="chat-tool-card" aria-labelledby={`${id}-remote-skills`}>
-        <h3 id={`${id}-remote-skills`}>{t('Central skills')}</h3>
+        <h3 id={`${id}-remote-skills`}>{t('Central')}</h3>
         {gateway && !online && <p>{t('Connect to a gateway to browse provider skills.')}</p>}
         {gateway && online && <>
           {skills.length > 0 && <div className="chat-tool-switches">

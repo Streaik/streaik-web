@@ -2,7 +2,7 @@ import * as Menu from '@radix-ui/react-dropdown-menu';
 import { GatewayError, isLiveTranscriptionModel, supportsFileTranscription, transcriptionFileAccept, transcriptionMediaType, transcriptionUploadLimit, usesTranscriptionWebSocket } from '@streaik/gateway';
 import type { CatalogModel, Gateway, GatewayTranscriptionEndpoint, Transcript } from '@streaik/gateway';
 import { Button, Tooltip } from '@streaik/themes';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChatIcon } from './ChatIcon';
 import { ModelPicker } from './ModelPicker';
@@ -13,6 +13,7 @@ import { maxSplittableFileBytes, mergeTranscriptionChunks, splitTranscription } 
 import { deleteTranscript, listTranscripts, saveTranscript } from './transcriptionLibrary';
 import type { SavedTranscript } from './transcriptionLibrary';
 import { useTranscriptionPreferences } from './transcriptionPreferences';
+import { useCatalogSearch } from './useCatalogSearch';
 import './images.css';
 import './transcriptions.css';
 
@@ -25,6 +26,7 @@ const preferredModels = ['openai/gpt-transcribe', 'openai/gpt-4o-transcribe', 'o
 const errorMessage = (error: unknown, fallback: string) => error instanceof GatewayError ? error.message : fallback;
 const wholeSeconds = browserNumberFormat({ maximumFractionDigits: 0 });
 const segmentSeconds = browserNumberFormat({ minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const transcriptSearchDocument = ({ name, transcript }: SavedTranscript) => ({ title: name, text: transcript.text });
 
 function defaultFileModel(models: readonly CatalogModel[]) {
   return preferredModels.map(id => models.find(model => model.id === id)).find(Boolean)
@@ -98,6 +100,9 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
   const [tab, setTab] = useState<Tab>('finished');
   const [queue, setQueue] = useState<Item[]>([]);
   const [items, setItems] = useState<SavedTranscript[]>([]);
+  const [query, setQuery] = useState('');
+  const sortedItems = useMemo(() => [...items].sort((a, b) => b.timestamp - a.timestamp), [items]);
+  const { results, message: searchMessage } = useCatalogSearch(sortedItems, query, transcriptSearchDocument);
   const [preview, setPreview] = useState<Preview>();
   const [phase, setPhase] = useState<Phase>();
   const [dragging, setDragging] = useState(false);
@@ -371,10 +376,12 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
             }}>{t(key === 'finished' ? 'Finished' : 'Streaming')}</button>)}
         </div>
         <section role="tabpanel" id={`${id}-finished-panel`} aria-labelledby={`${id}-finished`} hidden={tab !== 'finished'}>
-          {items.length ? <div className="transcription-grid">{[...items].sort((a, b) => b.timestamp - a.timestamp).map(item =>
+          <input type="search" className="ui-input transcription-search" aria-label={t('Search transcriptions')}
+            placeholder={t('Search transcriptions…')} value={query} onChange={event => setQuery(event.currentTarget.value)} />
+          {results.length ? <div className="transcription-grid">{results.map(item =>
             <TranscriptCard key={item.id} item={item} menuContainer={menuContainer} remove={() => void remove(item.id)}
               onError={() => setError('Could not copy the transcript.')} />)}</div>
-            : <p>{t('No finished transcriptions yet.')}</p>}
+            : <p role="status">{t(searchMessage ?? (items.length ? 'No matching transcriptions.' : 'No finished transcriptions yet.'))}</p>}
         </section>
         <section role="tabpanel" id={`${id}-streaming-panel`} aria-labelledby={`${id}-streaming`} hidden={tab !== 'streaming'}>
           <article className="transcription-card transcription-preview" aria-label={t('Streaming transcript')}>
