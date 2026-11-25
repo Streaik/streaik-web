@@ -994,6 +994,148 @@ test('MCP Tool output preferences filter approved requests and replay without ch
   expect(toolCalls).toBe(1);
 });
 
+test('Model Context settings localize, persist and leave URL and extensions off', async ({ page }) => {
+  await page.goto('/');
+  const settings = await showSettings(page, 'Model Context');
+  const area = settings.getByRole('tabpanel', { name: 'Model Context', exact: true });
+  const client = area.getByRole('tabpanel', { name: 'Client', exact: true });
+  const form = client.getByRole('switch', { name: 'Form', exact: true });
+  const reset = client.getByRole('switch', { name: 'Reset timeout on progress' });
+  const slider = client.getByRole('slider');
+  await expect(form).toBeChecked();
+  await expect(reset).toBeChecked();
+  await expect(slider).toHaveAccessibleName('Tool timeout (5 minutes)');
+  const url = client.getByRole('switch', { name: 'URL', exact: true });
+  await expect(url).toBeDisabled();
+  await expect(url).not.toBeChecked();
+  await form.uncheck();
+  await reset.uncheck();
+  await slider.press('End');
+  await expect(slider).toHaveValue('60');
+  await area.getByRole('tab', { name: 'Client' }).press('ArrowRight');
+  const extensions = area.getByRole('tabpanel', { name: 'Extensions' });
+  await expect(extensions.getByRole('switch')).toHaveCount(2);
+  for (const name of ['Apps', 'Skills']) {
+    const extension = extensions.getByRole('switch', { name, exact: true });
+    await expect(extension).toBeDisabled();
+    await expect(extension).not.toBeChecked();
+  }
+  await expect(area.getByRole('tab', { name: 'Catalog' })).toHaveCount(0);
+
+  await closeSettings(page);
+  await page.reload();
+  await showSettings(page, 'Model Context');
+  await expect(form).not.toBeChecked();
+  await expect(reset).not.toBeChecked();
+  await expect(slider).toHaveValue('60');
+  await settings.getByRole('tab', { name: 'General', exact: true }).click();
+  await settings.getByLabel('Language', { exact: true }).selectOption('nl');
+  const dutch = page.getByRole('dialog', { name: 'Instellingen', exact: true });
+  await dutch.getByRole('tab', { name: 'Model Context', exact: true }).click();
+  await expect(dutch.getByRole('heading', { name: 'Uitvragen' })).toBeVisible();
+  await expect(dutch.getByRole('switch', { name: 'Formulier' })).not.toBeChecked();
+  await expect(dutch.getByRole('slider')).toHaveAccessibleName('Tool timeout (60 minuten)');
+  await expect(dutch.getByRole('tab', { name: 'Extensies' })).toBeVisible();
+  await dutch.getByRole('tab', { name: 'Algemeen', exact: true }).click();
+  await dutch.getByLabel('Taal', { exact: true }).selectOption('es');
+  const spanish = page.getByRole('dialog', { name: 'Configuración', exact: true });
+  await spanish.getByRole('tab', { name: 'Contexto del modelo', exact: true }).click();
+  await expect(spanish.getByRole('tabpanel', { name: 'Cliente', exact: true })).toBeVisible();
+  await expect(spanish.getByRole('switch', { name: 'Formulario' })).not.toBeChecked();
+  await expect(spanish.getByRole('slider')).toHaveAccessibleName('Tiempo de espera de herramienta (60 minutos)');
+});
+
+test('MCP elicitation queues forms and resumes the tool before its separate result review', async ({ page }) => {
+  await mockModels(page);
+  let toolCalls = 0;
+  let chatCalls = 0;
+  const input = (message: string, properties = {}) => ({ method: 'elicitation/create', params: { mode: 'form', message,
+    requestedSchema: { type: 'object', properties, required: Object.keys(properties) } } });
+  await page.route('**/mcp-elicitation-fixture', route => {
+    const { id, method, params } = route.request().postDataJSON();
+    const reply = (result: unknown) => route.fulfill({ json: { jsonrpc: '2.0', id, result } });
+    if (method === 'server/discover') return reply({ supportedVersions: ['2026-07-28'], capabilities: { tools: {} } });
+    if (method === 'tools/list') return reply({ resultType: 'complete', ttlMs: 0, cacheScope: 'private',
+      tools: [{ name: 'elicit', inputSchema: { type: 'object' } }] });
+    expect(method).toBe('tools/call');
+    expect(params._meta['io.modelcontextprotocol/clientCapabilities'].elicitation).toEqual({ form: {} });
+    expect(params._meta.progressToken).toBeDefined();
+    expect(route.request().headers()['mcp-session-id']).toBeUndefined();
+    if (++toolCalls === 1) return reply({ resultType: 'input_required', requestState: 'opaque', inputRequests: {
+      address: input('First request', { email: { type: 'string', title: 'Email address', format: 'email', description: 'Your contact address' },
+        number: { type: 'integer', title: 'Quantity', default: 0 }, colors: { type: 'array', title: 'Colors', default: ['b'],
+          items: { anyOf: [{ const: 'b', title: 'Blue' }, { const: 'r', title: 'Red' }] } } }),
+      second: input('Second request'), third: input('Third request'),
+    } });
+    expect(params.requestState).toBe('opaque');
+    expect(params.inputResponses).toEqual({ address: { action: 'accept', content: { email: 'a@example.test', number: 0, colors: ['b', 'r'] } },
+      second: { action: 'decline' }, third: { action: 'cancel' } });
+    return reply({ resultType: 'complete', content: [{ type: 'text', text: 'Elicited tool result' }] });
+  });
+  await page.route('**/gateway/api/chat', route => {
+    const headers = { 'x-vercel-ai-ui-message-stream': 'v1', 'content-type': 'text/event-stream' };
+    const body = route.request().postDataJSON();
+    expect(JSON.stringify(body)).not.toContain('a@example.test');
+    if (++chatCalls > 1) return route.fulfill({ headers, body: sse('Elicitation flow complete', 2).replace(/^data: [^\n]+\n\n/, '') });
+    expect(body.tools).toHaveLength(1);
+    const frames = [
+      { type: 'start', messageId: 'elicit-fixture-answer' }, { type: 'start-step' },
+      { type: 'tool-input-available', toolName: body.tools[0].name, toolCallId: 'elicit-fixture', input: {}, dynamic: true, providerExecuted: false },
+      { type: 'tool-approval-request', toolCallId: 'elicit-fixture', approvalId: 'elicit-review', signature: 'fixture-signature' },
+      { type: 'finish-step' }, { type: 'finish', finishReason: 'tool-calls' },
+    ];
+    return route.fulfill({ headers, body: frames.map(frame => `data: ${JSON.stringify(frame)}\n\n`).join('') + 'data: [DONE]\n\n' });
+  });
+
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await expectChatModel(page);
+  await page.getByRole('button', { name: 'Add to message', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Model Context', exact: true }).click();
+  const context = page.getByRole('dialog', { name: 'Model Context', exact: true });
+  await context.getByRole('tab', { name: 'Installed', exact: true }).click();
+  await context.getByRole('button', { name: 'Add by URL' }).click();
+  const editor = page.getByRole('dialog', { name: 'Add MCP server' });
+  await editor.getByLabel('Server name').fill('Elicitation fixture');
+  await editor.getByLabel('Server URL').fill(new URL('/mcp-elicitation-fixture', page.url()).href);
+  await editor.getByRole('button', { name: 'Save server' }).click();
+  await context.getByRole('switch', { name: 'Elicitation fixture' }).check();
+  await expect(context.getByRole('status')).toHaveText('1 tools available');
+  await context.getByRole('button', { name: 'Close', exact: true }).click();
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('Run the elicitation fixture'); await composer.press('Enter');
+
+  const dialog = page.getByRole('dialog', { name: 'Elicitation', exact: true });
+  await expect(dialog.getByText('First request', { exact: true })).toBeVisible();
+  await expect(dialog.getByText(/Requested by Elicitation fixture/)).toBeVisible();
+  await expect(dialog.getByText('Second request', { exact: true })).toHaveCount(0);
+  const accept = dialog.getByRole('button', { name: 'Accept' });
+  await accept.click();
+  await expect(dialog.getByRole('alert')).toHaveText('This field is required.');
+  const email = dialog.getByRole('textbox', { name: /Email address/ });
+  await expect(email).toHaveAccessibleDescription('Your contact address This field is required.');
+  await email.fill('not-an-email');
+  await expect(dialog.getByRole('alert')).toHaveText('Enter a valid value.');
+  await email.fill('a@example.test');
+  await expect(dialog.getByRole('textbox', { name: /Quantity/ })).toHaveValue('0');
+  await expect(dialog.getByRole('checkbox', { name: 'Blue' })).toBeChecked();
+  await dialog.getByRole('checkbox', { name: 'Red' }).check();
+  await accept.click();
+  await expect(dialog.getByText('Second request', { exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Decline' }).click();
+  await expect(dialog.getByText('Third request', { exact: true })).toBeVisible();
+  expect(toolCalls).toBe(1);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  const review = page.getByRole('dialog', { name: 'Review tool result' });
+  await expect(review.getByRole('tabpanel', { name: 'Output', exact: true })).toContainText('Elicited tool result');
+  expect(toolCalls).toBe(2);
+  expect(chatCalls).toBe(1);
+  await review.getByRole('button', { name: 'Approve and share', exact: true }).click();
+  await expect(page.getByText('Elicitation flow complete', { exact: true })).toBeVisible();
+  expect(chatCalls).toBe(2);
+});
+
 for (const approved of [true, false]) test(`MCP composer discovers resources and prompts and ${approved ? 'shares' : 'withholds'} read_resource results`, async ({ page }) => {
   await mockModels(page);
   const serverName = 'Composer fixture';

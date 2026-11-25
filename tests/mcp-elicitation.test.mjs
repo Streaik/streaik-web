@@ -54,6 +54,7 @@ function remote(t, action) {
     if (rpc.method === 'notifications/cancelled') return new Response(null, { status: 202 });
     const result = rpc.method === 'server/discover' ? { supportedVersions: ['2026-07-28'], capabilities: { tools: {}, prompts: {}, resources: {} } }
       : await action(rpc, options);
+    if (result instanceof Response) return result;
     return Response.json({ jsonrpc: '2.0', id: rpc.id, result });
   });
 }
@@ -126,4 +127,52 @@ test('aborting the whole MCP operation dismisses outstanding form input without 
     return wait;
   }), { name: 'AbortError' });
   assert.equal(calls, 1);
+});
+
+test('tool progress can extend the configured timeout but not the hard deadline', async (t) => {
+  for (const scenario of ['complete after progress', 'timeout without reset', 'hard deadline']) await t.test(scenario, async sub => {
+    sub.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+    sub.mock.method(AbortSignal, 'timeout', (delay) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new DOMException('Timed out', 'TimeoutError')), delay);
+      return controller.signal;
+    });
+    const resetTimeoutOnProgress = scenario !== 'timeout without reset';
+    const streamOpened = Promise.withResolvers();
+    remote(sub, ({ id, method, params }, { signal }) => {
+      assert.equal(method, 'tools/call');
+      assert.equal('progressToken' in params._meta, resetTimeoutOnProgress);
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({ start(controller) {
+        signal.addEventListener('abort', () => controller.error(signal.reason), { once: true });
+        const frame = value => controller.enqueue(encoder.encode(`data: ${JSON.stringify({ jsonrpc: '2.0', ...value })}\n\n`));
+        streamOpened.resolve({ progress: value => frame({ method: 'notifications/progress', params: { progressToken: params._meta.progressToken, progress: value } }),
+          complete: () => { frame({ id, result: { resultType: 'complete', content: [] } }); controller.close(); } });
+      } });
+      return new Response(stream, { headers: { 'content-type': 'text/event-stream' } });
+    });
+    const outcome = callMcpTool(tool, {}, signal(), { ...defaultMcpPreferences, toolTimeoutMinutes: 1, resetTimeoutOnProgress })
+      .then(value => ({ value }), error => ({ error }));
+    const stream = await streamOpened.promise;
+    const flush = () => new Promise(resolve => setImmediate(resolve));
+    await flush();
+    if (!resetTimeoutOnProgress) {
+      sub.mock.timers.tick(60_000);
+      assert.match((await outcome).error.message, /timed out/i);
+    } else {
+      sub.mock.timers.tick(40_000);
+      stream.progress(1);
+      await flush();
+      sub.mock.timers.tick(40_000);
+      if (scenario === 'complete after progress') {
+        stream.complete();
+        assert.deepEqual((await outcome).value.output, { content: [] });
+      } else {
+        stream.progress(2);
+        await flush();
+        sub.mock.timers.tick(40_000);
+        assert.match((await outcome).error.message, /timed out/i);
+      }
+    }
+  });
 });
