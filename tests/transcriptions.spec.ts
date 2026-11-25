@@ -173,6 +173,49 @@ test('all file routes, drag and drop, interrupted SSE, and scoped finished cards
   await expect(cards).toHaveCount(2);
 });
 
+test('Finished searches transcript text and filenames, including when new results arrive', async ({ page }) => {
+  const texts = ['The café migration plan.', 'We discussed the budget.'];
+  let uploaded = 0;
+  await page.route('**/gateway/api/transcriptions', route => route.fulfill({ json: { text: texts[uploaded++] } }));
+  await openTranscriptions(page);
+  const composer = page.getByRole('form', { name: 'Transcription composer' });
+  const send = composer.getByRole('button', { name: 'Send', exact: true });
+  const upload = async (name: string) => {
+    await composer.locator('input[type=file]').setInputFiles({ ...file, name });
+    await send.click();
+    await expect(send).toBeVisible();
+  };
+  const finished = page.getByRole('tabpanel', { name: 'Finished', exact: true });
+  const search = finished.getByRole('searchbox', { name: 'Search transcriptions', exact: true });
+  const titles = finished.getByRole('article').getByRole('heading');
+  await expect(search).toHaveAttribute('placeholder', 'Search transcriptions…');
+  await expect(finished.getByRole('status')).toHaveText('No finished transcriptions yet.');
+
+  await upload('interview.wav');
+  await expect(titles).toHaveText(['interview.wav']);
+  await search.fill('budget');
+  await expect(finished.getByRole('status')).toHaveText('No matching transcriptions.');
+  await expect(titles).toHaveCount(0);
+  await upload('roadmap.wav');
+  await expect(titles).toHaveText(['roadmap.wav']);
+  await search.clear();
+  await expect(titles).toHaveText(['roadmap.wav', 'interview.wav']);
+
+  await page.reload();
+  await page.getByRole('button', { name: 'Transcriptions', exact: true }).click();
+  await expect(titles).toHaveCount(2);
+  await search.fill('CAFÉ migr');
+  await expect(titles).toHaveText(['interview.wav']);
+  await search.fill('roadmap');
+  await expect(titles).toHaveText(['roadmap.wav']);
+  await page.getByRole('tab', { name: 'Streaming', exact: true }).click();
+  await expect(page.getByRole('searchbox')).toHaveCount(0);
+  await expect(preview(page)).toBeVisible();
+  await page.getByRole('tab', { name: 'Finished', exact: true }).click();
+  await expect(search).toHaveValue('roadmap');
+  await expect(titles).toHaveText(['roadmap.wav']);
+});
+
 test.describe('Dutch regional settings with English interface', () => {
   test.use({ locale: 'nl-NL' });
 

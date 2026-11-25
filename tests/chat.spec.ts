@@ -411,7 +411,7 @@ test('chat settings list and remember remote skills without downloading until th
   await expectChatModel(page);
   expect(cursors).toEqual([]);
   const settings = await showChatSkills(page);
-  const remote = settings.getByRole('region', { name: 'Central skills', exact: true });
+  const remote = settings.getByRole('region', { name: 'Central', exact: true });
   await remote.getByRole('button', { name: 'Retry', exact: true }).click();
   const toggle = remote.getByRole('switch', { name, exact: true });
   await expect(toggle).not.toBeChecked();
@@ -452,7 +452,7 @@ test('chat settings list and remember remote skills without downloading until th
 
   await showChatSkills(page);
   await expect(toggle).toBeChecked();
-  await expect(settings.getByRole('region', { name: 'Local skills' }).getByRole('switch')).toHaveCount(0);
+  await expect(settings.getByRole('region', { name: 'Local', exact: true }).getByRole('switch')).toHaveCount(0);
   await toggle.uncheck();
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
   await page.getByRole('button', { name: 'View context', exact: true }).click();
@@ -553,7 +553,7 @@ test('a pinned remote skill can be downloaded, saved locally, and uploaded using
   expect(uploads).toBe(1);
   await page.getByRole('button', { name: 'New chat', exact: true }).click();
   const settings = await showChatSkills(page);
-  await expect(settings.getByRole('region', { name: 'Local skills' }).getByRole('switch', { name: 'meeting-brief', exact: true })).not.toBeChecked();
+  await expect(settings.getByRole('region', { name: 'Local', exact: true }).getByRole('switch', { name: 'meeting-brief', exact: true })).not.toBeChecked();
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
   await page.getByRole('button', { name: 'Skills', exact: true }).click();
   await central.click();
