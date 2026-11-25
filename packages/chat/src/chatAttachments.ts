@@ -45,7 +45,7 @@ export function isTextAttachment(mediaType: string) {
   return mediaType.startsWith('text/') || /^application\/(?:jsonl?|x-ndjson|xml|y(?:a)?ml|[\w.-]+\+(?:json|xml))$/.test(mediaType);
 }
 
-function asDataUrl(file: File, mediaType: string) {
+export function asDataUrl(file: Blob, mediaType: string) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));

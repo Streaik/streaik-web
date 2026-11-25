@@ -1437,8 +1437,10 @@ test('Gateway chat settings share context and replay catalog and approved text-o
   const privateText = 'An archived juniper garden';
   const catalogTool = 'local_ai_models_search';
   const historyTool = 'local_conversations_search_text';
+  const betaHeaders: (string | null)[] = [];
   await page.route('**/gateway/api/chat', async route => {
     requests.push(route.request().postDataJSON());
+    betaHeaders.push(await route.request().headerValue('openai-beta'));
     const stream = requests.length === 2 ? [
       { type: 'start', messageId: 'tool-batch' }, { type: 'start-step' },
       { type: 'tool-input-available', toolCallId: 'catalog-call', toolName: catalogTool, input: { query: 'router', limit: 5 }, dynamic: true },
@@ -1492,6 +1494,22 @@ test('Gateway chat settings share context and replay catalog and approved text-o
   await ai.check(); await history.check();
   await settings.getByRole('tab', { name: 'OpenAI', exact: true }).click();
   await settings.getByLabel('Service tier', { exact: true }).selectOption('flex');
+  await settings.getByRole('switch', { name: 'Configure reasoning', exact: true }).check();
+  await settings.getByLabel('Reasoning effort', { exact: true }).selectOption('xhigh');
+  await settings.getByLabel('Reasoning context', { exact: true }).selectOption('all_turns');
+  await settings.getByRole('button', { name: 'Add compaction rule', exact: true }).click();
+  await settings.getByRole('spinbutton', { name: 'Compaction threshold', exact: true }).fill('4096');
+  await settings.getByRole('switch', { name: 'Enable multi-agent responses', exact: true }).check();
+  await settings.getByRole('spinbutton', { name: 'Maximum concurrent subagents', exact: true }).fill('4');
+  await settings.getByRole('switch', { name: 'Web search', exact: true }).check();
+  await settings.getByLabel('Allowed web domains', { exact: true }).fill('example.org\nexample.net');
+  await settings.getByRole('switch', { name: 'Include web sources', exact: true }).check();
+  await settings.getByRole('switch', { name: 'Shell', exact: true }).check();
+  await settings.getByRole('button', { name: 'Add skill reference', exact: true }).click();
+  await settings.getByLabel('OpenAI skill ID', { exact: true }).fill('skill_reference_fixture');
+  await settings.getByRole('switch', { name: 'Apply Patch', exact: true }).check();
+  await settings.getByRole('switch', { name: 'Configure managed agent', exact: true }).check();
+  await settings.getByLabel('Session agent model', { exact: true }).fill('session-only');
   await settings.getByRole('button', { name: 'Save', exact: true }).click();
   const badges = page.getByRole('list', { name: 'Active chat context' });
   await expect(badges.getByText('Artificial Intelligence', { exact: true })).toBeVisible();
@@ -1537,7 +1555,15 @@ test('Gateway chat settings share context and replay catalog and approved text-o
   await review.getByRole('button', { name: 'Approve and share' }).click();
   await expect(page.getByText('Chat reply 3', { exact: true })).toBeVisible();
   expect(requests).toHaveLength(3);
-  for (const request of requests.slice(1)) expect(request.providerMetadata).toEqual({ openai: { service_tier: 'flex' } });
+  expect(betaHeaders).toEqual([null, 'responses_multi_agent=v1', 'responses_multi_agent=v1']);
+  for (const request of requests.slice(1)) expect(request.providerMetadata).toEqual({ openai: {
+    service_tier: 'flex', reasoning: { effort: 'xhigh', context: 'all_turns', summary: 'auto', mode: 'standard' },
+    context_management: [{ type: 'compaction', compact_threshold: 4096 }], multi_agent: { enabled: true, max_concurrent_subagents: 4 },
+    include: ['web_search_call.action.sources'], tools: [
+      { type: 'web_search', search_context_size: 'medium', filters: { allowed_domains: ['example.org', 'example.net'] } },
+      { type: 'shell', environment: { type: 'container_auto', skills: [{ type: 'skill_reference', skill_id: 'skill_reference_fixture' }] } },
+    ],
+  } });
   expect(requests[2].messages.at(-1)?.parts).toEqual(expect.arrayContaining([
     expect.objectContaining({ toolCallId: 'catalog-call', approval: { id: 'catalog-review', signature: 'fixture-catalog-signature', approved: true },
       output: { content: [], structuredContent: { data: [expect.objectContaining({ id: 'imagerouter/a/b' })] } } }),

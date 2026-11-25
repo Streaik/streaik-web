@@ -46,7 +46,14 @@ function containerOptions(tool: NativeOptions, persist: boolean): NativeOptions 
 export function persistOpenAIOptions(value: NativeOptions): NativeOptions {
   return Array.isArray(value.tools) ? { ...value, tools: list(value.tools).map(item => {
     const tool = object(item);
-    return tool.type === 'shell' || tool.type === 'code_interpreter' ? containerOptions(tool, true) : item;
+    if (tool.type === 'code_interpreter') return containerOptions(tool, true);
+    if (tool.type !== 'shell') return item;
+    const safe = containerOptions(tool, true);
+    const environment = object(safe.environment);
+    if (!Array.isArray(environment.skills)) return safe;
+    const { skills: _old, ...rest } = environment;
+    const skills = list(environment.skills).filter(skill => object(skill).type !== 'inline');
+    return { ...safe, environment: { ...rest, ...(skills.length && { skills }) } };
   }) } : value;
 }
 

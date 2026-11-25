@@ -207,10 +207,14 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
   const chatUrl = root && new URL('api/chat', root).href;
   const videosUrl = root && new URL('api/videos', root).href;
 
-  async function request(destination: string | undefined, auth: CredentialRequest, init: RequestInit = {}) {
+  async function request(destination: string | undefined, auth: CredentialRequest, init: RequestInit = {}, protocolHeaders?: HeadersInit) {
     if (!destination) throw new GatewayError('No gateway is configured. Choose Route → Direct to chat with a provider.');
     init.signal?.throwIfAborted();
-    return requestHttp(destination, await credentials(auth), init, fetcher);
+    const selected = new Headers(await credentials(auth));
+    if (protocolHeaders) new Headers(protocolHeaders).forEach((value, name) => {
+      if (!selected.has(name)) selected.set(name, value);
+    });
+    return requestHttp(destination, selected, init, fetcher);
   }
 
   async function listModelCatalog(signal?: AbortSignal): Promise<CatalogModel[]> {
@@ -383,7 +387,9 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
           if (!provider) {
             throw new GatewayError('Choose a model that supports API Chat.');
           }
-          return expectEventStream(await request(chatUrl, { kind: 'chat', provider }, init));
+          // An explicit protocol opt-in passes through this transport, never arbitrary SDK or body headers.
+          const beta = new Headers(init.headers).get('openai-beta');
+          return expectEventStream(await request(chatUrl, { kind: 'chat', provider }, init, beta ? { 'OpenAI-Beta': beta } : undefined));
         },
       });
     },

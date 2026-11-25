@@ -1,5 +1,8 @@
 import { Button } from '@streaik/themes';
+import { useState } from 'react';
+import { asDataUrl } from '../../chatAttachments';
 import { useAppTranslation } from '../../i18n';
+import { importSkillZip } from '../../skillBundles';
 import { Card, Choice, ListField, Text, Toggle, setOption } from '../fields';
 import type { OptionsEditor } from '../fields';
 import type { NativeOptions, NativeValue } from '../settings';
@@ -37,8 +40,20 @@ function ContainerOptions({ value, onChange }: OptionsEditor) {
 
 function SkillReferences({ value, onChange }: OptionsEditor) {
   const { t } = useAppTranslation();
+  const [inline, setInline] = useState<NativeOptions>();
+  const [reading, setReading] = useState(false);
+  const [invalid, setInvalid] = useState(false);
   const skills = list(value.skills);
   const save = (next: readonly NativeValue[]) => onChange(setOption(value, 'skills', next.length ? next : undefined));
+  async function read(file: File) {
+    setReading(true); setInvalid(false); setInline(undefined);
+    try {
+      const { metadata: { name, description } } = await importSkillZip(file);
+      const url = await asDataUrl(file, 'application/zip');
+      setInline({ type: 'inline', name, description, source: { type: 'base64', media_type: 'application/zip', data: url.split(',')[1] } });
+    } catch { setInvalid(true); }
+    finally { setReading(false); }
+  }
   return <fieldset><legend>{t('Shell skills')}</legend>
     <p>{t('Attach uploaded OpenAI skills by ID. Leave the version empty to use the provider default.')}</p>
     {skills.map((item, index) => {
@@ -53,6 +68,19 @@ function SkillReferences({ value, onChange }: OptionsEditor) {
       </fieldset>;
     })}
     <div><Button variant="subtle" onClick={() => save([...skills, { type: 'skill_reference' }])}>{t('Add skill reference')}</Button></div>
+    <label>{t('Inline Shell skill ZIP')}<input type="file" accept=".zip,application/zip" disabled={reading}
+      onChange={event => {
+        const file = event.currentTarget.files?.item(0);
+        event.currentTarget.value = '';
+        if (file) void read(file);
+      }} /></label>
+    <p>{t('An attached ZIP is sent to OpenAI with Shell requests during this session. The archive is not saved with preferences.')}</p>
+    {invalid && <p role="status">{t('Choose a valid skill ZIP with a SKILL.md manifest.')}</p>}
+    {inline && <div>
+      <Button variant="subtle" onClick={() => { save([...skills, inline]); setInline(undefined); }}>
+        {t('Attach inline skill {{name}}', { name: inline.name })}
+      </Button>
+    </div>}
   </fieldset>;
 }
 

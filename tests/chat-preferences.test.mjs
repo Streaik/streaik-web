@@ -5,6 +5,7 @@ import { defaultMcpPreferences } from '../packages/chat/src/mcpPreferences.ts';
 import { conversationGatewayCost, latestContextUsage } from '../packages/chat/src/messageMetadata.ts';
 import { filterToolOutputContent } from '../packages/chat/src/toolOutputContent.ts';
 import { chatProviderRequest } from '../packages/chat/src/providerChat/settings.ts';
+import { updateTypedItem } from '../packages/chat/src/providerChat/openai/options.ts';
 
 test('old profiles get Chat defaults; only explicit, valid booleans override each preference', () => {
   const defaults = { text: true, links: true, images: false, audio: false, video: false, documents: false };
@@ -51,6 +52,34 @@ test('native chat settings round-trip per profile and apply to the matching mode
   const { reasoning_effort, ...other } = cerebras;
   assert.deepEqual(chatProviderRequest(settings, 'cerebras/llama-3.1-8b')?.providerMetadata, { cerebras: other });
   assert.equal(chatProviderRequest(settings, 'groq/gpt-oss-120b'), undefined);
+});
+
+test('OpenAI response options preserve native tool order, isolate session settings and never persist secret values', (t) => {
+  const storage = new Map();
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  t.after(() => { if (original) Object.defineProperty(globalThis, 'localStorage', original); else delete globalThis.localStorage; });
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value),
+  } });
+  const future = { type: 'future_tool', extension: { flags: [0, false, null] } };
+  const shell = { type: 'shell', environment: { type: 'container_auto', skills: [{ type: 'skill_reference', skill_id: 'skill_demo', version: '2' }],
+    network_policy: { type: 'allowlist', allowed_domains: ['example.org'], domain_secrets: [{ domain: 'example.org', name: 'TOKEN', value: 'session-only-secret' }] } } };
+  const tools = [future, shell, { type: 'web_search', search_context_size: 'medium' }, { type: 'apply_patch' }, { type: 'tool_search', execution: 'client' }];
+  const changed = updateTypedItem(tools, 'web_search', { search_context_size: 'high' });
+  assert.deepEqual(changed, [future, shell, { type: 'web_search', search_context_size: 'high' }, ...tools.slice(3)]);
+  const multi_agent = { enabled: true, max_concurrent_subagents: 4 };
+  const providerSettings = { openai: { tools: changed, agent: { model: 'agent-model' }, environment: { type: 'openai_hosted' }, multi_agent }, together: { reasoning_effort: 'high' } };
+  const requested = chatProviderRequest(providerSettings, 'openai/gpt-5');
+  assert.deepEqual(requested.providerMetadata.openai, { tools: changed.slice(0, 3), multi_agent });
+  assert.deepEqual(requested.headers, { 'OpenAI-Beta': 'responses_multi_agent=v1' });
+  assert.equal(chatProviderRequest(providerSettings, 'together/openai/gpt-oss-120b').headers, undefined);
+  saveChatPreferences('alpha', { ...defaultChatPreferences, providerSettings });
+  assert.ok([...storage.values()].every(value => !value.includes('session-only-secret')));
+  const restored = loadChatPreferences('alpha').providerSettings;
+  assert.deepEqual(restored.openai.agent, { model: 'agent-model' });
+  const storedSecret = restored.openai.tools[1].environment.network_policy.domain_secrets[0];
+  assert.deepEqual(storedSecret, { domain: 'example.org', name: 'TOKEN' });
+  assert.equal(chatProviderRequest(restored, 'openai/gpt-5').providerMetadata.openai.tools[1].environment.network_policy.domain_secrets, undefined);
 });
 
 const assistant = (metadata, parts = []) => ({ role: 'assistant', metadata, parts });
