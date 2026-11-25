@@ -117,7 +117,7 @@ test('localizes the MCP overview tabs and uses matching cards for registry and i
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(endpoint);
 });
 
-test('uses Dutch skills headings and single-word composer menu labels', async ({ page }) => {
+test('uses Dutch single-word chat settings headings and composer menu labels', async ({ page }) => {
   await page.goto('/');
   const addLabel = /^(Bijlagen toevoegen|Aan bericht toevoegen)$/;
   await page.getByRole('button', { name: addLabel }).click();
@@ -128,9 +128,20 @@ test('uses Dutch skills headings and single-word composer menu labels', async ({
 
   await page.getByRole('button', { name: 'Chatinstellingen', exact: true }).click();
   const settings = page.getByRole('dialog', { name: 'Chatinstellingen', exact: true });
+  await settings.getByRole('tab', { name: 'Tools', exact: true }).click();
+  await expect(settings.getByRole('tabpanel', { name: 'Tools', exact: true }).getByRole('heading', { level: 3 })).toHaveText('Lokaal');
   await settings.getByRole('tab', { name: 'Skills', exact: true }).click();
-  await expect(settings.getByRole('region', { name: 'Lokale skills', exact: true })).toBeVisible();
-  await expect(settings.getByRole('region', { name: 'Centrale skills', exact: true })).toBeVisible();
+  await expect(settings.getByRole('region', { name: 'Lokaal', exact: true })).toBeVisible();
+  await expect(settings.getByRole('region', { name: 'Centraal', exact: true })).toBeVisible();
+});
+
+test('localizes the transcription search field in Dutch', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Transcripties', exact: true }).click();
+  const finished = page.getByRole('tabpanel', { name: 'Voltooid', exact: true });
+  const search = finished.getByRole('searchbox', { name: 'Transcripties zoeken', exact: true });
+  await expect(search).toBeVisible();
+  await expect(search).toHaveAttribute('placeholder', 'Transcripties zoeken…');
 });
 
 test('translates the Dutch Skills overview and shows a simplified skill editor', async ({ page }) => {
