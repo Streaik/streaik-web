@@ -33,7 +33,7 @@ async function create(page: Page, name: string) {
 }
 
 test('agent tool configuration preserves portable fields and auto-attaches only after MCP installation', async ({ page }) => {
-  await mockTextAgentModels(page);
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: replyModel, name: 'Answer model', type: 'language' }] } }));
   let discoveries = 0;
   await page.route('**/mcp-agent-inventory', route => {
     const { id, method } = route.request().postDataJSON();
@@ -79,7 +79,8 @@ test('agent tool configuration preserves portable fields and auto-attaches only 
     mcpServers: { Inventory: { type: 'http', url, allowed_tools: ['lookup'], required: true, namespace: true, defer_loading: true } } });
 
   const roles = await settings(page);
-  await roles.getByRole('combobox', { name: 'Chat', exact: true }).selectOption({ label: 'Inventory helper' });
+  await roles.getByRole('combobox', { name: 'Chat', exact: true }).click();
+  await page.getByRole('option', { name: 'Inventory helper', exact: true }).click();
   await roles.getByRole('button', { name: 'Close', exact: true }).click();
   await page.getByRole('button', { name: 'New chat', exact: true }).click();
   const picker = page.getByRole('button', { name: 'Model', exact: true });
