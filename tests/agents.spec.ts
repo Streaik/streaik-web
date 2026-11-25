@@ -184,9 +184,13 @@ test('browser-only agent creation, search, deletion and assignments', async ({ p
   await editor.getByRole('button', { name: 'Save agent' }).click();
   await expect(editor).toBeHidden();
   const search = page.getByRole('searchbox', { name: 'Search agents' });
-  await search.fill('offline-tag');
+  await search.fill('TAG defin');
   await expect(card(page, 'My agent')).toBeVisible();
   await expect(card(page, welcome)).toHaveCount(0);
+  await search.fill('something helpful');
+  await expect(page.getByText('No matching agents.')).toBeVisible();
+  await search.clear();
+  await expect(card(page, welcome)).toBeVisible();
   await page.getByRole('button', { name: 'New chat', exact: true }).click();
   await expect(draft).toHaveValue('');
   const dialog = await settings(page);
@@ -216,10 +220,12 @@ test('browser-only agent creation, search, deletion and assignments', async ({ p
   await expect(editButton).toBeFocused();
   await expect(local).toContainText('offline-tag');
   await expect(local.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
+  await search.fill('offline-tag');
   await actions(page, 'My agent').click();
   await page.getByRole('menuitem', { name: 'Delete', exact: true }).click();
   await page.getByRole('dialog', { name: 'Delete agent' }).getByRole('button', { name: 'Delete agent', exact: true }).click();
   await expect(local).toHaveCount(0);
+  await expect(page.getByText('No matching agents.')).toBeVisible();
   await expect(search).toBeFocused();
   await settings(page);
   await expect(select).toHaveText('Unavailable agent');

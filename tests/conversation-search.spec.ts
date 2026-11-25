@@ -92,4 +92,15 @@ test('history search shows recent chats, opens keyboard results, and removes del
   await expect(status).toHaveText('No matches found.');
   await input.fill('Example 8');
   await expect(results.getByRole('button', { name: 'Example 8' })).toBeVisible();
+
+  await page.goto('/agents');
+  const agents = page.getByRole('searchbox', { name: 'Search agents' });
+  await agents.fill('WelcomeMessageAgent');
+  await expect(page.getByRole('article', { name: 'WelcomeMessageAgent' })).toBeVisible();
+  await agents.fill('Question 8');
+  await expect(page.getByText('No matching agents.')).toBeVisible();
+  await toggle.click();
+  await headerTrigger.click();
+  await input.fill('WelcomeMessageAgent');
+  await expect(status).toHaveText('No matches found.');
 });
