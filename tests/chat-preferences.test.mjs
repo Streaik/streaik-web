@@ -4,7 +4,7 @@ import { defaultChatPreferences, loadChatPreferences, normalizeChatPreferences, 
 import { defaultMcpPreferences } from '../packages/chat/src/mcpPreferences.ts';
 import { conversationGatewayCost, latestContextUsage } from '../packages/chat/src/messageMetadata.ts';
 import { filterToolOutputContent } from '../packages/chat/src/toolOutputContent.ts';
-import { chatProviderMetadata } from '../packages/chat/src/providerChat/settings.ts';
+import { chatProviderRequest } from '../packages/chat/src/providerChat/settings.ts';
 
 test('old profiles get Chat defaults; only explicit, valid booleans override each preference', () => {
   const defaults = { text: true, links: true, images: false, audio: false, video: false, documents: false };
@@ -47,10 +47,10 @@ test('native chat settings round-trip per profile and apply to the matching mode
   const settings = loadChatPreferences('alpha').providerSettings;
   assert.deepEqual(settings, { cerebras });
   assert.deepEqual(loadChatPreferences('beta').providerSettings, {});
-  assert.deepEqual(chatProviderMetadata(settings, 'cerebras/gpt-oss-120b'), { cerebras });
+  assert.deepEqual(chatProviderRequest(settings, 'cerebras/gpt-oss-120b')?.providerMetadata, { cerebras });
   const { reasoning_effort, ...other } = cerebras;
-  assert.deepEqual(chatProviderMetadata(settings, 'cerebras/llama-3.1-8b'), { cerebras: other });
-  assert.equal(chatProviderMetadata(settings, 'groq/gpt-oss-120b'), undefined);
+  assert.deepEqual(chatProviderRequest(settings, 'cerebras/llama-3.1-8b')?.providerMetadata, { cerebras: other });
+  assert.equal(chatProviderRequest(settings, 'groq/gpt-oss-120b'), undefined);
 });
 
 const assistant = (metadata, parts = []) => ({ role: 'assistant', metadata, parts });
