@@ -17,6 +17,10 @@ export function Card({ title, children }: { title: string; children: ReactNode }
   return <section className="chat-tool-card"><h3>{t(title)}</h3>{children}</section>;
 }
 
+export function FieldGrid({ children }: { children: ReactNode }) {
+  return <div className="chat-provider-field-grid">{children}</div>;
+}
+
 type Field = { label: string; value?: NativeValue; disabled?: boolean };
 const asText = (value?: NativeValue) => typeof value === 'string' ? value : '';
 

@@ -21,6 +21,8 @@ export function toggleInclude(value: NativeValue | undefined, key: string, enabl
   return enabled ? [...entries, key] : entries.length ? entries : undefined;
 }
 
+export const encryptedReasoningInclude = 'reasoning.encrypted_content';
+
 export const efforts = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 export const summaries = ['auto', 'concise', 'detailed'];
 export const tiers = ['auto', 'default', 'flex', 'scale', 'priority', 'fast', 'ultrafast'];
@@ -59,10 +61,15 @@ export function persistOpenAIOptions(value: NativeOptions): NativeOptions {
 
 export function openAIChatOptions(value: NativeOptions): NativeOptions {
   // Managed session options are native to the session endpoint, not the Responses endpoint.
-  const { agent: _agent, environment: _environment, tools: saved, ...response } = value;
+  const { agent: _agent, environment: _environment, includeEncryptedReasoning, include, tools: saved, ...response } = value;
+  // The opt-out is a local preference. Only the native include array goes to API Chat.
+  const entries = list(include);
+  const includes = includeEncryptedReasoning === false ? entries.filter(entry => entry !== encryptedReasoningInclude)
+    : !Array.isArray(include) ? undefined
+    : entries.includes(encryptedReasoningInclude) ? entries : [...entries, encryptedReasoningInclude];
   const tools = list(saved).flatMap(item => {
     const tool = object(item);
-    if (tool.type === 'apply_patch' || tool.type === 'tool_search' && tool.execution === 'client') return [];
+    if (tool.type === 'tool_search' && tool.execution === 'client') return [];
     if (tool.type === 'shell') {
       const environment = object(tool.environment);
       if (environment.type === 'local' || environment.type === 'container_reference') return [];
@@ -77,7 +84,7 @@ export function openAIChatOptions(value: NativeOptions): NativeOptions {
     if (tool.type === 'file_search' && Array.isArray(tool.vector_store_ids) && !tool.vector_store_ids.length) return [];
     return [item];
   });
-  return tools.length ? { ...response, tools } : response;
+  return { ...response, ...(includes && { include: includes }), ...(tools.length && { tools }) };
 }
 
 export const openAIChatHeaders = (config: NativeOptions) => object(config.multi_agent).enabled === true
