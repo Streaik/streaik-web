@@ -4,6 +4,7 @@ import type { ChatView } from './ChatNavigation';
 import type { ImageRouteSetting } from './imageRoute';
 import type { TranscriptionRouteSetting } from './transcriptionPreferences';
 import type { DecisionRoute } from './modelDecisions';
+import type { AgentChatRoute } from './agentChat';
 
 type RouteChoiceGroup = {
   id: string;
@@ -19,8 +20,10 @@ function choices<T extends string>(id: string, selected: string, endpoints: read
   return { id, selected, submenu, options: endpoints.map(value => ({ value, label: label(value), onSelect: () => onSelect(value) })) };
 }
 
-export function pageRouteMenu(view: ChatView, { chat, decisions, images, transcriptions }: {
+export function pageRouteMenu(view: ChatView, { chat, agents, decisions, images, transcriptions }: {
   chat?: { selected: ChatRoute; direct?: readonly NativeChatEndpoint[]; disabled: boolean; onSelect: (route: ChatRoute) => void };
+  agents?: { selected?: AgentChatRoute; hosted?: boolean; gateway: boolean; direct?: readonly NativeChatEndpoint[];
+    disabled: boolean; onSelect: (route: AgentChatRoute) => void };
   decisions?: { selected: DecisionRoute; onSelect: (route: DecisionRoute) => void };
   images?: ImageRouteSetting;
   transcriptions?: TranscriptionRouteSetting;
@@ -31,6 +34,16 @@ export function pageRouteMenu(view: ChatView, { chat, decisions, images, transcr
   // Each page opts into the routes it owns; the navigation only renders the resulting groups.
   switch (view) {
     case 'chat': {
+      if (agents) {
+        const { selected, hosted, gateway, direct, disabled, onSelect } = agents;
+        const groups = [choices('agents', selected?.mode === 'agents' ? selected.endpoint : '', gatewayChatEndpoints,
+          endpoint => onSelect({ mode: 'agents', endpoint }), { label: 'Agents', disabled: !hosted }),
+        choices('gateway', selected?.mode === 'gateway' ? selected.endpoint : '', gatewayChatEndpoints,
+          endpoint => onSelect({ mode: 'gateway', endpoint }), { label: 'Gateway', disabled: !gateway })];
+        if (direct) groups.push(choices('direct', selected?.mode === 'direct' ? selected.endpoint : '', direct,
+          endpoint => onSelect({ mode: 'direct', endpoint }), { label: 'Direct', disabled: !direct.length }));
+        return { groups, disabled };
+      }
       if (!chat) return;
       const { selected, direct, disabled, onSelect } = chat;
       const groups = [choices('gateway', selected.mode === 'gateway' ? selected.endpoint : '', gatewayChatEndpoints,

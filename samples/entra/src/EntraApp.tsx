@@ -1,6 +1,6 @@
 import { ChatApp, useAppTranslation } from '@streaik/chat';
 import type { McpOptions } from '@streaik/chat';
-import { createGateway, GatewayError } from '@streaik/gateway';
+import { createAgentBackend, createGateway, GatewayError } from '@streaik/gateway';
 import { Button } from '@streaik/themes';
 import { useRef, useState } from 'react';
 import { appAgents } from '../../shared/appAgents';
@@ -8,7 +8,7 @@ import type { McpConfig } from '../../shared/mcpConfig';
 import type { EntraAuth } from './auth';
 import { createEntraMcpHeaders } from './mcpAuth';
 
-export function EntraApp({ appName, base, auth, mcpConfig }: { appName: string; base: URL; auth: EntraAuth; mcpConfig?: McpConfig }) {
+export function EntraApp({ appName, base, agentBase, auth, mcpConfig }: { appName: string; base: URL; agentBase?: URL; auth: EntraAuth; mcpConfig?: McpConfig }) {
   const { t } = useAppTranslation();
   const [account, setAccount] = useState(auth.getAccount);
   const [revision, setRevision] = useState(0);
@@ -16,6 +16,7 @@ export function EntraApp({ appName, base, auth, mcpConfig }: { appName: string; 
   const [issue, setIssue] = useState('');
   const working = useRef(false);
   const [gateway] = useState(() => createGateway(base, auth.headers));
+  const [agentBackend] = useState(() => agentBase && auth.hasAgentScope ? createAgentBackend(agentBase, auth.agentHeaders) : undefined);
   const [mcp] = useState<McpOptions | undefined>(() => {
     if (!mcpConfig?.base || !auth.hasMcpScope) return mcpConfig;
     const headersFor = createEntraMcpHeaders(mcpConfig.base, auth, auth.clientId);
@@ -40,7 +41,7 @@ export function EntraApp({ appName, base, auth, mcpConfig }: { appName: string; 
   }
 
   return <ChatApp key={account?.homeAccountId ?? 'signed-out'} appName={appName} gateway={gateway} agents={account ? appAgents : undefined} connection={{
-    ready: !!account, modelRevision: revision, mcp, mcpSession: !!account,
+    ready: !!account, modelRevision: revision, mcp, mcpSession: !!account, agentBackend: account ? agentBackend : undefined,
     historyProfile: account && `entra:${account.environment}:${account.tenantId}:${account.homeAccountId}` || undefined,
     emptyMessage: t(issue || 'Sign in with Microsoft to start chatting.'),
     account: account ? { name: account.name || account.username, busy, onLogout: () => { void authenticate(true); } } : undefined,

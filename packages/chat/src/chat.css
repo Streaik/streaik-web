@@ -79,7 +79,11 @@ body { margin: 0; }
 .chat-menu-arrow { margin-inline-start: auto; }
 .chat-route-check { width: 1em; flex: none; }
 .chat-toolbar { grid-area: header; display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .35rem .65rem .35rem .2rem; }
-.chat-toolbar > .ui-searchable-select, .chat-image-toolbar > .ui-searchable-select { --picker-height-cap: 100dvh; }
+.chat-picker-bar, .chat-mode-buttons { display: flex; align-items: center; gap: .35rem; }
+.chat-mode-buttons { flex: none; }
+.chat-mode-button[aria-pressed=true] { background: color-mix(in srgb, currentColor 12%, transparent); outline: 1px solid color-mix(in srgb, currentColor 24%, transparent); outline-offset: -1px; }
+.chat-mode-button { flex: none; aspect-ratio: 1; padding-inline: .6rem; }
+.chat-picker-bar > .ui-searchable-select, .chat-image-toolbar > .ui-searchable-select { --picker-height-cap: 100dvh; min-width: 0; }
 .chat-image-toolbar { display: flex; min-width: 0; margin-inline-end: auto; }
 .chat-toolbar > :first-child { min-width: 0; }
 .chat-toolbar .ui-select { max-width: min(25rem, 100%); text-overflow: ellipsis; }

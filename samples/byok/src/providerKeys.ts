@@ -30,3 +30,13 @@ export function providerHeaders(keys: ProviderKeys, request: CredentialRequest) 
   }
   return headers;
 }
+
+export function agentProviderHeaders(keys: ProviderKeys, modelIds: readonly string[]) {
+  const requested = new Set(modelIds.flatMap(id => id.includes('/') ? [id.slice(0, id.indexOf('/'))] : []));
+  const headers = new Headers();
+  for (const id of providerIds) {
+    const key = keys[id];
+    if (key && requested.has(id)) headers.set(providers[id].header, key);
+  }
+  return headers;
+}

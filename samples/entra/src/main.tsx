@@ -19,6 +19,11 @@ async function start() {
   root.render(<Startup />);
   const site = new URL(import.meta.env.BASE_URL, location.origin);
   const base = normalizeGatewayBase(import.meta.env.VITE_GATEWAY_BASE || '/gateway', site.href);
+  const agentValue = import.meta.env.VITE_AGENT_BASE?.trim();
+  let agentBase: URL | undefined;
+  if (agentValue) {
+    try { agentBase = normalizeGatewayBase(agentValue, site.href); } catch { /* Optional backend; browser routes remain available. */ }
+  }
   const mcpScope = import.meta.env.VITE_ENTRA_MCP_SCOPE?.trim();
   const mcpConfig = readMcpConfig(site, import.meta.env.VITE_MCP_BASE, import.meta.env.VITE_MCP_REGISTRY_URL);
   const { createEntraAuth, readMcpScopes } = await import('./auth');
@@ -26,11 +31,12 @@ async function start() {
     tenantId: import.meta.env.VITE_ENTRA_TENANT_ID ?? '',
     clientId: import.meta.env.VITE_ENTRA_CLIENT_ID ?? '',
     scope: import.meta.env.VITE_ENTRA_API_SCOPE ?? '',
+    agentScope: agentBase ? import.meta.env.VITE_ENTRA_AGENT_SCOPE?.trim() : undefined,
     mcpScope: mcpConfig ? mcpScope || undefined : undefined,
     mcpScopes: mcpConfig ? readMcpScopes(import.meta.env.VITE_ENTRA_MCP_SCOPES) : undefined,
   }, site);
   root.render(<ChatRouter basename={site.pathname}>
-    <EntraApp appName={appName} base={base} auth={auth} mcpConfig={mcpConfig} />
+    <EntraApp appName={appName} base={base} agentBase={agentBase} auth={auth} mcpConfig={mcpConfig} />
   </ChatRouter>);
 }
 

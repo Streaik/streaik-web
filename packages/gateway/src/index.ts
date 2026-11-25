@@ -15,6 +15,8 @@ import { readTokenPricing } from './tokenPricing.ts';
 import type { TokenRates } from './tokenPricing.ts';
 export { createDirectChat } from './directChat.ts';
 export type { DirectChat } from './directChat.ts';
+export { createAgentBackend } from './agentBackend.ts';
+export type { AgentBackend, AgentBackendCredentials, HostedAgent, HostedAgentSelection } from './agentBackend.ts';
 export { gatewayDecisionEndpoints } from './decisionChoice.ts';
 export type { DecisionChoice, GatewayDecisionEndpoint } from './decisionChoice.ts';
 export { gatewayImageEndpoints, imageBatchSizes, imageSource, isImageEndpoint, maxImageCount } from './images.ts';
@@ -158,7 +160,9 @@ export function readChatModels(payload: unknown): ChatModel[] {
   return pickChatModels(readModelCatalog(payload));
 }
 
-function statusMessage(status: number, target: 'gateway' | 'provider'): string {
+type HttpTarget = 'gateway' | 'provider' | 'agent backend';
+
+function statusMessage(status: number, target: HttpTarget): string {
   if (status === 401) return 'Authentication failed. Check your provider key or sign in again.';
   if (status === 403) return `The ${target} denied access. Check your permissions.`;
   if (status === 404) return `The ${target} route or model was not found.`;
@@ -167,7 +171,7 @@ function statusMessage(status: number, target: 'gateway' | 'provider'): string {
 }
 
 export async function requestHttp(destination: string, credentials: HeadersInit, init: RequestInit, fetcher: typeof fetch,
-  target: 'gateway' | 'provider' = 'gateway') {
+  target: HttpTarget = 'gateway') {
   // Retain only content negotiation from the caller; credentials are selected by
   // the host for this destination, never by the SDK or message body.
   const headers = new Headers(credentials);

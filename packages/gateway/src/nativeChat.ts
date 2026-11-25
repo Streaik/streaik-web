@@ -11,6 +11,7 @@ type NativeTarget = {
   model: string;
   gateway?: boolean;
   direct?: DirectMetricsOptions;
+  requestBody?: (body: RequestInit['body']) => RequestInit['body'];
   fetch: typeof fetch;
 };
 
@@ -55,7 +56,7 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
       const fetcher: typeof fetch = (input, init) => {
         if (input !== target.url || init?.method !== 'POST') throw new GatewayError('Unexpected chat request.');
         direct?.start();
-        const body = extendNativeTools(init.body, definitions, endpoint, model);
+        const body = target.requestBody ? target.requestBody(init.body) : extendNativeTools(init.body, definitions, endpoint, model);
         return target.fetch(input, body === init.body ? init : { ...init, body });
       };
       const sdk = { baseURL, apiKey: 'supplied-by-scoped-fetch', fetch: fetcher };

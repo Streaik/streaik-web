@@ -16,7 +16,7 @@ export function readMcpScopes(value?: string): Record<string, string> | undefine
   return scopes as Record<string, string>;
 }
 
-export async function createEntraAuth(config: { tenantId: string; clientId: string; scope: string; mcpScope?: string; mcpScopes?: Record<string, string> }, site: URL,
+export async function createEntraAuth(config: { tenantId: string; clientId: string; scope: string; agentScope?: string; mcpScope?: string; mcpScopes?: Record<string, string> }, site: URL,
   createClient: (config: Configuration) => MsalClient = (options) => new PublicClientApplication(options)) {
   const { tenantId, clientId, scope, mcpScope } = config;
   if (!guid.test(tenantId) || !guid.test(clientId) || !delegatedScope(scope) || (mcpScope !== undefined && !delegatedScope(mcpScope))) {
@@ -25,6 +25,8 @@ export async function createEntraAuth(config: { tenantId: string; clientId: stri
   const mcpScopes = new Map(Object.entries({ ...(mcpScope ? { default: mcpScope } : {}), ...config.mcpScopes }));
   if ([...mcpScopes].some(([profile, value]) => !profileName.test(profile) || !delegatedScope(value))) throw new Error('Configure MCP scopes by profile.');
   const scopes = [scope];
+  const agentScope = config.agentScope && delegatedScope(config.agentScope) ? config.agentScope : undefined;
+  const extraScopes = [...new Set([...mcpScopes.values(), ...(agentScope ? [agentScope] : [])])].filter(value => value !== scope);
   const msal = createClient({
     auth: { clientId, authority: `https://login.microsoftonline.com/${tenantId}`, redirectUri: new URL('auth-redirect.html', site).href },
     cache: { cacheLocation: 'sessionStorage' },
@@ -41,11 +43,12 @@ export async function createEntraAuth(config: { tenantId: string; clientId: stri
     clientId,
     getAccount: () => current,
     sessionVersion: () => revision,
+    hasAgentScope: !!agentScope,
     hasMcpScope: mcpScopes.size > 0,
     mcpScopeFor: (profile: string) => mcpScopes.get(profile),
     async signIn() {
       const result = await msal.loginPopup({ scopes, prompt: 'select_account',
-        extraScopesToConsent: mcpScopes.size ? [...new Set(mcpScopes.values())] : undefined });
+        extraScopesToConsent: extraScopes.length ? extraScopes : undefined });
       if (result.account.tenantId.toLowerCase() !== tenantId.toLowerCase()) {
         throw new GatewayError('Sign in with an account in the configured Microsoft Entra tenant.');
       }
@@ -79,6 +82,18 @@ export async function createEntraAuth(config: { tenantId: string; clientId: stri
         if (error instanceof GatewayError) throw error;
         if (error instanceof InteractionRequiredAuthError) throw new GatewayError('Your Microsoft session needs attention. Use Sign in again.');
         throw new GatewayError('Could not obtain a gateway access token. Try signing in again.');
+      }
+    },
+    async agentHeaders(): Promise<HeadersInit> {
+      const account = current;
+      const started = revision;
+      if (!account || !agentScope) throw new GatewayError('Sign in with Microsoft and configure the agent API scope.');
+      try {
+        const { accessToken } = await msal.acquireTokenSilent({ account, scopes: [agentScope] });
+        if (started !== revision || !accessToken) throw new Error();
+        return { Authorization: `Bearer ${accessToken}` };
+      } catch {
+        throw new GatewayError('Could not obtain an agent access token. Sign in again to consent to the agent API scope.');
       }
     },
     async mcpHeaders(profile = 'default'): Promise<HeadersInit> {

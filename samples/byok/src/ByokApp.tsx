@@ -1,6 +1,6 @@
 import { ChatApp, providerDirectory, useAppTranslation } from '@streaik/chat';
 import type { McpOptions } from '@streaik/chat';
-import { createDirectChat, createGateway, GatewayError } from '@streaik/gateway';
+import { createAgentBackend, createDirectChat, createGateway, GatewayError } from '@streaik/gateway';
 import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { appAgents } from '../../shared/appAgents';
@@ -8,14 +8,14 @@ import { byokMcpProvider, byokRegistryRemote } from '../../shared/mcpConfig';
 import { isMcpRuntime } from '@streaik/chat';
 import type { McpConfig } from '../../shared/mcpConfig';
 import { ProviderKeySettings } from './ProviderKeySettings';
-import { providerHeaders, providerIds, providers, validProviderKey } from './providerKeys.ts';
+import { agentProviderHeaders, providerHeaders, providerIds, providers, validProviderKey } from './providerKeys.ts';
 import type { ProviderId, ProviderKeys } from './providerKeys.ts';
 import { createVault, unlockVault } from './vault.ts';
 
 type Encrypter = Awaited<ReturnType<typeof createVault>>;
 type Vault = { state: 'session' } | { state: 'locked' } | { state: 'unlocked'; encrypt: Encrypter };
 
-export function ByokApp({ appName, base, mcpConfig }: { appName: string; base?: URL; mcpConfig?: McpConfig }) {
+export function ByokApp({ appName, base, agentBase, mcpConfig }: { appName: string; base?: URL; agentBase?: URL; mcpConfig?: McpConfig }) {
   const { t } = useAppTranslation();
   const scope = base?.href ?? 'direct';
   const storageKey = `streaik.byok.vault:${scope}`;
@@ -35,6 +35,12 @@ export function ByokApp({ appName, base, mcpConfig }: { appName: string; base?: 
   }));
   const [direct] = useState(() => createDirectChat(providerDirectory.providers, (provider) =>
     Object.hasOwn(providers, provider) ? keys.current[provider as ProviderId] : undefined));
+  const [agentBackend] = useState(() => agentBase && createAgentBackend(agentBase, request => {
+    if (request.kind === 'catalog') return {};
+    const headers = agentProviderHeaders(keys.current, request.modelIds);
+    if (![...headers].length) throw new GatewayError('Set or unlock a provider key for this agent’s models.');
+    return headers;
+  }));
   const [mcp] = useState<McpOptions | undefined>(() => mcpConfig && ({ ...mcpConfig,
     filterRegistryRemote: (name, remote) => byokRegistryRemote(name, remote) || isMcpRuntime(remote.endpoint, mcpConfig.base),
     headersForRemote: (declarations) => {
@@ -119,6 +125,7 @@ export function ByokApp({ appName, base, mcpConfig }: { appName: string; base?: 
   const configured = providerIds.filter((id) => !!keys.current[id]);
   return <ChatApp appName={appName} gateway={gateway} agents={vault.state === 'locked' ? undefined : appAgents} connection={{
     ready: configured.length > 0, modelRevision: revision, mcp, direct, mcpSession: vault.state !== 'locked',
+    agentBackend: vault.state === 'locked' ? undefined : agentBackend,
     historyProfile: vault.state === 'locked' ? undefined : 'byok',
     emptyMessage: t(vault.state === 'locked' ? 'Unlock your provider keys in Settings to start chatting.' : 'Add a provider key in Settings to start chatting.'),
     account: { name: 'BYOK' },
