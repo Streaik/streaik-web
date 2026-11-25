@@ -6,7 +6,7 @@ import { ChatIcon } from './ChatIcon';
 import { DialogTabs } from './DialogTabs';
 import { ToolDetails, ToolValue } from './ToolDetails';
 import { describeToolOutput } from './toolOutputContent';
-import { composerToolDefaults } from './chatPreferences';
+import { composerToolDefaults, toolConfigurationDefaults } from './chatPreferences';
 import type { ChatPreferences } from './chatPreferences';
 import type { RequestContext } from './chatContext';
 import { localPlugins } from './localPlugins';
@@ -18,14 +18,17 @@ import type { RemoteSkills } from './useRemoteSkills';
 import { activeChatProviders, chatProviders, normalizeProviderChatSettings } from './providerChat/settings';
 import type { ChatProviderId, ProviderChatSettings } from './providerChat/settings';
 import { ProviderChatForm } from './providerChat/forms';
+import { ToolConfigurationEditor } from './ToolConfigurationEditor';
+import type { ToolConfigurationRow } from './ToolConfigurationEditor';
 
 type DialogRef = RefObject<HTMLDialogElement | null>;
-type ChatSettingsTab = 'general' | 'tools' | 'skills' | ChatProviderId;
+type ChatSettingsTab = 'general' | 'tools' | 'tool-configuration' | 'skills' | ChatProviderId;
 
-export function ChatSettingsDialog({ dialog, value, onChange, gateway, hasHistory, locked, localSkills, remoteSkills, providerModels }: {
+export function ChatSettingsDialog({ dialog, value, onChange, gateway, hasHistory, locked, localSkills, remoteSkills, providerModels, toolRows, namespaceSupported, toolOptionsSupported }: {
   dialog: DialogRef; value: ChatPreferences; onChange: (preferences: ChatPreferences) => void;
   gateway: boolean; hasHistory: boolean; locked: boolean; localSkills: LocalSkills; remoteSkills: RemoteSkills;
   providerModels: readonly ChatModel[];
+  toolRows: readonly ToolConfigurationRow[]; namespaceSupported: boolean; toolOptionsSupported: boolean;
 }) {
   const { t } = useAppTranslation();
   const id = useId();
@@ -33,10 +36,11 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hasHistor
   const [draft, setDraft] = useState<ProviderChatSettings>();
   const [resetKey, setResetKey] = useState(0);
   const providers = activeChatProviders(providerModels);
-  const tabs: [ChatSettingsTab, string][] = [['general', t('General')], ['tools', t('Tools')], ['skills', t('Skills')],
+  const tabs: [ChatSettingsTab, string][] = [['general', t('General')], ['tools', t('Tools')],
+    ['tool-configuration', t('Tool configuration')], ['skills', t('Skills')],
     ...[...providers.keys()].map((provider): [ChatProviderId, string] => [provider, chatProviders[provider].label])];
   const tab = tabs.some(([key]) => key === requestedTab) ? requestedTab : 'general';
-  const providerTab = tab !== 'general' && tab !== 'tools' && tab !== 'skills' ? tab : undefined;
+  const providerTab = tab !== 'general' && tab !== 'tools' && tab !== 'skills' && tab !== 'tool-configuration' ? tab : undefined;
   const providerSettings = draft ?? value.providerSettings;
   const { online, needsLoad, load, cursor, busy, error, skills } = remoteSkills;
   useEffect(() => {
@@ -73,6 +77,17 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hasHistor
         </div>
         {gateway && !hasHistory && <p>{t('Chat History requires a local history profile.')}</p>}
       </section>
+    </div>
+    <div id={`${id}-tool-configuration-panel`} role="tabpanel" aria-labelledby={`${id}-tool-configuration-tab`} hidden={tab !== 'tool-configuration'}>
+      {tab === 'tool-configuration' && <>
+        {!toolOptionsSupported && <p>{t('This route does not send tool usage or search options.')}</p>}
+        <ToolConfigurationEditor rows={toolRows} disabled={locked} namespaces={{ checked: value.useToolNamespaces, disabled: !namespaceSupported,
+          onChange: useToolNamespaces => onChange({ ...value, useToolNamespaces }) }} onChange={(keys, patch) => {
+          const toolRequestConfig = { ...value.toolRequestConfig, ...Object.fromEntries(keys.map(key =>
+            [key, { ...(Object.hasOwn(value.toolRequestConfig, key) && value.toolRequestConfig[key]), ...patch }])) };
+          onChange({ ...value, toolRequestConfig });
+        }} />
+      </>}
     </div>
     <div id={`${id}-skills-panel`} className="chat-skill-cards" role="tabpanel" aria-labelledby={`${id}-skills-tab`} hidden={tab !== 'skills'}>
       <section className="chat-tool-card" aria-labelledby={`${id}-local-skills`}>
@@ -124,7 +139,7 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hasHistor
         if (providerTab) {
           setDraft(current => ({ ...(current ?? value.providerSettings), [providerTab]: undefined }));
           setResetKey(key => key + 1);
-        } else onChange({ ...value, ...composerToolDefaults });
+        } else onChange({ ...value, ...(tab === 'tool-configuration' ? toolConfigurationDefaults : composerToolDefaults) });
       }}>{t(providerTab ? 'Reset provider settings' : 'Defaults')}</Button>
       <Button variant={draft ? 'subtle' : undefined} onClick={() => dialog.current?.close()}>{t(draft ? 'Cancel' : 'Close')}</Button>
       {(providerTab || draft) && <Button disabled={locked || !draft || !providers.size} onClick={() => {

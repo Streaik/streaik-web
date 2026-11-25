@@ -61,8 +61,11 @@ function AgentCardActions({ entry, container, onAction }: {
   </div>;
 }
 
-export function AgentsView({ catalog, catalogStatus, toolbar, menuContainer }: {
+import type { McpServers } from './useMcpServers';
+
+export function AgentsView({ catalog, catalogStatus, toolbar, menuContainer, mcpServers }: {
   catalog: readonly CatalogModel[]; catalogStatus?: string; toolbar: HTMLDivElement | null; menuContainer: HTMLDivElement | null;
+  mcpServers: McpServers;
 }) {
   const { t } = useAppTranslation();
   const store = useAgents();
@@ -118,6 +121,6 @@ export function AgentsView({ catalog, catalogStatus, toolbar, menuContainer }: {
       })}</div>}
     {action?.kind === 'remove' ? <ConfirmAgentChange entry={action.entry} onConfirm={() => store.removeChange(action.entry)} onClose={end} />
       : action && <AgentEditor entry={action.kind === 'edit' ? action.entry : undefined} seed={action.kind === 'create' ? action.seed : undefined}
-        catalog={catalog} catalogStatus={catalogStatus} tags={tagOptions} onSave={store.save} onClose={end} />}
+        catalog={catalog} catalogStatus={catalogStatus} tags={tagOptions} mcpServers={mcpServers} onSave={store.save} onClose={end} />}
   </section>;
 }

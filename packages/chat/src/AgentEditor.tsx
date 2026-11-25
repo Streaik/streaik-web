@@ -14,7 +14,12 @@ import { useAppTranslation } from './i18n';
 import { chatProviders } from './providerChat/settings';
 import type { ChatProviderId, NativeOptions } from './providerChat/settings';
 
-const baseTabs = [['general', 'General'], ['details', 'Details'], ['realtime', 'Realtime']] as const;
+import { AgentToolConfigurationFields, AgentToolsFields } from './AgentToolFields';
+import { useMcpSelection } from './useMcpServers';
+import type { McpServers } from './useMcpServers';
+
+const baseTabs = [['general', 'General'], ['details', 'Details'], ['realtime', 'Realtime'], ['tools', 'Tools'],
+  ['tool-configuration', 'Tool configuration']] as const;
 type EditorTab = AgentTab | `provider-${ChatProviderId}`;
 
 function AgentDialog({ title, children, onClose }: { title: string; children: (close: () => void) => ReactNode; onClose: () => void }) {
@@ -33,14 +38,16 @@ function AgentDialog({ title, children, onClose }: { title: string; children: (c
   </dialog>;
 }
 
-export function AgentEditor({ entry, seed, catalog, catalogStatus, tags, onSave, onClose }: {
+export function AgentEditor({ entry, seed, catalog, catalogStatus, tags, mcpServers, onSave, onClose }: {
   entry?: AgentEntry; seed?: AgentDefinition; catalog: readonly CatalogModel[]; catalogStatus?: string; tags: readonly string[];
+  mcpServers: McpServers;
   onSave: (definition: AgentDefinition, entry?: AgentEntry) => void; onClose: () => void;
 }) {
   const { t } = useAppTranslation();
   const source = entry?.definition ?? seed;
   const [initial] = useState(() => createAgentDraft(source));
   const [draft, setDraft] = useState(initial);
+  const discovery = useMcpSelection(mcpServers);
   const [requestedTab, setTab] = useState<EditorTab>('general');
   const [error, setError] = useState<Error>();
   const providers = agentProviderGroups(draft.models, catalog);
@@ -94,7 +101,9 @@ export function AgentEditor({ entry, seed, catalog, catalogStatus, tags, onSave,
           aria-labelledby={`${id}-${key}-tab`} hidden={key !== tab}>
           {key === 'general' ? <AgentGeneralFields {...{ draft, initial, patch, catalog, catalogStatus }} sample={entry?.source === 'sample'} />
             : key === 'details' ? <AgentDetailsFields {...{ draft, patch, tags }} />
-              : <AgentRealtimeFields {...{ draft, initial, patch, catalog, catalogStatus }} />}
+              : key === 'realtime' ? <AgentRealtimeFields {...{ draft, initial, patch, catalog, catalogStatus }} />
+                : key === 'tools' ? <AgentToolsFields {...{ draft, patch, discovery }} store={mcpServers} />
+                  : <AgentToolConfigurationFields {...{ draft, patch, discovery }} store={mcpServers} />}
         </section>)}
         {providerTabs.map(({ key, provider, entries }) => <section key={key} className="agent-panel" id={`${id}-${key}-panel`}
           role="tabpanel" aria-labelledby={`${id}-${key}-tab`} hidden={key !== tab}>

@@ -4,6 +4,7 @@ import { asRecord, createDirectMetrics } from './directMetrics.ts';
 import type { DirectMetricsOptions } from './directMetrics.ts';
 import { GatewayError } from './index.ts';
 import type { ChatMessage, ChatMessageMetadata, NativeChatEndpoint } from './index.ts';
+import { extendNativeTools } from './nativeToolOptions.ts';
 
 type NativeTarget = {
   url: string;
@@ -54,7 +55,8 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
       const fetcher: typeof fetch = (input, init) => {
         if (input !== target.url || init?.method !== 'POST') throw new GatewayError('Unexpected chat request.');
         direct?.start();
-        return target.fetch(input, init);
+        const body = extendNativeTools(init.body, definitions, endpoint, model);
+        return target.fetch(input, body === init.body ? init : { ...init, body });
       };
       const sdk = { baseURL, apiKey: 'supplied-by-scoped-fetch', fetch: fetcher };
       const adapter = endpoint === '/v1/messages'

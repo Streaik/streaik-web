@@ -4,6 +4,8 @@ import { defaultMcpPreferences, mcpTimeoutRange } from './mcpPreferences.ts';
 import type { McpPreferences } from './mcpPreferences.ts';
 import { persistentProviderChatSettings } from './providerChat/settings.ts';
 import type { ProviderChatSettings } from './providerChat/settings.ts';
+import { normalizeToolConfiguration } from './toolConfiguration.ts';
+import type { ToolConfiguration } from './toolConfiguration.ts';
 
 export const pinnableViews = ['models', 'providers'] as const;
 export type PinnableView = (typeof pinnableViews)[number];
@@ -25,9 +27,14 @@ export type ChatPreferences = {
   toolOutput: ToolOutputPreferences;
   mcp: McpPreferences;
   providerSettings: ProviderChatSettings;
+  toolRequestConfig: ToolConfiguration;
+  useToolNamespaces: boolean;
+};
+export const toolConfigurationDefaults: Pick<ChatPreferences, 'toolRequestConfig' | 'useToolNamespaces'> = {
+  toolRequestConfig: {}, useToolNamespaces: false,
 };
 export const composerToolDefaults: Pick<ChatPreferences, 'delay' | 'plugins' | 'remoteSkillIds'> = { delay: 40, plugins: [], remoteSkillIds: [] };
-export const defaultChatPreferences: ChatPreferences = { ...composerToolDefaults, convertAttachmentsToText: false, pinnedViews: [],
+export const defaultChatPreferences: ChatPreferences = { ...composerToolDefaults, ...toolConfigurationDefaults, convertAttachmentsToText: false, pinnedViews: [],
   dictate: true, showContextSize: true, showMessageTokens: true, showProviderLogo: true, showMetrics: false,
   toolOutput: toolOutputDefaults, mcp: defaultMcpPreferences, providerSettings: {} };
 
@@ -59,6 +66,8 @@ export function normalizeChatPreferences(value: StoredPreferences | null | undef
     showMetrics: booleanPreference(value?.showMetrics, defaultChatPreferences.showMetrics),
     toolOutput,
     providerSettings: persistentProviderChatSettings(value?.providerSettings),
+    toolRequestConfig: normalizeToolConfiguration(value?.toolRequestConfig),
+    useToolNamespaces: value?.useToolNamespaces === true,
     mcp: {
       formElicitation: booleanPreference(value?.mcp?.formElicitation, defaultMcpPreferences.formElicitation),
       toolTimeoutMinutes: typeof timeout === 'number' && Number.isFinite(timeout)

@@ -50,7 +50,7 @@ const definitions = [
   }],
   ['video', 'Create a video', {
     name: 'VideoAgent', description: 'Creates videos.',
-    model: { id: 'openai/gemini-omni-1.2-flash' },
+    model: { id: 'google/gemini-omni-1.2-flash' },
     instructions: 'Create videos',
   }]
 ] satisfies ReadonlyArray<readonly [string, string, AgentDefinition]>;

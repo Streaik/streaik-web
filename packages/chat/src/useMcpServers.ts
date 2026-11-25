@@ -81,7 +81,7 @@ export type McpServers = ReturnType<typeof useMcpServers>;
 type Selection = { record: McpServerRecord } & ({ state: 'loading' | 'error' } | { state: 'ready'; discovery: McpDiscovery });
 
 /** Selection belongs to the conversation, not the installed-server library. */
-export function useMcpSelection(store: McpServers) {
+export function useMcpSelection(store: McpServers, automatic?: readonly McpServerRecord[]) {
   const [selected, setSelected] = useState<ReadonlyMap<string, Selection>>(() => new Map());
   const requests = useRef(new Map<string, AbortController>());
   useEffect(() => {
@@ -89,7 +89,7 @@ export function useMcpSelection(store: McpServers) {
     return () => { active.forEach(controller => controller.abort()); active.clear(); };
   }, []);
 
-  const readyRecords = store.records.filter(record => !!store.connection(record));
+  const readyRecords = (automatic ?? store.records).filter(record => !!store.connection(record));
   const current = readyRecords.flatMap(record => {
     const entry = selected.get(record.id);
     return entry?.record === record ? [entry] : [];
@@ -97,6 +97,9 @@ export function useMcpSelection(store: McpServers) {
   const invalid = [...selected.values()].filter(entry => !readyRecords.includes(entry.record));
   useEffect(() => {
     for (const { record } of invalid) clear(record.id);
+    if (automatic) for (const record of readyRecords) {
+      if (!selected.has(record.id)) set(record, true);
+    }
   });
 
   function clear(id: string) {
@@ -127,7 +130,8 @@ export function useMcpSelection(store: McpServers) {
   }
 
   const connected = current.filter(entry => entry.state === 'ready');
-  return { entries: current, connected, loading: current.some(entry => entry.state === 'loading'),
+  return { entries: current, connected, loading: current.some(entry => entry.state === 'loading') ||
+      (!!automatic && readyRecords.some(record => !current.some(entry => entry.record === record))),
     tools: connected.flatMap(entry => entry.discovery.tools).filter((tool, index, tools) => tools.findIndex(other => other.name === tool.name) === index), set };
 }
 

@@ -218,6 +218,20 @@ body { margin: 0; }
 .chat-history-search-excerpt { color: var(--muted); font-size: .8rem; font-weight: 400; }
 .chat-tools-dialog { box-sizing: border-box; width: min(40rem, calc(100% - 1.5rem)); }
 .chat-tools-dialog[open] { display: grid; gap: 1rem; }
+.tool-config-editor { min-width: 0; }
+.tool-config-namespaces { display: flex; align-items: center; justify-content: flex-end; gap: .55rem; margin-block-end: .8rem; }
+.tool-config-table { width: 100%; border-collapse: collapse; text-align: start; }
+.tool-config-table th, .tool-config-table td { text-align: start; padding: .55rem .4rem; border-bottom: 1px solid var(--border); }
+.tool-config-table th { overflow-wrap: anywhere; }
+.tool-config-table th small { display: block; color: var(--muted); font-weight: 400; }
+.tool-config-callers summary { cursor: pointer; border: 1px solid var(--border); border-radius: .45rem; padding: .35rem .45rem; }
+.tool-config-callers summary[aria-disabled=true] { cursor: default; opacity: .65; }
+.tool-config-options { display: grid; gap: .35rem; padding: .4rem 0; }
+.tool-config-options label { display: flex; align-items: center; gap: .35rem; }
+.tool-config-switch { appearance: none; display: inline-grid; align-items: center; width: 2.55rem; height: 1.4rem; margin: 0; padding: .15rem; border: 1px solid var(--border); border-radius: 2rem; background: var(--surface); cursor: pointer; }
+.tool-config-switch::before { content: ''; width: 1rem; height: 1rem; border-radius: 50%; background: currentColor; opacity: .7; }
+.tool-config-switch:checked::before { justify-self: end; opacity: 1; }
+.tool-config-switch:disabled { opacity: .5; cursor: default; }
 .chat-tool-tabs { display: flex; flex-wrap: wrap; gap: .25rem; padding: .25rem; width: fit-content; max-width: 100%; box-sizing: border-box; background: var(--surface); border-radius: .55rem; }
 .chat-tool-tabs button { border: 1px solid transparent; border-radius: .4rem; background: transparent; color: var(--foreground); font: inherit; padding: .5rem .75rem; cursor: pointer; }
 .chat-tool-tabs button[aria-selected=true] { border-color: var(--border); background: var(--background); font-weight: 650; }
