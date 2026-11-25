@@ -7,8 +7,9 @@ import { CatalogMark } from './CatalogMark';
 import { ChatIcon } from './ChatIcon';
 import { useAppTranslation } from './i18n';
 import { defaultSkillVersion, importSkillZip, saveSkillVersion } from './skillBundles';
-import type { SkillBundle, SkillVersion } from './skillBundles';
+import type { LocalSkill, SkillBundle, SkillVersion } from './skillBundles';
 import { LocalSkillDetails, RemoteSkillDetails, SkillDialog, SkillEditor, SkillTabs, SkillUploadDialog, skillError } from './SkillDialogs';
+import { useCatalogSearch } from './useCatalogSearch';
 import type { LocalSkills } from './useLocalSkills';
 import type { RemoteSkills } from './useRemoteSkills';
 import { VersionBadge } from './VersionBadge';
@@ -17,6 +18,15 @@ import './skills.css';
 type Action = { kind: 'create' } | { kind: 'edit' | 'details' | 'delete'; id: string }
   | { kind: 'remote-details'; skill: RemoteSkill }
   | { kind: 'upload'; source: { local: SkillVersion } | { remote: RemoteSkill; version?: string } };
+
+function localSkillSearchDocument(skill: LocalSkill) {
+  const { name, description } = defaultSkillVersion(skill).metadata;
+  return { title: name, text: description };
+}
+
+function remoteSkillSearchDocument({ name, description, id }: RemoteSkill) {
+  return { title: name, text: `${description}\n${id}` };
+}
 
 function SkillCardMenu({ name, container, actions, onAction }: {
   name: string; container: HTMLDivElement | null; actions: { label: string; action: Action; danger?: boolean }[];
@@ -90,12 +100,13 @@ export function SkillsView({ store, gateway, remote, toolbar, menuContainer }: {
     finally { if (active.current === request) { active.current = null; setImporting(false); } }
   }
 
-  const term = query.trim().toLowerCase();
-  const matches = (...values: string[]) => values.some(value => value.toLowerCase().includes(term));
-  const localCards = store.skills.flatMap(skill => {
+  const localSearch = useCatalogSearch(store.skills, sourceTab === 0 ? query : '', localSkillSearchDocument);
+  const remoteSearch = useCatalogSearch(remote.skills, sourceTab === 1 && online ? query : '', remoteSkillSearchDocument);
+  const term = query.trim();
+  const localCards = localSearch.results.map(skill => {
     const version = defaultSkillVersion(skill);
     const { name, description } = version.metadata;
-    return matches(name, description) ? [<article className="catalog-card agent-card" aria-label={name} key={skill.id}>
+    return <article className="catalog-card agent-card" aria-label={name} key={skill.id}>
       <header className="agent-card-header"><div className="catalog-card-title"><CatalogMark provider="" name={name} />
         <div><h2>{name}</h2><VersionBadge version={version.version} /></div></div>
         <div className="agent-card-actions"><Tooltip content={t('Edit')}><button type="button" className="chat-row-button" aria-label={t('Edit')}
@@ -107,9 +118,9 @@ export function SkillsView({ store, gateway, remote, toolbar, menuContainer }: {
           ]} />
         </div></header>
       <p>{description}</p>
-    </article>] : [];
+    </article>;
   });
-  const remoteCards = remote.skills.filter(skill => matches(skill.name, skill.description, skill.id)).map(skill =>
+  const remoteCards = remoteSearch.results.map(skill =>
     <article className="catalog-card agent-card" aria-label={skill.name} key={skill.id}>
       <header className="agent-card-header"><div className="catalog-card-title"><CatalogMark provider={skill.id.split('/')[0]} name={skill.name} />
         <div><h2>{skill.name}</h2><p>{skill.id}</p></div></div>
@@ -155,12 +166,13 @@ export function SkillsView({ store, gateway, remote, toolbar, menuContainer }: {
     {error && <p role="alert" className="chat-error">{t(error)}</p>}
     <SkillTabs label={t('Skill sources')} onChange={setSourceTab} tabs={[
       { title: t('Local'), panel: !store.ready ? <p role="status">{t('Loading local skills…')}</p> : localCards.length
-        ? <div className="catalog-grid agent-grid">{localCards}</div> : <p role="status">{t(term ? 'No matching skills.' : 'No local skills yet.')}</p> },
+        ? <div className="catalog-grid agent-grid">{localCards}</div>
+        : <p role="status">{t(localSearch.message ?? (term ? 'No matching skills.' : 'No local skills yet.'))}</p> },
       { title: t('Central'), panel: !online ? <p>{t('Connect to a gateway to browse provider skills.')}</p> : <>
         {(needsLoad || remote.busy) && <p role="status">{t('Loading provider skills…')}</p>}
         {remote.error !== undefined && <p role="alert" className="chat-error">{t(remote.error || 'Could not load provider skills.')}</p>}
         {remoteCards.length ? <div className="catalog-grid agent-grid">{remoteCards}</div> : !needsLoad && !remote.busy && remote.error === undefined
-          && <p role="status">{t(term ? 'No matching skills.' : 'No provider skills found.')}</p>}
+          && <p role="status">{t(remoteSearch.message ?? (term ? 'No matching skills.' : 'No provider skills found.'))}</p>}
         {remote.error !== undefined ? <Button onClick={() => load(remote.cursor)}>{t('Retry')}</Button>
           : remote.cursor && <Button disabled={remote.busy} onClick={() => load(remote.cursor)}>{t('Load more')}</Button>}
       </> },

@@ -453,6 +453,8 @@ export const chatMessages = {
   'Search chats': ['Chats zoeken', 'Buscar chats'],
   'Searching chat history…': ['Chatgeschiedenis doorzoeken…', 'Buscando en el historial de chats…'],
   'Could not search chat history.': ['De chatgeschiedenis kon niet worden doorzocht.', 'No se pudo buscar en el historial de chats.'],
+  'Searching…': ['Zoeken…', 'Buscando…'],
+  'Could not search.': ['Zoeken is niet gelukt.', 'No se pudo realizar la búsqueda.'],
   'Search results': ['Zoekresultaten', 'Resultados de búsqueda'],
   'Pinned': ['Vastgezet', 'Fijados'],
   'Recent': ['Recent', 'Recientes'],

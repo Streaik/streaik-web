@@ -12,8 +12,16 @@ import { useAgents } from './AgentsProvider';
 import { CatalogMark } from './CatalogMark';
 import { ChatIcon } from './ChatIcon';
 import { useAppTranslation } from './i18n';
+import { useCatalogSearch } from './useCatalogSearch';
 
 type Action = { kind: 'create'; seed?: AgentDefinition } | { kind: 'edit' | 'remove'; entry: AgentEntry };
+
+const noAgents: readonly AgentEntry[] = [];
+
+function agentSearchDocument({ definition }: AgentEntry) {
+  return { title: definition.name, text: [definition.description, definition.model?.id,
+    ...(definition.models?.map(({ id }) => id) ?? []), ...(definition.tags ?? [])].join('\n') };
+}
 
 function AgentCardActions({ entry, container, onAction }: {
   entry: AgentEntry; container: HTMLDivElement | null; onAction: (action: Action, opener: HTMLElement) => void;
@@ -63,6 +71,7 @@ export function AgentsView({ catalog, catalogStatus, toolbar, menuContainer }: {
   const [action, setAction] = useState<Action>();
   const search = useRef<HTMLInputElement>(null);
   const opener = useRef<HTMLElement | null>(null);
+  const { results: visible, message: searchMessage } = useCatalogSearch(store?.entries ?? noAgents, query, agentSearchDocument);
   useLayoutEffect(() => {
     if (action || !opener.current) return;
     const target = opener.current;
@@ -72,10 +81,6 @@ export function AgentsView({ catalog, catalogStatus, toolbar, menuContainer }: {
   }, [action]);
   if (!store) return null;
 
-  const term = query.trim().toLowerCase();
-  const visible = store.entries.filter(({ definition }) => [definition.name, definition.description,
-    definition.model?.id, ...(definition.models?.map(({ id }) => id) ?? []), ...(definition.tags ?? [])]
-    .some((value) => value?.toLowerCase().includes(term)));
   const tagOptions = [...new Set(store.entries.flatMap(({ definition }) => definition.tags ?? []).map((tag) => tag.trim()).filter(Boolean))].sort();
 
   function start(next: Action, button: HTMLElement) { opener.current = button; setAction(next); }
@@ -90,7 +95,7 @@ export function AgentsView({ catalog, catalogStatus, toolbar, menuContainer }: {
     {store.notice && <p className="chat-notice" role="status">{t(store.notice)}</p>}
     <input ref={search} className="ui-input agent-input" aria-label={t('Search agents')} type="search" placeholder={t('Search agents…')}
       value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
-    {visible.length === 0 ? <p role="status">{t(term ? 'No matching agents.' : 'No agents yet.')}</p> :
+    {visible.length === 0 ? <p role="status">{t(searchMessage ?? (query.trim() ? 'No matching agents.' : 'No agents yet.'))}</p> :
       <div className="catalog-grid agent-grid">{visible.map((entry) => {
         const { definition, source } = entry;
         const model = primaryAgentModel(definition, ({ id, type }) => (type ?? catalog.find((item) => item.id === id && item.type === 'language')?.type

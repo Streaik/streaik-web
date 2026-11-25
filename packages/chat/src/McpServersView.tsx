@@ -1,5 +1,5 @@
 import { Button, Tooltip } from '@streaik/themes';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ChatIcon } from './ChatIcon';
@@ -9,6 +9,7 @@ import { fetchMcpCatalog, filterMcpCatalog, mcpAppAuth, preferredMcpRemote } fro
 import type { McpCatalogServer, McpOptions } from './mcp';
 import { mcpEndpoint, mcpHeaderFields, resolveMcpHeaders } from './mcpConfiguration';
 import type { McpHeaderRow, McpServerRecord } from './mcpConfiguration';
+import { useCatalogSearch } from './useCatalogSearch';
 import type { McpSelection, McpServers } from './useMcpServers';
 import { VersionBadge } from './VersionBadge';
 import './mcpServers.css';
@@ -114,6 +115,14 @@ function Configure({ record, disabled, onConfigure }: { record: McpServerRecord;
 
 type ServerSectionsProps = { store: McpServers; options?: McpOptions; locked: boolean; onEdit: (target: McpEditorTarget) => void };
 
+function installedSearchDocument({ title, endpoint }: McpServerRecord) {
+  return { title, text: endpoint };
+}
+
+function registrySearchDocument({ title, name, description, remotes }: McpCatalogServer) {
+  return { title, text: [name, description, ...remotes.map(remote => remote.endpoint)].join('\n') };
+}
+
 function McpServerCard({ title, name, description, version, endpoint, actions, inDialog }: {
   title: string; name?: string; description?: string; version?: string; endpoint?: ReactNode; actions: ReactNode; inDialog?: boolean;
 }) {
@@ -131,13 +140,15 @@ function McpServerCard({ title, name, description, version, endpoint, actions, i
   </article>;
 }
 
-function InstalledServers({ store, selection, locked, onEdit }: ServerSectionsProps & { selection?: McpSelection }) {
+function InstalledServers({ store, selection, locked, onEdit, active }: ServerSectionsProps & { selection?: McpSelection; active: boolean }) {
   const { t } = useAppTranslation();
   const id = useId();
   const [error, setError] = useState(false);
+  const [query, setQuery] = useState('');
+  const { results, message: searchMessage } = useCatalogSearch(store.records, !selection && active ? query : '', installedSearchDocument);
   const disabled = locked || !store.available;
   const addLabel = t('Add by URL');
-  const servers = store.records.map(record => {
+  const servers = results.map(record => {
     const entry = selection?.entries.find(entry => entry.record === record);
     const ready = !!store.connection(record);
     const status = !ready ? t('Credentials needed') : entry?.state === 'loading' ? t('Connecting…')
@@ -170,9 +181,11 @@ function InstalledServers({ store, selection, locked, onEdit }: ServerSectionsPr
       <Tooltip content={addLabel}><Button type="button" variant="subtle" className="chat-composer-icon" aria-label={addLabel}
         aria-haspopup="dialog" disabled={disabled} onClick={() => onEdit({})}><ChatIcon name="link" /></Button></Tooltip>
     </div>}
+    {!selection && <div className="catalog-filters"><input type="search" aria-label={t('Search MCP servers')} placeholder={t('Search MCP servers')}
+      value={query} onChange={event => setQuery(event.currentTarget.value)} /></div>}
     {selection && servers.length > 0 && <p>{t('Only enable servers you trust. Tool inputs are sent when a tool runs; approval controls sharing the result with the chat model.')}</p>}
     {error && <p role="alert" className="chat-error">{t('Could not remove this MCP server.')}</p>}
-    {servers.length === 0 ? <p>{t('No MCP servers installed yet.')}</p>
+    {servers.length === 0 ? <p role="status">{t(searchMessage ?? (query.trim() ? 'No matching MCP servers.' : 'No MCP servers installed yet.'))}</p>
       : selection ? <ul className="mcp-list">{servers}</ul> : <div className="catalog-grid">{servers}</div>}
   </section>;
 }
@@ -207,7 +220,7 @@ function CatalogCard({ item, installed, disabled, options, install, inDialog }: 
     endpoint={endpoint} actions={<>{remote && <CopyServerUrl key={remote.endpoint} endpoint={remote.endpoint} />}{actions}</>} inDialog={inDialog} />;
 }
 
-function McpRegistry({ store, options, locked, onEdit, inDialog }: ServerSectionsProps & { inDialog: boolean }) {
+function McpRegistry({ store, options, locked, onEdit, inDialog, active }: ServerSectionsProps & { inDialog: boolean; active: boolean }) {
   const { t } = useAppTranslation();
   const [catalog, setCatalog] = useState<McpCatalogServer[]>([]);
   const [cursor, setCursor] = useState<string>();
@@ -232,9 +245,9 @@ function McpRegistry({ store, options, locked, onEdit, inDialog }: ServerSection
   }, [registryUrl, request]);
 
   const installed = new Set(store.records.map(record => record.endpoint));
-  const term = query.trim().toLowerCase();
-  const results = filterMcpCatalog(catalog, options?.filterRegistryRemote)
-    .filter(item => `${item.title} ${item.name} ${item.description ?? ''}`.toLowerCase().includes(term));
+  const filter = options?.filterRegistryRemote;
+  const eligible = useMemo(() => filterMcpCatalog(catalog, filter), [catalog, filter]);
+  const { results, message: searchMessage } = useCatalogSearch(eligible, active && registryUrl ? query : '', registrySearchDocument);
   const disabled = locked || !store.available;
   const refreshLabel = t('Refresh registry');
 
@@ -265,7 +278,7 @@ function McpRegistry({ store, options, locked, onEdit, inDialog }: ServerSection
         {registryError && <p role="alert" className="chat-error">{t('Could not load the MCP registry.')}</p>}
         {results.length ? <div className="catalog-grid">{results.map(item => <CatalogCard key={item.name} item={item} installed={installed}
           disabled={disabled} options={options} install={install} inDialog={inDialog} />)}</div>
-          : !request && !registryError && <p>{t(term ? 'No matching MCP servers.' : 'No MCP servers found in the registry.')}</p>}
+          : !request && !registryError && <p role="status">{t(searchMessage ?? (query.trim() ? 'No matching MCP servers.' : 'No MCP servers found in the registry.'))}</p>}
         {cursor && <Button type="button" className="catalog-more" disabled={!!request} onClick={() => setRequest({ cursor })}>{t('Load more servers')}</Button>}
       </>}
   </section>;
@@ -281,10 +294,10 @@ function McpServerTabs({ selection, ...props }: ServerSectionsProps & { selectio
       className={selection ? undefined : 'catalog-tabs'}
       onChange={next => { setTab(next); if (next === 'registry') setRegistryOpened(true); }} />
     <div id={`${id}-installed-panel`} aria-labelledby={`${id}-installed-tab`} role="tabpanel" tabIndex={0} hidden={tab !== 'installed'}>
-      <InstalledServers {...props} selection={selection} />
+      <InstalledServers {...props} selection={selection} active={tab === 'installed'} />
     </div>
     <div id={`${id}-registry-panel`} aria-labelledby={`${id}-registry-tab`} role="tabpanel" tabIndex={0} hidden={tab !== 'registry'}>
-      {registryOpened && <McpRegistry {...props} inDialog={!!selection} />}
+      {registryOpened && <McpRegistry {...props} inDialog={!!selection} active={tab === 'registry'} />}
     </div>
   </>;
 }

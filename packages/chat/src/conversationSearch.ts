@@ -2,19 +2,10 @@ import { create, remove, search, upsert } from '@orama/orama';
 import { convertedAttachmentName } from './chatAttachments.ts';
 import { conversationTitle } from './conversations.ts';
 import type { Conversation } from './conversations.ts';
+import { createSearchTokenizer, normalizeWord, tokenize, wordPattern } from './searchTokenizer.ts';
 
 type SearchHit = { id: string; excerpt?: string };
 export type SearchHistory = (term: string) => Promise<SearchHit[]>;
-
-const wordPattern = /[\p{L}\p{N}][\p{L}\p{M}\p{N}]*/gu;
-
-function normalizeWord(word: string) {
-  return word.toLowerCase().normalize('NFD').replace(/(\p{Script=Latin})\p{M}+/gu, '$1').normalize('NFC');
-}
-
-function tokenize(text: string) {
-  return Array.from(new Set((text.match(wordPattern) ?? []).map(normalizeWord)));
-}
 
 function searchableText({ messages }: Conversation) {
   const parts: string[] = [];
@@ -38,9 +29,8 @@ function excerpt(text: string, terms: string[]) {
 }
 
 function database() {
-  // Use the same Unicode word boundaries for indexing and querying mixed-language chats.
   return create({ schema: { title: 'string', text: 'string' }, sort: { enabled: false },
-    components: { tokenizer: { language: 'unicode', normalizationCache: new Map(), tokenize } } });
+    components: { tokenizer: createSearchTokenizer() } });
 }
 
 export function createConversationSearch() {
