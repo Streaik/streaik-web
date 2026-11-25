@@ -1430,6 +1430,68 @@ test('MCP argument completions are optional, contextual, and debounced for promp
   await expect(page.getByText('Prompt complete', { exact: true })).toBeVisible();
 });
 
+test('OpenAI chat settings pair fields when wide and persist the encrypted reasoning opt-out', async ({ page }) => {
+  await mockModels(page);
+  const requests: { providerMetadata?: unknown }[] = [];
+  await page.route('**/gateway/api/chat', async route => {
+    requests.push(route.request().postDataJSON());
+    await route.fulfill({ contentType: 'text/event-stream', headers: { 'x-vercel-ai-ui-message-stream': 'v1' }, body: sse('Opt-out reply', 1) });
+  });
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await expectChatModel(page);
+
+  const settings = page.getByRole('dialog', { name: 'Chat settings', exact: true });
+  const openAI = settings.getByRole('tabpanel', { name: 'OpenAI', exact: true });
+  const encrypted = openAI.getByRole('switch', { name: 'Include encrypted reasoning', exact: true });
+  async function showOpenAI() {
+    await page.getByRole('button', { name: 'Chat settings', exact: true }).click();
+    await settings.getByRole('tab', { name: 'OpenAI', exact: true }).click();
+  }
+
+  await showOpenAI();
+  await expect(encrypted).toBeChecked();
+  await expect(encrypted).toBeEnabled();
+  await expect(openAI.getByRole('heading').last()).toHaveText('Other');
+  for (const title of ['Reasoning', 'Apply Patch', 'Managed agent session', 'Managed environment session']) {
+    const card = openAI.locator('section').filter({ has: page.getByRole('heading', { name: title, exact: true }) });
+    await expect(card.locator('p')).toHaveCount(0);
+  }
+
+  await openAI.getByRole('switch', { name: 'Configure reasoning', exact: true }).check();
+  await openAI.getByRole('switch', { name: 'Image generation', exact: true }).check();
+  const pairs = [['Reasoning effort', 'Reasoning summary'], ['Image model', 'Image action'], ['Service tier', 'Text verbosity']];
+  for (const [first, second] of pairs) {
+    const left = (await openAI.getByLabel(first, { exact: true }).boundingBox())!;
+    const right = (await openAI.getByLabel(second, { exact: true }).boundingBox())!;
+    expect(right.x).toBeGreaterThan(left.x + left.width);
+    expect(right.y).toBeCloseTo(left.y, 0);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const [first, second] of pairs) {
+    const top = (await openAI.getByLabel(first, { exact: true }).boundingBox())!;
+    const bottom = (await openAI.getByLabel(second, { exact: true }).boundingBox())!;
+    expect(bottom.x).toBeCloseTo(top.x, 0);
+    expect(bottom.y).toBeGreaterThan(top.y + top.height);
+  }
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await openAI.getByRole('switch', { name: 'Configure reasoning', exact: true }).uncheck();
+  await openAI.getByRole('switch', { name: 'Image generation', exact: true }).uncheck();
+  await encrypted.uncheck();
+  await settings.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.reload();
+  await expectChatModel(page);
+  await showOpenAI();
+  await expect(encrypted).not.toBeChecked();
+  await settings.getByRole('button', { name: 'Close', exact: true }).click();
+
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('Send without encrypted reasoning.');
+  await composer.press('Enter');
+  await expect(page.getByText('Opt-out reply', { exact: true })).toBeVisible();
+  expect(requests[0].providerMetadata).toEqual({ openai: { include: [] } });
+});
+
 test('Gateway chat settings share context and replay catalog and approved text-only history tools once', async ({ page }) => {
   await mockModels(page);
   const requests: { messages: { role: string; parts: { text?: string; toolCallId?: string; output?: unknown }[] }[];
@@ -1559,9 +1621,10 @@ test('Gateway chat settings share context and replay catalog and approved text-o
   for (const request of requests.slice(1)) expect(request.providerMetadata).toEqual({ openai: {
     service_tier: 'flex', reasoning: { effort: 'xhigh', context: 'all_turns', summary: 'auto', mode: 'standard' },
     context_management: [{ type: 'compaction', compact_threshold: 4096 }], multi_agent: { enabled: true, max_concurrent_subagents: 4 },
-    include: ['web_search_call.action.sources'], tools: [
+    include: ['web_search_call.action.sources', 'reasoning.encrypted_content'], tools: [
       { type: 'web_search', search_context_size: 'medium', filters: { allowed_domains: ['example.org', 'example.net'] } },
       { type: 'shell', environment: { type: 'container_auto', skills: [{ type: 'skill_reference', skill_id: 'skill_reference_fixture' }] } },
+      { type: 'apply_patch' },
     ],
   } });
   expect(requests[2].messages.at(-1)?.parts).toEqual(expect.arrayContaining([

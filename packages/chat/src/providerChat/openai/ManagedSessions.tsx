@@ -1,6 +1,6 @@
 import { useId, useState } from 'react';
 import { useAppTranslation } from '../../i18n';
-import { Card, Choice, Integer, ListField, Text, Toggle, setOption } from '../fields';
+import { Card, Choice, FieldGrid, Integer, ListField, Text, Toggle, setOption } from '../fields';
 import type { OptionsEditor } from '../fields';
 import type { NativeOptions, NativeValue } from '../settings';
 import { efforts, object, summaries, tiers, typedItem, updateTypedItem } from './options';
@@ -30,7 +30,6 @@ function JsonSchema({ value, onChange }: { value?: NativeValue; onChange: (schem
 }
 
 export function ManagedSessions({ value, onChange }: OptionsEditor) {
-  const { t } = useAppTranslation();
   const agent = object(value.agent);
   const environment = object(value.environment);
   const setAgent = (key: string, next?: NativeValue) => onChange(setOption(value, 'agent', setOption(agent, key, next)));
@@ -50,67 +49,77 @@ export function ManagedSessions({ value, onChange }: OptionsEditor) {
   const programmatic = tool('programmatic_tool_calling');
   return <>
     <Card title="Managed agent session">
-      <p>{t('Saved for managed sessions. These settings are not sent to the default Responses route.')}</p>
       <Toggle label="Configure managed agent" checked={!!value.agent} onChange={on => onChange(setOption(value, 'agent', on ? {} : undefined))} />
       {!!value.agent && <>
         <Text label="Session agent model" value={agent.model} onChange={next => setAgent('model', next)} />
         <Text label="Session agent instructions" multiline value={agent.instructions} onChange={next => setAgent('instructions', next)} />
-        <Choice label="Session reasoning effort" value={reasoning.effort} choices={efforts}
-          onChange={next => setAgent('reasoning', setOption(reasoning, 'effort', next))} />
-        <Choice label="Session reasoning summary" value={reasoning.summary} choices={summaries}
-          onChange={next => setAgent('reasoning', setOption(reasoning, 'summary', next))} />
-        <Choice label="Session service tier" value={agent.service_tier} choices={tiers} onChange={next => setAgent('service_tier', next)} />
-        <Choice label="Session text verbosity" value={text.verbosity} choices={['low', 'medium', 'high']}
-          onChange={next => setAgent('text', setOption(text, 'verbosity', next))} />
-        <Choice label="Session response format" value={format.type} choices={['text', 'json_schema']}
-          onChange={type => setAgent('text', setOption(text, 'format', type === 'json_schema' ? { type, schema: format.schema ?? {} } : type ? { type } : undefined))} />
+        <FieldGrid>
+          <Choice label="Session reasoning effort" value={reasoning.effort} choices={efforts}
+            onChange={next => setAgent('reasoning', setOption(reasoning, 'effort', next))} />
+          <Choice label="Session reasoning summary" value={reasoning.summary} choices={summaries}
+            onChange={next => setAgent('reasoning', setOption(reasoning, 'summary', next))} />
+          <Choice label="Session service tier" value={agent.service_tier} choices={tiers} onChange={next => setAgent('service_tier', next)} />
+          <Choice label="Session text verbosity" value={text.verbosity} choices={['low', 'medium', 'high']}
+            onChange={next => setAgent('text', setOption(text, 'verbosity', next))} />
+          <Choice label="Session response format" value={format.type} choices={['text', 'json_schema']}
+            onChange={type => setAgent('text', setOption(text, 'format', type === 'json_schema' ? { type, schema: format.schema ?? {} } : type ? { type } : undefined))} />
+        </FieldGrid>
         {format.type === 'json_schema' && <JsonSchema value={format.schema} onChange={schema => setAgent('text', { ...text, format: { ...format, schema } })} />}
         <Toggle label="Enable session subagents" checked={multi.enabled === true}
           onChange={on => setAgent('multi_agent', on ? { ...multi, enabled: true } : undefined)} />
         {multi.enabled === true && <Integer label="Session maximum subagents" value={multi.max_concurrent_subagents} min={1}
           onChange={next => setAgent('multi_agent', setOption(multi, 'max_concurrent_subagents', next))} />}
-        {([['computer_use', 'Session computer use'], ['web_search', 'Session web search'],
-          ['programmatic_tool_calling', 'Session programmatic tool calling'], ['tool_search', 'Session tool search']] as const).map(([type, label]) =>
-          <Toggle key={type} label={label} checked={!!tool(type)} onChange={on => saveTool(type, on ? {} : undefined)} />)}
-        {computer && <Toggle label="Include session screenshots" checked={computer.include_screenshots === true}
-          onChange={on => updateTool('computer_use', 'include_screenshots', on)} />}
-        {programmatic && <Toggle label="Enable session programmatic execution" checked={programmatic.enabled !== false}
-          onChange={on => updateTool('programmatic_tool_calling', 'enabled', on)} />}
+        <FieldGrid>
+          {([['computer_use', 'Session computer use'], ['web_search', 'Session web search'],
+            ['programmatic_tool_calling', 'Session programmatic tool calling'], ['tool_search', 'Session tool search']] as const).map(([type, label]) =>
+            <Toggle key={type} label={label} checked={!!tool(type)} onChange={on => saveTool(type, on ? {} : undefined)} />)}
+          {computer && <Toggle label="Include session screenshots" checked={computer.include_screenshots === true}
+            onChange={on => updateTool('computer_use', 'include_screenshots', on)} />}
+          {programmatic && <Toggle label="Enable session programmatic execution" checked={programmatic.enabled !== false}
+            onChange={on => updateTool('programmatic_tool_calling', 'enabled', on)} />}
+        </FieldGrid>
         {search && <>
-          <Choice label="Session web search mode" value={search.mode} choices={['disabled', 'cached', 'live']}
-            onChange={next => updateTool('web_search', 'mode', next)} />
-          <Choice label="Session search context size" value={search.context_size} choices={['low', 'medium', 'high']}
-            onChange={next => updateTool('web_search', 'context_size', next)} />
+          <FieldGrid>
+            <Choice label="Session web search mode" value={search.mode} choices={['disabled', 'cached', 'live']}
+              onChange={next => updateTool('web_search', 'mode', next)} />
+            <Choice label="Session search context size" value={search.context_size} choices={['low', 'medium', 'high']}
+              onChange={next => updateTool('web_search', 'context_size', next)} />
+          </FieldGrid>
           <ListField label="Session allowed web domains" value={search.allowed_domains}
             onChange={next => updateTool('web_search', 'allowed_domains', next)} />
-          {([['country', 'Session country'], ['region', 'Session region'], ['city', 'Session city'], ['timezone', 'Session time zone']] as const)
-            .map(([key, label]) => <Text key={key} label={label} value={searchLocation[key]}
-              onChange={next => updateTool('web_search', 'location', setOption(searchLocation, key, next))} />)}
+          <FieldGrid>
+            {([['country', 'Session country'], ['region', 'Session region'], ['city', 'Session city'], ['timezone', 'Session time zone']] as const)
+              .map(([key, label]) => <Text key={key} label={label} value={searchLocation[key]}
+                onChange={next => updateTool('web_search', 'location', setOption(searchLocation, key, next))} />)}
+          </FieldGrid>
         </>}
       </>}
     </Card>
     <Card title="Managed environment session">
-      <p>{t('Saved for managed sessions. These settings are not sent to the default Responses route.')}</p>
       <Toggle label="Configure managed environment" checked={!!value.environment}
         onChange={on => onChange(setOption(value, 'environment', on ? { type: 'openai_hosted' } : undefined))} />
       {!!value.environment && <>
-        <Choice label="Session environment type" value={environment.type} choices={{ none: 'None', openai_hosted: 'OpenAI hosted' }}
-          onChange={type => onChange(setOption(value, 'environment', { type: type ?? 'openai_hosted' }))} />
+        <FieldGrid>
+          <Choice label="Session environment type" value={environment.type} choices={{ none: 'None', openai_hosted: 'OpenAI hosted' }}
+            onChange={type => onChange(setOption(value, 'environment', { type: type ?? 'openai_hosted' }))} />
+          {environment.type === 'openai_hosted' && <>
+            <Text label="Environment template ID" value={environment.environment_template_id}
+              onChange={next => setEnvironment('environment_template_id', next)} />
+            <Choice label="Environment container size" value={environment.container_size} choices={['small', 'medium', 'large']}
+              onChange={next => setEnvironment('container_size', next)} />
+            <Choice label="Environment network access" value={network.access} choices={['enabled', 'disabled', 'restricted']}
+              onChange={access => setEnvironment('network', access === 'restricted' ? { ...network, access } : access ? { access } : undefined)} />
+          </>}
+        </FieldGrid>
         {environment.type === 'openai_hosted' && <>
-          <Text label="Environment template ID" value={environment.environment_template_id}
-            onChange={next => setEnvironment('environment_template_id', next)} />
-          <Choice label="Environment container size" value={environment.container_size} choices={['small', 'medium', 'large']}
-            onChange={next => setEnvironment('container_size', next)} />
           <Toggle label="Enable environment desktop" checked={desktop.enabled === true}
             onChange={on => setEnvironment('desktop', { ...desktop, enabled: on })} />
-          <Choice label="Environment network access" value={network.access} choices={['enabled', 'disabled', 'restricted']}
-            onChange={access => setEnvironment('network', access === 'restricted' ? { ...network, access } : access ? { access } : undefined)} />
-          {network.access === 'restricted' && <>
+          {network.access === 'restricted' && <FieldGrid>
             <ListField label="Environment allowed domains" value={network.allowed_domains}
               onChange={next => setEnvironment('network', setOption(network, 'allowed_domains', next))} />
             <ListField label="Environment blocked domains" value={network.blocked_domains}
               onChange={next => setEnvironment('network', setOption(network, 'blocked_domains', next))} />
-          </>}
+          </FieldGrid>}
         </>}
       </>}
     </Card>

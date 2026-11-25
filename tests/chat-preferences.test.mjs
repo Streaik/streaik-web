@@ -5,7 +5,7 @@ import { defaultMcpPreferences } from '../packages/chat/src/mcpPreferences.ts';
 import { conversationGatewayCost, latestContextUsage } from '../packages/chat/src/messageMetadata.ts';
 import { filterToolOutputContent } from '../packages/chat/src/toolOutputContent.ts';
 import { chatProviderRequest } from '../packages/chat/src/providerChat/settings.ts';
-import { updateTypedItem } from '../packages/chat/src/providerChat/openai/options.ts';
+import { encryptedReasoningInclude, updateTypedItem } from '../packages/chat/src/providerChat/openai/options.ts';
 
 test('old profiles get Chat defaults; only explicit, valid booleans override each preference', () => {
   const defaults = { text: true, links: true, images: false, audio: false, video: false, documents: false };
@@ -70,7 +70,7 @@ test('OpenAI response options preserve native tool order, isolate session settin
   const multi_agent = { enabled: true, max_concurrent_subagents: 4 };
   const providerSettings = { openai: { tools: changed, agent: { model: 'agent-model' }, environment: { type: 'openai_hosted' }, multi_agent }, together: { reasoning_effort: 'high' } };
   const requested = chatProviderRequest(providerSettings, 'openai/gpt-5');
-  assert.deepEqual(requested.providerMetadata.openai, { tools: changed.slice(0, 3), multi_agent });
+  assert.deepEqual(requested.providerMetadata.openai, { tools: changed.slice(0, 4), multi_agent });
   assert.deepEqual(requested.headers, { 'OpenAI-Beta': 'responses_multi_agent=v1' });
   assert.equal(chatProviderRequest(providerSettings, 'together/openai/gpt-oss-120b').headers, undefined);
   saveChatPreferences('alpha', { ...defaultChatPreferences, providerSettings });
@@ -80,6 +80,27 @@ test('OpenAI response options preserve native tool order, isolate session settin
   const storedSecret = restored.openai.tools[1].environment.network_policy.domain_secrets[0];
   assert.deepEqual(storedSecret, { domain: 'example.org', name: 'TOKEN' });
   assert.equal(chatProviderRequest(restored, 'openai/gpt-5').providerMetadata.openai.tools[1].environment.network_policy.domain_secrets, undefined);
+});
+
+test('encrypted reasoning defaults on and a saved opt-out becomes a native include array, not an upstream flag', (t) => {
+  const storage = new Map();
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  t.after(() => { if (original) Object.defineProperty(globalThis, 'localStorage', original); else delete globalThis.localStorage; });
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value),
+  } });
+
+  const request = openai => chatProviderRequest({ openai }, 'openai/gpt-5')?.providerMetadata;
+  const include = ['web_search_call.action.sources', 'file_search_call.results'];
+  assert.equal(request({}), undefined); // API Chat applies the default when include is absent.
+  assert.deepEqual(request({ include }), { openai: { include: [...include, encryptedReasoningInclude] } });
+  assert.deepEqual(request({ include: [encryptedReasoningInclude, ...include] }), { openai: { include: [encryptedReasoningInclude, ...include] } });
+
+  const openai = { includeEncryptedReasoning: false, include: [encryptedReasoningInclude, ...include] };
+  saveChatPreferences('alpha', { ...defaultChatPreferences, providerSettings: { openai } });
+  assert.deepEqual(loadChatPreferences('alpha').providerSettings, { openai });
+  assert.deepEqual(request(loadChatPreferences('alpha').providerSettings.openai), { openai: { include } });
+  assert.deepEqual(request({ includeEncryptedReasoning: false }), { openai: { include: [] } });
 });
 
 const assistant = (metadata, parts = []) => ({ role: 'assistant', metadata, parts });
