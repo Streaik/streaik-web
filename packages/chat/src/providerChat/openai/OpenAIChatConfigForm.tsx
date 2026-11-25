@@ -2,7 +2,7 @@ import { Button } from '@streaik/themes';
 import { useAppTranslation } from '../../i18n';
 import { Card, Choice, Integer, ParallelCalls, Text, Toggle, setOption } from '../fields';
 import type { OptionsEditor, ProviderFormProps } from '../fields';
-import type { NativeOptions, NativeValue } from '../settings';
+import type { NativeValue } from '../settings';
 import { efforts, list, object, summaries, tiers } from './options';
 import { HostedTools } from './HostedTools';
 import { ExecutionTools } from './ExecutionTools';
@@ -38,7 +38,7 @@ function ContextManagement({ value, onChange }: OptionsEditor) {
         </div>
       </fieldset>;
     })}
-    <div><Button variant="outline" onClick={() => save([...rows, { type: 'compaction', compact_threshold: 1000 }])}>{t('Add compaction rule')}</Button></div>
+    <div><Button variant="subtle" onClick={() => save([...rows, { type: 'compaction', compact_threshold: 1000 }])}>{t('Add compaction rule')}</Button></div>
   </Card>;
 }
 

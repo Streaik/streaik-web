@@ -30,7 +30,7 @@ function ContainerOptions({ value, onChange }: OptionsEditor) {
           <div><Button variant="subtle" onClick={() => setSecrets(secrets.filter((_, i) => i !== index))}>{t('Remove secret')}</Button></div>
         </fieldset>;
       })}
-      <div><Button variant="outline" onClick={() => setSecrets([...secrets, {}])}>{t('Add domain secret')}</Button></div>
+      <div><Button variant="subtle" onClick={() => setSecrets([...secrets, {}])}>{t('Add domain secret')}</Button></div>
     </>}
   </>;
 }
@@ -52,7 +52,7 @@ function SkillReferences({ value, onChange }: OptionsEditor) {
         <div><Button variant="subtle" onClick={() => save(skills.filter((_, i) => i !== index))}>{t('Remove skill')}</Button></div>
       </fieldset>;
     })}
-    <div><Button variant="outline" onClick={() => save([...skills, { type: 'skill_reference' }])}>{t('Add skill reference')}</Button></div>
+    <div><Button variant="subtle" onClick={() => save([...skills, { type: 'skill_reference' }])}>{t('Add skill reference')}</Button></div>
   </fieldset>;
 }
 
