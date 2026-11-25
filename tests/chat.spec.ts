@@ -3,6 +3,7 @@ import type { Page } from '@playwright/test';
 import type { TokenRates } from '@streaik/gateway';
 import { readFileSync } from 'node:fs';
 import { BlobWriter, TextReader, ZipWriter } from '@zip.js/zip.js';
+import { faviconEndpoint, iconResponse, openAiFavicon } from './icon-fixtures';
 
 const directory = JSON.parse(readFileSync(new URL('../packages/chat/src/provider-directory.json', import.meta.url), 'utf8')) as {
   providers: { id: string; country?: string; regions?: string[]; tokenPricing?: Partial<Record<string, TokenRates>> }[];
@@ -13,6 +14,7 @@ const fakeKey = 'test-openai-key';
 const passphrase = 'a test-only passphrase';
 
 test.beforeEach(async ({ page }) => {
+  await page.route(faviconEndpoint, route => route.fulfill(iconResponse));
   page.on('pageerror', (error) => console.error(error.stack ?? error.message));
   page.on('response', (response) => {
     if (response.status() >= 400 && !response.url().includes('/gateway/')) console.error(response.status(), response.url());
@@ -116,6 +118,12 @@ test('app agent defaults select only available models, and transcription clearin
   await picker.click();
   await page.getByRole('option', { name: 'gpt-4o-transcribe', exact: true }).click();
   await expect(picker).toHaveText('Select a model');
+  const transcription = page.getByRole('form', { name: 'Transcription composer' });
+  for (const name of ['Send', 'Dictate', 'Real-time']) {
+    await expect(transcription.getByRole('button', { name, exact: true })).toBeDisabled();
+  }
+  await expect(page.getByText('The selected model does not support file transcription on this route.')).toHaveCount(0);
+  await expect(page.getByText('Dictate needs a file transcription model.')).toHaveCount(0);
   await page.reload();
   await connect();
   await expect(picker).toBeEnabled();
@@ -661,9 +669,9 @@ test('a pinned remote skill can be downloaded, saved locally, and uploaded using
   expect(cursors).toEqual([null, skill.id]);
 });
 
-test('above-composer spinner clears and a failed provider logo leaves the full model ID', async ({ page }) => {
+test('above-composer spinner clears and a failed provider favicon leaves the full model ID', async ({ page }) => {
   await mockModels(page);
-  await page.route('**/logos/openai.png', (route) => route.abort());
+  await page.route(openAiFavicon, (route) => route.abort());
   const delay = Promise.withResolvers<void>();
   await page.route('**/gateway/api/chat', async (route) => {
     await delay.promise;
@@ -991,7 +999,8 @@ test('global Chat preferences persist and control badges and context independent
   await expect(bar).toHaveCount(0);
   await send('First usage question');
   const lastReply = page.getByRole('article', { name: 'Assistant', exact: true }).last();
-  await expect(lastReply.locator('.chat-provider-logo')).toBeVisible();
+  await expect(lastReply.locator('.chat-provider-logo')).toHaveAttribute('src', openAiFavicon);
+  await expect(lastReply.locator('.chat-speaker')).toHaveText('gpt-4.1-mini');
   await expect(lastReply.getByRole('img', { name: /^Total tokens:/ })).toHaveText('2,034');
   await expect(lastReply.getByRole('img', { name: /^Time to first token:/ })).toHaveCount(0);
   await expect(cost).toHaveCount(0);
@@ -2917,6 +2926,7 @@ for (const [host, url] of [['BYOK', '/'], ['Entra', 'http://localhost:15174']] a
     await search.fill('OpenAI');
     const openai = cards.filter({ has: page.getByRole('heading', { name: 'OpenAI', exact: true }) });
     await expect(openai).toBeVisible();
+    await expect(openai.locator('.catalog-mark img')).toHaveAttribute('src', openAiFavicon);
     for (const label of ['website', 'docs', 'pricing', 'terms', 'privacy', 'console']) {
       const link = openai.getByRole('link', { name: `OpenAI ${label}`, exact: true });
       await expect(link).toHaveText('');

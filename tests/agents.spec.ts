@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test';
 import type { Page, Route } from '@playwright/test';
+import { faviconEndpoint, iconResponse, openAiFavicon } from './icon-fixtures';
+
+test.beforeEach(async ({ page }) => {
+  await page.route(faviconEndpoint, route => route.fulfill(iconResponse));
+});
 
 const agents = (page: Page) => page.getByRole('button', { name: 'Agents', exact: true });
 const card = (page: Page, name: string) => page.getByRole('article', { name, exact: true });
@@ -314,7 +319,7 @@ test('catalog-backed models and Realtime settings persist without starting audio
   await editor.getByLabel('Speed', { exact: true }).fill('1.15');
   await editor.getByRole('button', { name: 'Save agent' }).click();
   const local = card(page, 'Audio agent');
-  await expect(local.locator('.catalog-mark img')).toHaveAttribute('src', /\/openai\.png$/);
+  await expect(local.locator('.catalog-mark img')).toHaveAttribute('src', openAiFavicon);
 
   available = false;
   await page.reload();
@@ -433,16 +438,15 @@ test('Agents share provider forms and use the selected model’s saved native se
 });
 
 test('agent cards share provider icons and fall back when themed icons fail or are removed', async ({ page }) => {
-  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="purple"/></svg>';
-  await page.route('**/agent-mark.svg', (route) => route.fulfill({ contentType: 'image/svg+xml', body: svg }));
-  await page.route('**/agent-light.svg', (route) => route.fulfill({ contentType: 'image/svg+xml', body: svg }));
+  await page.route('**/agent-mark.svg', (route) => route.fulfill(iconResponse));
+  await page.route('**/agent-light.svg', (route) => route.fulfill(iconResponse));
   await page.route('**/agent-dark.svg', (route) => route.fulfill({ status: 404 }));
   await page.emulateMedia({ colorScheme: 'light' });
   await page.goto('/');
   await agents(page).click();
   const sample = card(page, welcome);
   const icon = sample.locator('.catalog-mark img');
-  await expect(icon).toHaveAttribute('src', /\/openai\.png$/);
+  await expect(icon).toHaveAttribute('src', openAiFavicon);
   await sample.getByRole('button', { name: 'Edit', exact: true }).click();
   const edit = page.getByRole('dialog', { name: 'Edit agent', exact: true });
   const details = edit.getByRole('tab', { name: 'Details', exact: true });
@@ -464,7 +468,7 @@ test('agent cards share provider icons and fall back when themed icons fail or a
   await details.click();
   await edit.getByRole('button', { name: 'Remove icon 1', exact: true }).click();
   await edit.getByRole('button', { name: 'Save agent' }).click();
-  await expect(icon).toHaveAttribute('src', /\/openai\.png$/);
+  await expect(icon).toHaveAttribute('src', openAiFavicon);
 });
 
 test('sample overrides persist and reset without changing explicit role choices', async ({ page }) => {
