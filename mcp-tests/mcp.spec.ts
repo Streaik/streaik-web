@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { APIRequestContext, APIResponse, Page, Request } from '@playwright/test';
-import { fetchMcpCatalog, mcpAppAuth } from '../packages/chat/src/mcp';
+import { completeMcpArgument, discoverMcpServer, fetchMcpCatalog, mcpAppAuth } from '../packages/chat/src/mcp';
 import { acceptsEntraMcpToken, readMcpConfig } from '../samples/shared/mcpConfig';
 
 const model = 'openai/gpt-4.1-mini';
@@ -256,6 +256,17 @@ for (const approve of [true, false]) {
     expect(toolCalls).toBe(1);
   });
 }
+
+test('bundled REST Countries returns prompt completions through the web MCP client', async () => {
+  const server = { id: 'countries', title: 'REST Countries', endpoint: `${mcp}/github-rest-countries`, requestHeaders: () => ({}) };
+  const signal = new AbortController().signal;
+  const discovery = await discoverMcpServer(server, signal);
+  expect(discovery.hasCompletions).toBe(true);
+  const name = 'list-languages-by-region';
+  expect(discovery.prompts.some(prompt => prompt.name === name)).toBe(true);
+  const suggestions = await completeMcpArgument(server, { ref: { type: 'ref/prompt', name }, argument: { name: 'region', value: '' } }, signal);
+  expect(suggestions).toContain('Europe');
+});
 
 test('approved REST Countries structured data reaches the next chat request', async ({ page }) => {
   const endpoint = `${mcp}/github-rest-countries`;
