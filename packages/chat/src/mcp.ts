@@ -4,6 +4,7 @@ import type { McpRemoteHeader, McpServerRecord } from './mcpConfiguration.ts';
 export type { McpRemoteHeader } from './mcpConfiguration.ts';
 
 const revision = '2026-07-28';
+const entraProtectedRemotes = 'net.streaik/entra-protected-remotes';
 
 type RequestHeaders = (signal?: AbortSignal) => HeadersInit | Promise<HeadersInit>;
 export type McpAppAuth = { ready: boolean; headers: RequestHeaders; challengeOnly?: boolean };
@@ -28,7 +29,7 @@ export function mcpFailure(error: unknown): string {
   return error instanceof McpRequestError ? error.message : 'The MCP request could not be completed.';
 }
 export type McpCatalogServer = { name: string; title: string; description?: string; version?: string;
-  remotes: Pick<McpServerRecord, 'endpoint' | 'declarations'>[] };
+  remotes: (Pick<McpServerRecord, 'endpoint' | 'declarations'> & { requiresEntra?: true })[] };
 
 export function isMcpRuntime(endpoint: string, base?: URL) {
   if (!base || mcpEndpoint(endpoint) !== endpoint) return false;
@@ -69,14 +70,21 @@ export async function fetchMcpCatalog(registryUrl: URL, signal: AbortSignal, cur
   const names = new Set<string>();
   for (const item of listing.servers) {
     if (!isObject(item) || !isObject(item.server)) continue;
-    const { name, title, description, version, remotes } = item.server;
+    const { name, title, description, version, remotes, _meta } = item.server;
     if (typeof name !== 'string' || !name.trim() || name.length > 240 || names.has(name)) continue;
+    const protectedUrls = isObject(_meta) ? _meta[entraProtectedRemotes] : undefined;
+    const protectedEndpoints = new Set(Array.isArray(protectedUrls) ? protectedUrls.flatMap(url => {
+      const endpoint = typeof url === 'string' ? mcpEndpoint(url) : undefined;
+      return endpoint ? [endpoint] : [];
+    }) : []);
     const choices: McpCatalogServer['remotes'] = [];
     for (const remote of Array.isArray(remotes) ? remotes : []) {
       if (!isObject(remote) || remote.type !== 'streamable-http' || typeof remote.url !== 'string') continue;
       const endpoint = mcpEndpoint(remote.url);
       const declarations = mcpDeclarations(remote.headers);
-      if (endpoint && declarations && !choices.some(remote => remote.endpoint === endpoint)) choices.push({ endpoint, declarations });
+      if (endpoint && declarations && !choices.some(remote => remote.endpoint === endpoint)) {
+        choices.push({ endpoint, declarations, ...(protectedEndpoints.has(endpoint) ? { requiresEntra: true } : {}) });
+      }
     }
     names.add(name);
     servers.push({ name, title: (typeof title === 'string' && title.trim() || name.split('/').at(-1) || name).slice(0, 160),

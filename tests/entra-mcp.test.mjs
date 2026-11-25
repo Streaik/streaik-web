@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createEntraMcpHeaders } from '../samples/entra/src/mcpAuth.ts';
 import { readMcpScopes } from '../samples/entra/src/auth.ts';
-import { discoverMcpServer, expandMcpResource, filterMcpCatalog, preferredMcpRemote, readMcpResource } from '../packages/chat/src/mcp.ts';
+import { discoverMcpServer, expandMcpResource, fetchMcpCatalog, filterMcpCatalog, preferredMcpRemote, readMcpResource } from '../packages/chat/src/mcp.ts';
 import { byokRegistryRemote } from '../samples/shared/mcpConfig.ts';
 
 const base = new URL('https://mcp.example.test/team/entra/');
@@ -26,14 +26,25 @@ test('the registry prefers the Entra remote over the BYOK remote when the Entra 
   assert.equal(preferredMcpRemote([byok, managed], { base: new URL('https://mcp.example.test/team/byok/') }), byok);
 });
 
-test('BYOK sees only header remotes for bundled servers in a shared registry', () => {
-  const byok = { endpoint: 'https://mcp.example.test/team/byok/google-images', declarations: [{ name: 'x-goog-api-key' }] };
-  const managed = { endpoint, declarations: [] };
-  const graph = { endpoint: new URL('microsoft-onenote', base).href, declarations: [] };
-  const google = { name: 'io.github.streaik/Google-Images', title: 'Google Images', remotes: [byok, managed] };
-  const oneNote = { name: 'io.github.streaik/Microsoft-OneNote', title: 'OneNote', remotes: [graph] };
-  const thirdParty = { name: 'test.example/public', title: 'Public server', remotes: [{ endpoint: 'https://test.example/public', declarations: [] }] };
-  assert.deepEqual(filterMcpCatalog([google, oneNote, thirdParty], byokRegistryRemote), [{ ...google, remotes: [byok] }, thirdParty]);
+test('BYOK hides marked Entra remotes but keeps anonymous, header-auth and third-party remotes', async t => {
+  const byok = 'https://mcp.example.test/team/byok/google-images';
+  const graph = new URL('microsoft-onenote', base).href;
+  const countries = new URL('github-rest-countries', base).href;
+  const thirdParty = 'https://other.example.test/public';
+  const streamable = (url, headers) => ({ type: 'streamable-http', url, headers });
+  const metadata = (...urls) => ({ 'net.streaik/entra-protected-remotes': urls });
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ servers: [
+    { server: { name: 'test.example.mcp/Google-Images', remotes: [streamable(byok, [{ name: 'x-goog-api-key', isSecret: true }]), streamable(endpoint)],
+      _meta: metadata(endpoint, null, 'not a URL') } },
+    { server: { name: 'test.example.mcp/Microsoft-OneNote', remotes: [streamable(graph)], _meta: metadata(graph) } },
+    { server: { name: 'test.example.mcp/GitHub-RESTCountries', remotes: [streamable(countries)] } },
+    { server: { name: 'test.example.other/public', remotes: [streamable(thirdParty)] } },
+  ] }));
+  const { servers } = await fetchMcpCatalog(new URL('https://registry.example.test/v0.1/servers'), new AbortController().signal);
+  assert.equal(servers.length, 4);
+  assert.equal(servers[0].remotes[1].requiresEntra, true);
+  assert.equal(preferredMcpRemote(servers[0].remotes, { base }).endpoint, endpoint);
+  assert.deepEqual(filterMcpCatalog(servers, byokRegistryRemote).map(server => server.remotes.map(remote => remote.endpoint)), [[byok], [countries], [thirdParty]]);
 });
 
 function mockAuth() {

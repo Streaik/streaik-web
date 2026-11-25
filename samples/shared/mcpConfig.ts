@@ -3,9 +3,8 @@ import { normalizeGatewayBase } from '@streaik/gateway';
 
 export type McpConfig = Pick<McpOptions, 'base' | 'registryUrl'>;
 
-// Outside the configured BYOK host, keep bundled headerless remotes (which can be OAuth) out of the view.
-export const byokRegistryRemote: NonNullable<McpOptions['filterRegistryRemote']> = (name, remote) =>
-  !name.startsWith('io.github.streaik/') || remote.declarations.length > 0;
+// The registry marks Entra-only remotes explicitly; headerless anonymous remotes remain visible.
+export const byokRegistryRemote: NonNullable<McpOptions['filterRegistryRemote']> = (_name, remote) => !remote.requiresEntra;
 
 export function readMcpConfig(site: URL, base?: string, registry?: string): McpConfig | undefined {
   if (!base?.trim() && !registry?.trim()) return;
