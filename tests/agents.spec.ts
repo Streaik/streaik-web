@@ -32,6 +32,40 @@ async function create(page: Page, name: string) {
   return editor;
 }
 
+test('agent tool configuration edits the portable blueprint without contacting an uninstalled MCP endpoint', async ({ page }) => {
+  let unauthorized = 0;
+  await page.route('https://inventory.example/mcp', route => { unauthorized++; return route.abort(); });
+  await page.goto('/');
+  await agents(page).click();
+  const editor = await create(page, 'Inventory helper');
+  await editor.getByRole('tab', { name: 'Tools', exact: true }).click();
+  const tools = editor.getByRole('tabpanel', { name: 'Tools', exact: true });
+  await tools.getByRole('checkbox', { name: 'Tool search', exact: true }).check();
+  const addServer = tools.getByRole('group', { name: 'Add MCP server', exact: true });
+  await addServer.getByLabel('Server name').fill('Inventory');
+  await addServer.getByLabel('MCP URL').fill('https://inventory.example/mcp');
+  await addServer.getByRole('button', { name: 'Add MCP server' }).click();
+  const server = tools.getByRole('group', { name: 'Inventory', exact: true });
+  await server.getByRole('checkbox', { name: 'Namespace', exact: true }).check();
+  await server.getByRole('checkbox', { name: 'Search', exact: true }).check();
+  await server.getByRole('checkbox', { name: 'Restrict allowed tools' }).check();
+  await server.getByLabel('Allowed tool names (one per line)').fill('lookup');
+  await editor.getByRole('tab', { name: 'Tool configuration', exact: true }).click();
+  const configuration = editor.getByRole('tabpanel', { name: 'Tool configuration' });
+  await configuration.getByRole('switch', { name: 'Search for lookup', exact: true }).uncheck();
+  await configuration.locator('summary[aria-label="Usage method for lookup"]').click();
+  await configuration.getByRole('checkbox', { name: 'Direct', exact: true }).check();
+  await editor.getByRole('button', { name: 'Save agent' }).click();
+  await expect(card(page, 'Inventory helper')).toBeVisible();
+  const saved = await page.evaluate(() => {
+    const key = Object.keys(localStorage).find(value => value.startsWith('streaik.agents.v1:'));
+    return key ? JSON.parse(localStorage.getItem(key)!).local.find((item: { definition: { name: string } }) => item.definition.name === 'Inventory helper')?.definition : undefined;
+  });
+  expect(saved).toMatchObject({ tools: [{ type: 'tool_search' }, { type: 'function', name: 'lookup', allowed_callers: ['direct'], defer_loading: false }],
+    mcpServers: { Inventory: { type: 'http', url: 'https://inventory.example/mcp', allowed_tools: ['lookup'], namespace: true, defer_loading: true } } });
+  expect(unauthorized).toBe(0);
+});
+
 const textAgentModel = 'openai/gpt-6-luna';
 const replyModel = 'openai/gpt-4.1-mini';
 const agentTestKey = 'test-agent-openai-key';

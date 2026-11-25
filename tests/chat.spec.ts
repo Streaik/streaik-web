@@ -78,6 +78,51 @@ async function mockModels(page: Page) {
   });
 }
 
+test('chat tool configuration sends namespaced options and defaults leave the tools attached', async ({ page }) => {
+  await mockModels(page);
+  const requests: Record<string, unknown>[] = [];
+  await page.route('**/gateway/api/chat', route => {
+    requests.push(route.request().postDataJSON());
+    return route.fulfill({ contentType: 'text/event-stream', headers: { 'x-vercel-ai-ui-message-stream': 'v1' },
+      body: sse(`Tool configuration reply ${requests.length}`, requests.length) });
+  });
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await chooseChatModel(page);
+  const settings = page.getByRole('dialog', { name: 'Chat settings', exact: true });
+  const open = () => page.getByRole('button', { name: 'Chat settings', exact: true }).click();
+  const tab = () => settings.getByRole('tab', { name: 'Tool configuration', exact: true }).click();
+  await open();
+  await settings.getByRole('tab', { name: 'Tools', exact: true }).click();
+  await settings.getByRole('switch', { name: 'Artificial Intelligence', exact: true }).check();
+  await tab();
+  const panel = settings.getByRole('tabpanel', { name: 'Tool configuration' });
+  await panel.getByRole('switch', { name: 'Use namespaces' }).check();
+  await panel.locator('summary[aria-label="Usage method for All tools"]').click();
+  await panel.getByRole('checkbox', { name: 'Programmatic', exact: true }).check();
+  await panel.getByRole('switch', { name: 'Search for local_ai_models_search', exact: true }).check();
+  await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('Send configured tools'); await composer.press('Enter');
+  await expect(page.getByText('Tool configuration reply 1')).toBeVisible();
+  expect(requests[0]).toMatchObject({ clientToolResultApproval: true, providerMetadata: { openai: { tools: [
+    { type: 'namespace', name: 'local', tools: expect.arrayContaining([
+      expect.objectContaining({ name: 'local_ai_models_search', allowed_callers: ['programmatic'], defer_loading: true }),
+      expect.objectContaining({ name: 'local_ai_providers_list', allowed_callers: ['programmatic'] }),
+    ]) },
+  ] } } });
+  expect(requests[0]).not.toHaveProperty('tools');
+  await open(); await tab();
+  await settings.getByRole('button', { name: 'Defaults', exact: true }).click();
+  await expect(panel.getByRole('switch', { name: 'Use namespaces' })).not.toBeChecked();
+  await expect(panel.getByRole('switch', { name: 'Search for local_ai_models_search', exact: true })).not.toBeChecked();
+  await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  await composer.fill('Send default tools'); await composer.press('Enter');
+  await expect(page.getByText('Tool configuration reply 2')).toBeVisible();
+  expect(requests[1].tools).toContainEqual(expect.objectContaining({ name: 'local_ai_models_search' }));
+  expect(JSON.stringify(requests[1].tools)).not.toMatch(/allowed_callers|defer_loading/);
+});
+
 test('app agent defaults select only available models, and transcription clearing survives reload', async ({ page }) => {
   const alternatives = [{ id: model }, { id: 'openai/gpt-image-1', type: 'image' },
     { id: 'openai/other-video', type: 'video' }, { id: 'openai/gpt-4o-transcribe', type: 'transcription' }];
