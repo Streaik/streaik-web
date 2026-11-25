@@ -495,6 +495,7 @@ test('Google Live Transcribe waits for setup, streams PCM, and saves only finali
     { id: 'google/gemini-2.5-flash-native-audio-preview', type: 'audio', tags: ['realtime'] },
     { id: googleModel, type: 'transcription', tags: ['realtime'] },
   ]);
+  await chooseModel(page, googleModel);
   await expect(start(page)).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Dictate', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: 'Transcription settings' }).click();

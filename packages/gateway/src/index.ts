@@ -89,14 +89,14 @@ function apiChatProvider(id: string): string | undefined {
 
 export function isTextModel(provider: string, nativeId: string, type: string | undefined) {
   // Catalog classification is not a promise that /api/chat supports the model.
-  if (provider === 'openai' && /(?:^|[-_.])(audio|realtime|tts|transcribe|transcription|image|vision|search|embedding|chat|moderation)(?:[-_.]|$)/i.test(nativeId)) return false;
+  if (provider === 'openai' && /(?:^|[-_.])(audio|realtime|tts|transcribe|transcription|image|video|vision|search|embedding|chat|moderation)(?:[-_.]|$)/i.test(nativeId)) return false;
   if (provider === 'google' && (!/^gemini-/i.test(nativeId) || /(?:^|[-_.])(embedding|tts|audio|image)(?:[-_.]|$)/i.test(nativeId))) return false;
   if (provider === 'xai' && (!/^grok-/i.test(nativeId) || /(?:^|[-_.])(voice|image|video|imagine|tts|stt|audio)(?:[-_.]|$)/i.test(nativeId))) return false;
   // The gateway passes through OpenAI's untyped listing and Anthropic's
   // `type: "model"` records on older deployments.
   if (type != null && type !== 'model') return type === 'language';
   if (provider === 'anthropic') return /^claude-/i.test(nativeId);
-  return provider === 'openai' && /^(gpt-(4\.1|4o|5(?:\.\d+)?)|o[134])(?:$|-)/i.test(nativeId);
+  return provider === 'openai' && /^(gpt-(4\.1|4o|[56](?:\.\d+)?)|o[134])(?:$|-)/i.test(nativeId);
 }
 
 function text(value: unknown): string | undefined {

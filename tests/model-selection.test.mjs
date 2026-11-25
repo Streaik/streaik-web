@@ -33,7 +33,7 @@ test('chat agent instructions are a text block in system context, not a transcri
   const messages = [{ id: 'opening', role: 'user', parts: [{ type: 'text', text: 'Hi' }] }];
   const context = { chatInstructions: 'Keep it concise.\nUse examples.', user: { preferredLanguage: 'en', darkMode: false } };
   const text = requestContextText(context);
-  assert.deepEqual(text, [context.chatInstructions, JSON.stringify(context.user)]);
+  assert.deepEqual(text, [JSON.stringify(context.user), context.chatInstructions]);
   assert.deepEqual(withRequestContext(messages, context), [
     { id: 'streaik-request-context', role: 'system', parts: text.map(text => ({ type: 'text', text })) }, ...messages,
   ]);

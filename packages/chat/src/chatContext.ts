@@ -19,9 +19,9 @@ export function buildRequestContext(appName: string, preferredLanguage: string, 
 }
 
 export function requestContextText(context: RequestContext) {
-  return [...(context.chatInstructions ? [context.chatInstructions] : []),
-    ...(context.skills ? [JSON.stringify(context.skills)] : []), ...(context.mcp ? [JSON.stringify(context.mcp)] : []),
-    ...(context.system ? [JSON.stringify(context.system)] : []), ...(context.user ? [JSON.stringify(context.user)] : [])];
+  return [...(context.skills ? [JSON.stringify(context.skills)] : []), ...(context.mcp ? [JSON.stringify(context.mcp)] : []),
+    ...(context.system ? [JSON.stringify(context.system)] : []), ...(context.user ? [JSON.stringify(context.user)] : []),
+    ...(context.chatInstructions ? [context.chatInstructions] : [])];
 }
 
 export function withRequestContext(messages: ChatMessage[], context: RequestContext | undefined): ChatMessage[] {

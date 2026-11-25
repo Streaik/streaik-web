@@ -82,12 +82,22 @@ test('app agent defaults select only available models, and transcription clearin
   const defaults = [{ id: 'openai/gpt-6.2-sol' }, { id: 'openai/gpt-6.1-terra' },
     { id: 'openai/gpt-image-2.6-flare', type: 'image' }, { id: 'openai/gpt-image-2.6-sunburst', type: 'image' },
     { id: 'openai/gemini-omni-1.2-flash', type: 'video' }, { id: 'openai/gpt-transcribe', type: 'transcription' }];
-  let available = true;
+  let available = false;
   await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: available ? [...alternatives, ...defaults] : alternatives } }));
   await page.route('**/gateway/v1/skills?*', route => route.fulfill({ json: { data: [], has_more: false } }));
+  const connect = async () => { await showSettings(page); await addKey(page); await closeSettings(page); };
   await page.goto('/');
-  await showSettings(page); await addKey(page); await closeSettings(page);
+  await connect();
   const picker = modelPicker(page);
+  await expect(picker).toHaveText('Select models');
+  for (const [view, placeholder] of [['Images', 'Select models'], ['Videos', 'Select a model'], ['Transcriptions', 'Select a model']]) {
+    await page.getByRole('button', { name: view, exact: true }).click();
+    await expect(picker).toBeEnabled();
+    await expect(picker).toHaveText(placeholder);
+  }
+  available = true;
+  await page.goto('/');
+  await connect();
   await expect(picker).toHaveText('gpt-6.1-terra, gpt-6.2-sol');
   await openRoute(page, 'Decisions');
   await page.getByRole('menuitemradio', { name: 'Off', exact: true }).click();
@@ -107,15 +117,9 @@ test('app agent defaults select only available models, and transcription clearin
   await page.getByRole('option', { name: 'gpt-4o-transcribe', exact: true }).click();
   await expect(picker).toHaveText('Select a model');
   await page.reload();
+  await connect();
   await expect(picker).toBeEnabled();
   await expect(picker).toHaveText('Select a model');
-
-  available = false;
-  for (const path of ['/', '/images', '/videos', '/transcriptions']) {
-    await page.goto(path);
-    await expect(picker).toBeEnabled();
-    await expect(picker).toHaveText('Select a model');
-  }
 });
 
 test('edited chat agent instructions are visible and sent as system context after a model override', async ({ page }) => {
@@ -156,6 +160,7 @@ test('edited chat agent instructions are visible and sent as system context afte
   await composer.fill('Continue with an override'); await composer.press('Enter');
   await expect(page.getByText('Instruction reply 2', { exact: true })).toBeVisible();
   await page.reload();
+  await showSettings(page); await addKey(page); await closeSettings(page);
   await expect(modelPicker(page)).toHaveText('gpt-5-nano');
 });
 
@@ -301,8 +306,10 @@ test('local Skills tabs persist versions and chat progressively discloses approv
   await page.route('**/gateway/v1/skills?*', route => route.fulfill({ json: { data: [], has_more: false } }));
   await page.route('**/gateway/api/chat', async route => {
     const body = route.request().postDataJSON(); requests.push(body);
-    const [skills, system, user] = body.messages[0].parts.map(({ text }: { text: string }) => JSON.parse(text));
-    expect(body.messages[0]).toMatchObject({ role: 'system', parts: [{ type: 'text' }, { type: 'text' }, { type: 'text' }] });
+    const [skillText, systemText, userText, instructions] = body.messages[0].parts.map(({ text }: { text: string }) => text);
+    const [skills, system, user] = [skillText, systemText, userText].map(text => JSON.parse(text));
+    expect(body.messages[0].role).toBe('system');
+    expect(instructions).toBe('Chat');
     const catalog = skills.availableSkills;
     const skillId = catalog.skills[0].skill_id;
     expect(skillId).toMatch(/^local:/);
@@ -371,6 +378,7 @@ test('local Skills tabs persist versions and chat progressively discloses approv
   await details.getByRole('button', { name: 'Close' }).click();
   await expect(card).toContainText('v1');
   await page.getByRole('button', { name: 'New chat', exact: true }).click();
+  await chooseChatModel(page);
 
   const settings = await showChatSkills(page);
   const toggle = settings.getByRole('switch', { name: 'weekly-digest', exact: true });
@@ -391,7 +399,7 @@ test('local Skills tabs persist versions and chat progressively discloses approv
   await toggle.check();
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
   await viewContext.click();
-  await expect(system.getByRole('heading')).toHaveText('System context');
+  await expect(system.getByRole('heading', { name: 'System context', exact: true })).toBeVisible();
   await expect(system).not.toContainText('weekly-digest');
   await context.getByRole('tab', { name: 'System', exact: true }).press('End');
   await expect(skillsTab).toBeFocused();
@@ -1327,7 +1335,9 @@ for (const approved of [true, false]) test(`MCP composer discovers resources and
       expect(wire).not.toContain(privateText);
       expect(wire).not.toContain(userUri);
       expect(wire).not.toContain('test-mcp-composer');
-      const systemParts = body.messages[0].parts.map((part: { text: string }) => JSON.parse(part.text));
+      const systemText = body.messages[0].parts.map((part: { text: string }) => part.text);
+      expect(systemText.at(-1)).toBe('Chat');
+      const systemParts = systemText.slice(0, -1).map((text: string) => JSON.parse(text));
       const server = systemParts.find((part: { mcpResourceCatalog?: unknown }) => part.mcpResourceCatalog).mcpResourceCatalog.servers[0];
       expect(server.resources.map((item: { uri: string }) => item.uri)).toEqual(['fixture://pages/shared', assistantUri]);
       expect(server.resourceTemplates).toEqual([]);
@@ -1937,6 +1947,7 @@ test('Images settings set the request count and show matching gallery shimmers b
   const imagePicker = await picker.boundingBox();
   expect(imagePicker?.x).toBeCloseTo(chatPicker!.x, 0);
   expect(imagePicker?.y).toBeCloseTo(chatPicker!.y, 0);
+  await chooseModel(page, 'gpt-image-1');
   const prompt = page.getByRole('textbox', { name: 'Image prompt', exact: true });
   await expect(prompt).toHaveCount(1);
   const settingsButton = page.getByRole('button', { name: 'Image settings', exact: true });
@@ -1993,6 +2004,7 @@ test('Images clears shimmers on stop and on gateway failure while retaining the 
   const prompt = page.getByRole('textbox', { name: 'Image prompt' });
   const send = page.getByRole('button', { name: 'Send', exact: true });
   const shimmers = page.locator('.image-shimmer');
+  await chooseModel(page, 'gpt-image-1');
   await prompt.fill('Stop this one');
   await send.click();
   await expect(shimmers).toHaveCount(1);
@@ -2162,6 +2174,7 @@ test('edit masks stay visible for Google and warn instead of silently losing the
   await page.goto('/');
   await showSettings(page); await addKey(page); await closeSettings(page);
   await page.getByRole('button', { name: 'Images', exact: true }).click();
+  await chooseModel(page, 'gemini-2.5-flash-image');
   const composer = page.getByRole('form', { name: 'Image composer' });
   await composer.getByRole('textbox', { name: 'Image prompt' }).fill('Make it brighter');
   await composer.getByRole('button', { name: 'Image settings' }).click();
@@ -2242,7 +2255,6 @@ async function prepareModelDecisions(page: Page) {
   await showSettings(page); await addKey(page); await addKey(page, 'Anthropic', 'test-anthropic-key'); await closeSettings(page);
   await modelPicker(page).click();
   await expect(page.getByRole('option', { name: 'Decision model', exact: true })).toHaveCount(0);
-  await page.getByRole('option', { name: candidateLabel, exact: true, selected: true }).click();
   await page.getByRole('option', { name: 'GPT Mini', exact: true }).click();
   await page.keyboard.press('Escape');
 }
@@ -2596,7 +2608,9 @@ test('switching from API Chat to a native gateway route keeps inline history and
     expect(await route.request().headerValue('authorization')).toBeNull();
     const body = route.request().postDataJSON();
     expect(body.model).toBe(model);
-    const context = body.messages.filter(({ role }: { role: string }) => role === 'system').map(({ content }: { content: string }) => JSON.parse(content));
+    const systemText = body.messages.filter(({ role }: { role: string }) => role === 'system').map(({ content }: { content: string }) => content);
+    expect(systemText.at(-1)).toBe('Chat');
+    const context = systemText.slice(0, -1).map((text: string) => JSON.parse(text));
     expect(context).toEqual([
       { availableSkills: expect.objectContaining({ activationTool: 'activate_skill', instructions: expect.any(String),
         skills: [expect.objectContaining(skill)] }) },
@@ -2973,6 +2987,7 @@ test('compact badges, logo fallback, copy, pinned history and conversation repla
   });
   await page.goto('/');
   await showSettings(page); await addKey(page); await closeSettings(page);
+  await chooseChatModel(page);
   await enableChatMetrics(page);
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   await composer.fill('Persistent first question'); await composer.press('Enter');
@@ -3121,7 +3136,6 @@ test('BYOK can chat through OpenRouter without sending another provider key', as
   await addKey(page, 'OpenRouter', routerKey);
   await closeSettings(page);
   await modelPicker(page).click();
-  await page.getByRole('option', { name: 'gpt-4.1-mini', exact: true, selected: true }).click();
   await page.getByRole('option', { name: /vendor\/model:free/ }).click();
   await page.keyboard.press('Escape');
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
@@ -3204,6 +3218,7 @@ test.describe('touch navigation', () => {
     }));
     await page.goto('/');
     await showSettings(page); await addKey(page); await closeSettings(page);
+    await chooseChatModel(page);
     const composer = page.getByRole('textbox', { name: 'Message', exact: true });
     await composer.fill('Touch question');
     await page.getByRole('button', { name: 'Send', exact: true }).tap();
