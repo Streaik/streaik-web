@@ -115,9 +115,14 @@ test('the web MCP client lists and reads delegated data with the resource-bound 
   mockFetch(t, async (request, init) => {
     if (!(request instanceof Request)) return;
     assert.equal(request.url, endpoint);
-    assert.equal(init.headers.get('Authorization'), 'Bearer mcp1.entra-0');
     assert.equal(init.headers.get('Mcp-Protocol-Version'), '2026-07-28');
     const { id, method, params } = await request.json();
+    if (init.headers.get('Authorization') === null) {
+      assert.equal(method, 'server/discover');
+      methods.push('challenge');
+      return new Response(null, { status: 401, headers: { 'WWW-Authenticate': 'Bearer' } });
+    }
+    assert.equal(init.headers.get('Authorization'), 'Bearer mcp1.entra-0');
     methods.push(method);
     const reply = { jsonrpc: '2.0', id };
     const complete = { resultType: 'complete', ttlMs: 0, cacheScope: 'private' };
@@ -133,11 +138,11 @@ test('the web MCP client lists and reads delegated data with the resource-bound 
   });
   const { auth, calls } = mockAuth();
   const headers = createEntraMcpHeaders(base, auth, 'spa-client-id');
-  const server = { id: 'calendar', title: 'Calendar', endpoint, requestHeaders: signal => headers(endpoint, signal) };
+  const server = { id: 'calendar', title: 'Calendar', endpoint, challengeOnly: true, requestHeaders: signal => headers(endpoint, signal) };
   const signal = new AbortController().signal;
   assert.deepEqual(await discoverMcpServer(server, signal), { tools: [], hasResources: true, hasPrompts: false,
     resources: [], resourceTemplates: [template], prompts: [], promptsFailed: false });
-  assert.deepEqual(await readMcpResource(server, resource, signal), { text: 'calendar data', images: [] });
+  assert.deepEqual(await readMcpResource(server, resource, signal), { contents: [{ uri: resource, text: 'calendar data' }], text: 'calendar data', images: [] });
   assert.deepEqual(calls, ['images']);
-  assert.deepEqual(methods, ['server/discover', 'resources/list', 'resources/templates/list', 'server/discover', 'resources/read']);
+  assert.deepEqual(methods, ['challenge', 'server/discover', 'resources/list', 'resources/templates/list', 'challenge', 'server/discover', 'resources/read']);
 });
