@@ -1433,7 +1433,7 @@ test('MCP argument completions are optional, contextual, and debounced for promp
 test('Gateway chat settings share context and replay catalog and approved text-only history tools once', async ({ page }) => {
   await mockModels(page);
   const requests: { messages: { role: string; parts: { text?: string; toolCallId?: string; output?: unknown }[] }[];
-    tools?: { name: string }[]; clientToolResultApproval?: boolean }[] = [];
+    tools?: { name: string }[]; clientToolResultApproval?: boolean; providerMetadata?: unknown }[] = [];
   const privateText = 'An archived juniper garden';
   const catalogTool = 'local_ai_models_search';
   const historyTool = 'local_conversations_search_text';
@@ -1461,6 +1461,7 @@ test('Gateway chat settings share context and replay catalog and approved text-o
   await send(privateText);
   await expect(page.getByText('Chat reply 1', { exact: true })).toBeVisible();
   expect(requests[0].tools).toBeUndefined();
+  expect(requests[0].providerMetadata).toBeUndefined();
   await page.getByRole('button', { name: 'New chat', exact: true }).click();
   await expect(page.getByText('Chat reply 1', { exact: true })).toHaveCount(0);
 
@@ -1489,7 +1490,9 @@ test('Gateway chat settings share context and replay catalog and approved text-o
   await expect(ai).not.toBeChecked();
   await expect(history).not.toBeChecked();
   await ai.check(); await history.check();
-  await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  await settings.getByRole('tab', { name: 'OpenAI', exact: true }).click();
+  await settings.getByLabel('Service tier', { exact: true }).selectOption('flex');
+  await settings.getByRole('button', { name: 'Save', exact: true }).click();
   const badges = page.getByRole('list', { name: 'Active chat context' });
   await expect(badges.getByText('Artificial Intelligence', { exact: true })).toBeVisible();
   await expect(badges.getByText('Chat History', { exact: true })).toBeVisible();
@@ -1534,6 +1537,7 @@ test('Gateway chat settings share context and replay catalog and approved text-o
   await review.getByRole('button', { name: 'Approve and share' }).click();
   await expect(page.getByText('Chat reply 3', { exact: true })).toBeVisible();
   expect(requests).toHaveLength(3);
+  for (const request of requests.slice(1)) expect(request.providerMetadata).toEqual({ openai: { service_tier: 'flex' } });
   expect(requests[2].messages.at(-1)?.parts).toEqual(expect.arrayContaining([
     expect.objectContaining({ toolCallId: 'catalog-call', approval: { id: 'catalog-review', signature: 'fixture-catalog-signature', approved: true },
       output: { content: [], structuredContent: { data: [expect.objectContaining({ id: 'imagerouter/a/b' })] } } }),
@@ -2152,6 +2156,89 @@ test('BYOK chooses between chat models through the selected Decisions route, or 
   await page.reload();
   await openRoute(page, 'Decisions');
   await expect(page.getByRole('menuitemradio', { name: 'Off', exact: true })).toHaveAttribute('aria-checked', 'true');
+});
+
+test('native provider settings match active chat models and send only the Decisions winner’s options', async ({ page }) => {
+  const cerebras = 'cerebras/gpt-oss-120b';
+  const together = 'together/openai/gpt-oss-120b';
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [
+    { id: model, name: 'GPT Mini' }, { id: cerebras, name: 'Cerebras OSS', type: 'language' },
+    { id: together, name: 'Together OSS', type: 'language' }, { id: 'openai/gpt-6-luna', type: 'decision' },
+  ] } }));
+  let choices = 0;
+  await page.route('**/gateway/v1/decisions', route => {
+    const body = route.request().postDataJSON();
+    expect(body.providerMetadata).toBeUndefined();
+    expect(body.questions[0].choices.map(({ value }: { value: string }) => value)).toEqual(expect.arrayContaining([model, cerebras, together]));
+    choices++;
+    return route.fulfill({ json: { answers: [{ name: 'chat_model', type: 'choice', choice: together }] } });
+  });
+  const requests: { model: string; providerMetadata?: unknown }[] = [];
+  await page.route('**/gateway/api/chat', async route => {
+    const request = route.request().postDataJSON();
+    requests.push(request);
+    await route.fulfill({ contentType: 'text/event-stream', headers: { 'x-vercel-ai-ui-message-stream': 'v1' },
+      body: sse(`Native settings reply ${requests.length}`, requests.length, request.model) });
+  });
+  await page.goto('/');
+  await showSettings(page);
+  await addKey(page);
+  await addKey(page, 'Cerebras', 'test-cerebras-key');
+  await addKey(page, 'Together', 'test-together-key');
+  await closeSettings(page);
+  const settings = page.getByRole('dialog', { name: 'Chat settings', exact: true });
+  const openProvider = async (provider: string) => {
+    await page.getByRole('button', { name: 'Chat settings', exact: true }).click();
+    await settings.getByRole('tab', { name: provider, exact: true }).click();
+  };
+  const save = settings.getByRole('button', { name: 'Save', exact: true });
+  const effort = settings.getByLabel('Reasoning effort', { exact: true });
+  await modelPicker(page).click();
+  for (const name of ['GPT Mini', 'Cerebras OSS', 'Together OSS']) {
+    const option = page.getByRole('option', { name, exact: true });
+    if (await option.getAttribute('aria-selected') !== 'true') await option.click();
+  }
+  await page.keyboard.press('Escape');
+  await openProvider('OpenAI');
+  await settings.getByLabel('Service tier', { exact: true }).selectOption('flex');
+  await settings.getByRole('tab', { name: 'Cerebras', exact: true }).click();
+  await settings.getByRole('spinbutton', { name: 'Seed', exact: true }).fill('0');
+  await settings.getByLabel('Parallel tool calls', { exact: true }).selectOption('false');
+  await settings.getByRole('tab', { name: 'Together AI', exact: true }).click();
+  await effort.selectOption('high');
+  await save.click();
+  await openProvider('Together AI');
+  await effort.selectOption('low');
+  await settings.getByRole('button', { name: 'Cancel', exact: true }).click();
+
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  const send = async (text: string, next: number) => {
+    await composer.fill(text); await composer.press('Enter');
+    await expect(page.getByText(`Native settings reply ${next}`, { exact: true })).toBeVisible();
+  };
+  await send('Choose among the active providers', 1);
+  expect(choices).toBe(1);
+  expect(requests[0]).toMatchObject({ model: together, providerMetadata: { together: { reasoning_effort: 'high' } } });
+  expect(Object.keys(requests[0].providerMetadata as object)).toEqual(['together']);
+  await expect(page).toHaveURL(/\/c\/[0-9a-f-]{36}$/);
+  await page.reload();
+  // The BYOK sample drops session-only credentials on reload, not saved chat preferences.
+  await showSettings(page); await addKey(page, 'Together', 'test-together-key'); await closeSettings(page);
+  await expect(modelPicker(page)).toBeEnabled();
+  await openProvider('Together AI');
+  await expect(effort).toHaveValue('high');
+  await expect(settings.getByRole('tab', { name: 'Cerebras', exact: true })).toHaveCount(0);
+  await settings.getByRole('button', { name: 'Reset provider settings', exact: true }).click();
+  await expect(effort).toHaveValue('');
+  await save.click();
+  await send('Use provider defaults again', 2);
+  expect(requests[1].model).toBe(together);
+  expect(requests[1].providerMetadata).toBeUndefined();
+
+  await openRoute(page, 'Gateway');
+  await page.getByRole('menuitemradio', { name: '/v1/chat/completions', exact: true }).click();
+  await page.getByRole('button', { name: 'Chat settings', exact: true }).click();
+  await expect(settings.getByRole('tab', { name: 'Together AI', exact: true })).toHaveCount(0);
 });
 
 test('invalid or stopped decisions do not submit a chat request', async ({ page }) => {

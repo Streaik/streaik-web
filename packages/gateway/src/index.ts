@@ -371,6 +371,7 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
         api: chatUrl,
         prepareSendMessagesRequest: ({ messages, body }) => ({ body: {
           model: body?.model, messages, ...(Array.isArray(body?.tools) && body.tools.length ? { tools: body.tools } : {}),
+          ...(body?.providerMetadata && { providerMetadata: body.providerMetadata }),
           ...(body?.clientToolResultApproval === true && { clientToolResultApproval: true }),
         } }),
         fetch: async (input, init) => {

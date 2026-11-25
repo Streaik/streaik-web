@@ -1,4 +1,5 @@
 import { Button } from '@streaik/themes';
+import type { ChatModel } from '@streaik/gateway';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { ChatIcon } from './ChatIcon';
@@ -14,28 +15,41 @@ import { useAppTranslation } from './i18n';
 import { defaultSkillVersion } from './skillBundles';
 import type { LocalSkills } from './useLocalSkills';
 import type { RemoteSkills } from './useRemoteSkills';
+import { activeChatProviders, chatProviders, normalizeProviderChatSettings } from './providerChat/settings';
+import type { ChatProviderId, ProviderChatSettings } from './providerChat/settings';
+import { ProviderChatForm } from './providerChat/ProviderChatForm';
 
 type DialogRef = RefObject<HTMLDialogElement | null>;
+type ChatSettingsTab = 'general' | 'tools' | 'skills' | ChatProviderId;
 
-export function ChatSettingsDialog({ dialog, value, onChange, gateway, hasHistory, locked, localSkills, remoteSkills }: {
+export function ChatSettingsDialog({ dialog, value, onChange, gateway, hasHistory, locked, localSkills, remoteSkills, providerModels }: {
   dialog: DialogRef; value: ChatPreferences; onChange: (preferences: ChatPreferences) => void;
   gateway: boolean; hasHistory: boolean; locked: boolean; localSkills: LocalSkills; remoteSkills: RemoteSkills;
+  providerModels: readonly ChatModel[];
 }) {
   const { t } = useAppTranslation();
   const id = useId();
-  const [tab, setTab] = useState<'general' | 'tools' | 'skills'>('general');
+  const [requestedTab, setTab] = useState<ChatSettingsTab>('general');
+  const [draft, setDraft] = useState<ProviderChatSettings>();
+  const [resetKey, setResetKey] = useState(0);
+  const providers = activeChatProviders(providerModels);
+  const tabs: [ChatSettingsTab, string][] = [['general', t('General')], ['tools', t('Tools')], ['skills', t('Skills')],
+    ...[...providers.keys()].map((provider): [ChatProviderId, string] => [provider, chatProviders[provider].label])];
+  const tab = tabs.some(([key]) => key === requestedTab) ? requestedTab : 'general';
+  const providerTab = tab !== 'general' && tab !== 'tools' && tab !== 'skills' ? tab : undefined;
+  const providerSettings = draft ?? value.providerSettings;
   const { online, needsLoad, load, cursor, busy, error, skills } = remoteSkills;
   useEffect(() => {
     if (tab === 'skills' && dialog.current?.open && gateway && online && !busy && error === undefined && (needsLoad || cursor)) load(cursor);
   }, [tab, dialog, gateway, online, busy, error, needsLoad, cursor, load]);
-  return <dialog ref={dialog} className="chat-settings chat-tools-dialog" aria-labelledby={`${id}-title`} onClose={() => setTab('general')}>
+  return <dialog ref={dialog} className="chat-settings chat-tools-dialog" aria-labelledby={`${id}-title`} onClose={() => {
+    setTab('general'); setDraft(undefined);
+  }}>
     <header className="chat-settings-header">
       <h2 id={`${id}-title`}>{t('Chat settings')}</h2>
       <Button className="chat-close" variant="subtle" aria-label={t('Close chat settings')} onClick={() => dialog.current?.close()}><ChatIcon name="close" /></Button>
     </header>
-    <DialogTabs id={id} label={t('Chat settings sections')}
-      tabs={[[ 'general', t('General') ], [ 'tools', t('Tools') ], [ 'skills', t('Skills') ]]}
-      value={tab} onChange={setTab} />
+    <DialogTabs id={id} label={t('Chat settings sections')} tabs={tabs} value={tab} onChange={setTab} />
     <div id={`${id}-general-panel`} role="tabpanel" aria-labelledby={`${id}-general-tab`} hidden={tab !== 'general'}>
       <section className="chat-tool-card">
         <h3>{t('Chat')}</h3>
@@ -98,9 +112,25 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hasHistor
         {!gateway && <p>{t('Skills are available only on Gateway routes.')}</p>}
       </section>
     </div>
+    {[...providers].map(([provider, models]) => <div key={provider} id={`${id}-${provider}-panel`}
+      role="tabpanel" aria-labelledby={`${id}-${provider}-tab`} hidden={tab !== provider}>
+      {tab === provider && <fieldset className="chat-provider-fields" disabled={locked} aria-label={chatProviders[provider].label}>
+        <ProviderChatForm key={resetKey} provider={provider} value={providerSettings[provider] ?? {}} models={models}
+          onChange={next => setDraft(current => ({ ...(current ?? value.providerSettings), [provider]: next }))} />
+      </fieldset>}
+    </div>)}
     <footer className="chat-tool-footer">
-      <Button variant="subtle" disabled={locked} onClick={() => onChange({ ...value, ...composerToolDefaults })}>{t('Defaults')}</Button>
-      <Button onClick={() => dialog.current?.close()}>{t('Close')}</Button>
+      <Button variant="subtle" disabled={locked} onClick={() => {
+        if (providerTab) {
+          setDraft(current => ({ ...(current ?? value.providerSettings), [providerTab]: undefined }));
+          setResetKey(key => key + 1);
+        } else onChange({ ...value, ...composerToolDefaults });
+      }}>{t(providerTab ? 'Reset provider settings' : 'Defaults')}</Button>
+      <Button variant={draft ? 'subtle' : undefined} onClick={() => dialog.current?.close()}>{t(draft ? 'Cancel' : 'Close')}</Button>
+      {(providerTab || draft) && <Button disabled={locked || !draft || !providers.size} onClick={() => {
+        onChange({ ...value, providerSettings: normalizeProviderChatSettings(draft) });
+        dialog.current?.close();
+      }}>{t('Save')}</Button>}
     </footer>
   </dialog>;
 }

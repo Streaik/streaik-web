@@ -30,6 +30,8 @@ import { ChatActivity, groupMessageParts, invocationName } from './ChatActivity'
 import type { Invocation } from './ChatActivity';
 import { loadChatPreferences, saveChatPreferences } from './chatPreferences';
 import type { ChatPreferences } from './chatPreferences';
+import { chatProviderMetadata } from './providerChat/settings';
+import type { ProviderChatSettings } from './providerChat/settings';
 import { filterToolOutputContent } from './toolOutputContent';
 import { buildRequestContext, requestContextText, withRequestContext } from './chatContext';
 import type { RequestContext } from './chatContext';
@@ -375,6 +377,7 @@ function HistoryChat({ appName, gateway, connection, scope, models, route, onRou
 
 type Turn = { model: string; route: ChatRoute; tools: ChatTool[]; context?: RequestContext;
   catalog: readonly CatalogModel[]; skills: readonly LocalSkill[]; remoteSkills?: TurnRemoteSkills;
+  providerSettings?: ProviderChatSettings;
   seen: Set<string>; resolved: Set<string>; automatic: { calls: number } };
 const isApiChat = (route: ChatRoute | undefined) => !route || (route.mode === 'gateway' && route.endpoint === '/api/chat');
 const toolComplete = (part: Invocation) => part.state === 'output-available' || part.state === 'output-error' || part.state === 'approval-responded';
@@ -425,8 +428,9 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       async sendMessages(request) {
         const last = request.messages.at(-1);
         const previous = request.trigger === 'submit-message' && last?.role === 'assistant' ? last : undefined;
-        const { route, decision, context, ...body } = (request.body ?? {}) as {
+        const { route, decision, context, providerSettings, ...body } = (request.body ?? {}) as {
           model?: string; route?: ChatRoute; decision?: ModelDecision; context?: RequestContext; tools?: ToolDefinition[];
+          providerSettings?: ProviderChatSettings;
         };
         let model = body.model;
         const enabledSkillIds = new Set(context?.skills?.availableSkills.skills.map(({ id }) => id));
@@ -450,7 +454,9 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           }
         }
         if (isApiChat(route)) {
-          const stream = await apiChat.sendMessages({ ...request, body: { ...request.body, ...(body.tools?.length && { clientToolResultApproval: true }) },
+          const providerMetadata = chatProviderMetadata(providerSettings, model);
+          const stream = await apiChat.sendMessages({ ...request, body: { ...request.body, ...(providerMetadata && { providerMetadata }),
+            ...(body.tools?.length && { clientToolResultApproval: true }) },
             messages: withRequestContext(request.messages, context) });
           return withReplyMetadata(stream, model, previous);
         }
@@ -531,7 +537,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   useEffect(() => () => { operation.current?.abort(); }, []);
 
   function requestBody(turn: Turn) {
-    return { model: turn.model, route: turn.route, context: turn.context,
+    return { model: turn.model, route: turn.route, context: turn.context, providerSettings: turn.providerSettings,
       tools: turn.tools.map(({ definition: { name, description, inputSchema } }) => ({ name, description, inputSchema })) };
   }
 
@@ -646,6 +652,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     setPendingModel(decision ? undefined : model);
     const seen = new Set(messages.flatMap(message => message.parts.flatMap(part => 'toolCallId' in part ? [part.toolCallId] : [])));
     const next: Turn = { model, route, tools: enabledTools, context, catalog, skills: localSkills.skills, seen, resolved: new Set(), automatic: { calls: 0 },
+      providerSettings: isApiChat(route) ? preferences.providerSettings : undefined,
       remoteSkills: enabledRemoteSkills.length ? { skills: enabledRemoteSkills, download: gateway.downloadSkill, bundles: new Map() } : undefined };
     setTurn(next);
     return { ...requestBody(next), ...(decision && { decision }) };
@@ -777,7 +784,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         </div>
       </main>
       <ChatSettingsDialog dialog={chatSettings} value={preferences} onChange={onPreferences} gateway={gatewayRoute}
-        hasHistory={hasHistory} locked={routesLocked} localSkills={localSkills} remoteSkills={remoteSkills} />
+        hasHistory={hasHistory} locked={routesLocked} localSkills={localSkills} remoteSkills={remoteSkills}
+        providerModels={isApiChat(route) ? selected : []} />
       {contextOpen && <ViewContextDialog onClose={() => setContextOpen(false)} context={(busy || toolParts.length > 0) && turn ? turn.context : context}
         tools={(busy || toolParts.length > 0) && turn ? turn.tools : enabledTools} />}
       {review && <ToolApprovalDialog key={`${review.id}:${review.kind}`} review={review} onAnswer={answerTool} onStop={stopTurn} />}

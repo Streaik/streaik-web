@@ -2,6 +2,8 @@ import { localPlugins } from './localPlugins.ts';
 import type { LocalPluginId } from './localPlugins.ts';
 import { defaultMcpPreferences, mcpTimeoutRange } from './mcpPreferences.ts';
 import type { McpPreferences } from './mcpPreferences.ts';
+import { normalizeProviderChatSettings } from './providerChat/settings.ts';
+import type { ProviderChatSettings } from './providerChat/settings.ts';
 
 export const pinnableViews = ['models', 'providers'] as const;
 export type PinnableView = (typeof pinnableViews)[number];
@@ -22,14 +24,15 @@ export type ChatPreferences = {
   showMetrics: boolean;
   toolOutput: ToolOutputPreferences;
   mcp: McpPreferences;
+  providerSettings: ProviderChatSettings;
 };
 export const composerToolDefaults: Pick<ChatPreferences, 'delay' | 'plugins' | 'remoteSkillIds'> = { delay: 40, plugins: [], remoteSkillIds: [] };
 export const defaultChatPreferences: ChatPreferences = { ...composerToolDefaults, convertAttachmentsToText: false, pinnedViews: [],
   dictate: true, showContextSize: true, showMessageTokens: true, showProviderLogo: true, showMetrics: false,
-  toolOutput: toolOutputDefaults, mcp: defaultMcpPreferences };
+  toolOutput: toolOutputDefaults, mcp: defaultMcpPreferences, providerSettings: {} };
 
-type StoredPreferences = Partial<Omit<ChatPreferences, 'toolOutput' | 'mcp'> & {
-  toolOutput: Partial<ToolOutputPreferences>; mcp: Partial<McpPreferences>;
+type StoredPreferences = Partial<Omit<ChatPreferences, 'toolOutput' | 'mcp' | 'providerSettings'> & {
+  toolOutput: Partial<ToolOutputPreferences>; mcp: Partial<McpPreferences>; providerSettings: unknown;
 }>;
 
 const booleanPreference = (value: unknown, fallback: boolean) => typeof value === 'boolean' ? value : fallback;
@@ -55,6 +58,7 @@ export function normalizeChatPreferences(value: StoredPreferences | null | undef
     showProviderLogo: booleanPreference(value?.showProviderLogo, defaultChatPreferences.showProviderLogo),
     showMetrics: booleanPreference(value?.showMetrics, defaultChatPreferences.showMetrics),
     toolOutput,
+    providerSettings: normalizeProviderChatSettings(value?.providerSettings),
     mcp: {
       formElicitation: booleanPreference(value?.mcp?.formElicitation, defaultMcpPreferences.formElicitation),
       toolTimeoutMinutes: typeof timeout === 'number' && Number.isFinite(timeout)

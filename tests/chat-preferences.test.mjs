@@ -4,6 +4,7 @@ import { defaultChatPreferences, loadChatPreferences, normalizeChatPreferences, 
 import { defaultMcpPreferences } from '../packages/chat/src/mcpPreferences.ts';
 import { conversationGatewayCost, latestContextUsage } from '../packages/chat/src/messageMetadata.ts';
 import { filterToolOutputContent } from '../packages/chat/src/toolOutputContent.ts';
+import { chatProviderMetadata } from '../packages/chat/src/providerChat/settings.ts';
 
 test('old profiles get Chat defaults; only explicit, valid booleans override each preference', () => {
   const defaults = { text: true, links: true, images: false, audio: false, video: false, documents: false };
@@ -32,6 +33,24 @@ test('MCP defaults are backward compatible and saved settings remain scoped and 
   assert.equal(normalizeChatPreferences({ mcp: { toolTimeoutMinutes: 0 } }).mcp.toolTimeoutMinutes, 1);
   assert.equal(normalizeChatPreferences({ mcp: { toolTimeoutMinutes: 2.7 } }).mcp.toolTimeoutMinutes, 3);
   assert.deepEqual(normalizeChatPreferences({ mcp: { toolTimeoutMinutes: NaN, formElicitation: 'false' } }).mcp, defaultMcpPreferences);
+});
+
+test('native chat settings round-trip per profile and apply to the matching model only', (t) => {
+  const storage = new Map();
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  t.after(() => { if (original) Object.defineProperty(globalThis, 'localStorage', original); else delete globalThis.localStorage; });
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value),
+  } });
+  const cerebras = { reasoning_effort: 'high', seed: 0, parallel_tool_calls: false, future_option: { nested: [null, true] } };
+  saveChatPreferences('alpha', { ...defaultChatPreferences, providerSettings: { cerebras, together: [], groq: { seed: 1 } } });
+  const settings = loadChatPreferences('alpha').providerSettings;
+  assert.deepEqual(settings, { cerebras });
+  assert.deepEqual(loadChatPreferences('beta').providerSettings, {});
+  assert.deepEqual(chatProviderMetadata(settings, 'cerebras/gpt-oss-120b'), { cerebras });
+  const { reasoning_effort, ...other } = cerebras;
+  assert.deepEqual(chatProviderMetadata(settings, 'cerebras/llama-3.1-8b'), { cerebras: other });
+  assert.equal(chatProviderMetadata(settings, 'groq/gpt-oss-120b'), undefined);
 });
 
 const assistant = (metadata, parts = []) => ({ role: 'assistant', metadata, parts });
