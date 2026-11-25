@@ -5,6 +5,7 @@ import type { mcpResourceCatalog } from './mcpChatContext';
 
 export type RequestContext = {
   system?: { systemInformation: { appName: string; timezone: string } };
+  chatInstructions?: string;
   user?: { preferredLanguage: string; darkMode: boolean };
   skills?: ReturnType<typeof skillSystemBlock>;
   mcp?: ReturnType<typeof mcpResourceCatalog>;
@@ -18,7 +19,8 @@ export function buildRequestContext(appName: string, preferredLanguage: string, 
 }
 
 export function requestContextText(context: RequestContext) {
-  return [...(context.skills ? [JSON.stringify(context.skills)] : []), ...(context.mcp ? [JSON.stringify(context.mcp)] : []),
+  return [...(context.chatInstructions ? [context.chatInstructions] : []),
+    ...(context.skills ? [JSON.stringify(context.skills)] : []), ...(context.mcp ? [JSON.stringify(context.mcp)] : []),
     ...(context.system ? [JSON.stringify(context.system)] : []), ...(context.user ? [JSON.stringify(context.user)] : [])];
 }
 

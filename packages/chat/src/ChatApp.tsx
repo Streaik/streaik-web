@@ -19,7 +19,8 @@ import { ChatNavigation } from './ChatNavigation';
 import type { ChatAccount, ChatView } from './ChatNavigation';
 import { chatLocation, conversationPath, pagePaths } from './chatLocation';
 import { ModelsView, ProvidersView } from './CatalogViews';
-import { ModelPicker, resolveModelSelection } from './ModelPicker';
+import { ModelPicker } from './ModelPicker';
+import { defaultAgentModelIds, resolveModelSelection } from './modelSelection';
 import { pageRouteMenu } from './routeMenu';
 import { AgentsProvider, useAgents } from './AgentsProvider';
 import { AgentsView } from './AgentsView';
@@ -406,6 +407,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const { t, i18n } = useAppTranslation();
   const darkMode = useColorScheme() === 'dark';
   const agents = useAgents();
+  const chatAgent = assignedAgent(agents, 'chat');
   const [selectedIds, setSelectedIds] = useState<string[] | undefined>(() =>
     conversation.metadata?.model ? [conversation.metadata.model] : undefined);
   const [pendingModel, setPendingModel] = useState<string>();
@@ -470,8 +472,9 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           return withReplyMetadata(stream, model, previous);
         }
         if (route?.mode === 'direct' && direct && nativeChatEndpoints.includes(route.endpoint)) {
+          // Direct native transports use this field for client-provided system context.
           const stream = await direct.chatTransport(route.endpoint).sendMessages({ ...request,
-            body: { ...request.body, ...(context?.mcp && { mcpInstructions: requestContextText(context) }) } });
+            body: { ...request.body, ...(context && { mcpInstructions: requestContextText(context) }) } });
           return withReplyMetadata(stream, model, previous);
         }
         throw new GatewayError('The selected chat route is unavailable.');
@@ -512,7 +515,9 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const enabledTools = activeChatTools(route, preferences.plugins, hasHistory, mcpSelection.tools, hasSkills, mcpCatalog ? readResourceTool : undefined);
   const baseContext = useMemo(() => gatewayRoute ? buildRequestContext(appName, language, darkMode, localSkills.skills, enabledRemoteSkills) : undefined,
     [gatewayRoute, appName, language, darkMode, localSkills.skills, enabledRemoteSkills]);
-  const context = mcpCatalog ? { ...baseContext, mcp: mcpCatalog } : baseContext;
+  const chatInstructions = chatAgent?.instructions;
+  const context = mcpCatalog || chatInstructions ? { ...baseContext, ...(mcpCatalog && { mcp: mcpCatalog }),
+    ...(chatInstructions && { chatInstructions }) } : baseContext;
   const badges: ComposerBadge[] = [
     ...mcpSelection.connected.map(({ record }) => ({ key: `mcp:${record.id}`, label: record.title, icon: 'providers' as const,
       remove: () => mcpSelection.set(record, false) })),
@@ -697,7 +702,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     : !agentModels ? t('Loading gateway models…') : agentModels.error;
   const compatible = route.mode === 'direct' ? catalog.filter(item => direct?.supports(item.provider, route.endpoint)) : pickChatCatalogModels(catalog);
   const router = gatewayRoute ? modelDecisionRouter(agents, catalog, decisions.selected) : undefined;
-  const { byId: compatibleById, selected } = resolveModelSelection(compatible, selectedIds, !!router);
+  const { byId: compatibleById, selected } = resolveModelSelection(compatible, selectedIds, !!router, defaultAgentModelIds(chatAgent));
   const model = selected[0];
   const conversationCost = useMemo(() => conversationGatewayCost(messages), [messages]);
   const contextUsage = preferences.showContextSize ? latestContextUsage(messages, selected) : undefined;

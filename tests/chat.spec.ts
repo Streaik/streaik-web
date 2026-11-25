@@ -46,11 +46,18 @@ async function showChatSkills(page: Page) {
   return dialog;
 }
 const modelPicker = (page: Page) => page.getByRole('button', { name: 'Model', exact: true });
-async function expectChatModel(page: Page) {
+async function chooseModel(page: Page, name: string) {
   const picker = modelPicker(page);
   await expect(picker).toBeEnabled();
-  await expect(picker).toHaveText('gpt-4.1-mini');
+  if (await picker.textContent() !== name) {
+    await picker.click();
+    await page.getByRole('option', { name, exact: true }).click();
+    const search = page.getByRole('searchbox', { name: 'Search models', exact: true });
+    if (await search.isVisible()) await search.press('Escape');
+  }
+  await expect(picker).toHaveText(name);
 }
+const chooseChatModel = (page: Page) => chooseModel(page, 'gpt-4.1-mini');
 async function addKey(page: Page, provider = 'OpenAI', key = fakeKey) {
   await page.getByRole('tab', { name: 'API keys', exact: true }).click();
   const panel = page.getByRole('tabpanel', { name: 'API keys', exact: true });
@@ -125,7 +132,7 @@ test('conversation URLs survive reload, switch through browser history, and stay
   });
   await page.goto('/');
   await showSettings(page); await addKey(page); await closeSettings(page);
-  await expectChatModel(page);
+  await chooseChatModel(page);
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   await composer.fill('First linked conversation');
   await composer.press('Enter');
@@ -155,6 +162,7 @@ test('conversation URLs survive reload, switch through browser history, and stay
   await newChat.click();
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByText('Route reply 1')).toHaveCount(0);
+  await chooseChatModel(page);
   await composer.fill('Second linked conversation');
   await composer.press('Enter');
   await expect(page.getByText('Route reply 2')).toBeVisible();
@@ -242,7 +250,7 @@ test('local Skills tabs persist versions and chat progressively discloses approv
   });
   await page.goto('/');
   await showSettings(page); await addKey(page); await closeSettings(page);
-  await expectChatModel(page);
+  await chooseChatModel(page);
   await page.getByRole('button', { name: 'Skills', exact: true }).click();
   await page.getByRole('button', { name: 'Add skill', exact: true }).click();
   await page.getByRole('menuitem', { name: 'New', exact: true }).click();
@@ -408,7 +416,7 @@ test('chat settings list and remember remote skills without downloading until th
 
   await page.goto('/');
   await showSettings(page); await addKey(page); await closeSettings(page);
-  await expectChatModel(page);
+  await chooseChatModel(page);
   expect(cursors).toEqual([]);
   const settings = await showChatSkills(page);
   const remote = settings.getByRole('region', { name: 'Central', exact: true });
@@ -424,7 +432,7 @@ test('chat settings list and remember remote skills without downloading until th
   await page.reload();
   // BYOK keys are session-only; the profile-scoped skill selections survive reconnecting.
   await showSettings(page); await addKey(page); await closeSettings(page);
-  await expectChatModel(page);
+  await chooseChatModel(page);
   await page.getByRole('button', { name: 'View context', exact: true }).click();
   const context = page.getByRole('dialog', { name: 'Context', exact: true });
   const skillsTab = context.getByRole('tab', { name: 'Skills', exact: true });
@@ -575,7 +583,7 @@ test('above-composer spinner clears and a failed provider logo leaves the full m
   });
   await page.goto('/');
   await showSettings(page); await addKey(page); await closeSettings(page);
-  await expectChatModel(page);
+  await chooseChatModel(page);
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   const progress = page.locator('.chat-progress');
   await composer.fill('When will you respond?');
@@ -640,7 +648,7 @@ test('composer attaches picked files, dropped files and links, with opt-in local
   });
   await page.goto('/');
   await showSettings(page); await addKey(page); await closeSettings(page);
-  await expectChatModel(page);
+  await chooseChatModel(page);
 
   const composer = page.getByRole('form', { name: 'Message composer' });
   const plus = composer.getByRole('button', { name: 'Add to message' });
@@ -737,10 +745,12 @@ test('model picker groups and searches compatible models on a narrow screen, wit
   const openAI = list.getByRole('group', { name: 'OpenAI', exact: true });
   const claude = list.getByRole('option', { name: 'Claude Example', exact: true });
   await expect(page.locator('.chat-toolbar').getByRole('button')).toHaveCount(1);
-  await expect(picker).toHaveText('Claude Example');
+  await expect(picker).toHaveText('Select models');
   await picker.press('ArrowDown');
   await expect(search).toBeFocused();
   await expect(list).toHaveAttribute('aria-multiselectable', 'true');
+  await expect(list.getByRole('option', { selected: true })).toHaveCount(0);
+  await claude.click();
   await expect(list.getByRole('group', { name: 'Anthropic', exact: true }).getByRole('option', { selected: true })).toHaveText('Claude Example');
   await expect(openAI.getByRole('option')).toHaveText(['GPT Mini', 'GPT Nano']);
   await expect(list.getByRole('option')).toHaveCount(20);
@@ -838,7 +848,7 @@ test('search and provider groups remain available when switching to HTML and Flu
     await panel.getByRole('combobox', { name: 'Theme', exact: true }).selectOption(theme);
     await expect(panel.getByRole('group', { name: `${theme === 'html' ? 'HTML' : 'Fluent'} settings` })).toBeVisible();
     await closeSettings(page);
-    await expectChatModel(page);
+    await chooseChatModel(page);
     await picker.click();
     await expect(search).toBeFocused();
     await search.fill('openai');
@@ -878,7 +888,7 @@ test('global Chat preferences persist and control badges and context independent
   for (const name of ['Show metrics', 'Images', 'Audio', 'Video', 'Documents']) await expect(toggle(name)).not.toBeChecked();
   await toggle('Dictate').uncheck();
   await closeSettings(page);
-  await expectChatModel(page);
+  await chooseChatModel(page);
 
   const bar = page.getByRole('progressbar', { name: 'Context window', exact: true });
   const cost = page.getByRole('img', { name: /^Conversation cost \(USD\):/ });
@@ -972,7 +982,7 @@ test('MCP Tool output preferences filter approved requests and replay without ch
   });
   await page.goto('/');
   await showSettings(page); await addKey(page); await closeSettings(page);
-  await expectChatModel(page);
+  await chooseChatModel(page);
   await page.getByRole('button', { name: 'Add to message', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Model Context', exact: true }).click();
   const context = page.getByRole('dialog', { name: 'Model Context', exact: true });
@@ -1136,7 +1146,7 @@ test('MCP elicitation queues forms and resumes the tool before its separate resu
 
   await page.goto('/');
   await showSettings(page); await addKey(page); await closeSettings(page);
-  await expectChatModel(page);
+  await chooseChatModel(page);
   await page.getByRole('button', { name: 'Add to message', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Model Context', exact: true }).click();
   const context = page.getByRole('dialog', { name: 'Model Context', exact: true });
@@ -1256,7 +1266,7 @@ for (const approved of [true, false]) test(`MCP composer discovers resources and
   });
   await page.goto('/');
   await showSettings(page); await addKey(page); await closeSettings(page);
-  await expectChatModel(page);
+  await chooseChatModel(page);
   const openMenu = () => page.getByRole('button', { name: 'Add to message', exact: true }).click();
   const openContext = async () => {
     await openMenu();
@@ -1365,7 +1375,7 @@ test('MCP argument completions are optional, contextual, and debounced for promp
     headers: { 'x-vercel-ai-ui-message-stream': 'v1' }, body: sse('Prompt complete', 1) }));
   await page.goto('/');
   await showSettings(page); await addKey(page); await closeSettings(page);
-  await expectChatModel(page);
+  await chooseChatModel(page);
   const openMenuItem = async (name: string) => {
     await page.getByRole('button', { name: 'Add to message', exact: true }).click();
     await page.getByRole('menuitem', { name, exact: true }).click();
@@ -1439,7 +1449,7 @@ test('OpenAI chat settings pair fields when wide and persist the encrypted reaso
   });
   await page.goto('/');
   await showSettings(page); await addKey(page); await closeSettings(page);
-  await expectChatModel(page);
+  await chooseChatModel(page);
 
   const settings = page.getByRole('dialog', { name: 'Chat settings', exact: true });
   const openAI = settings.getByRole('tabpanel', { name: 'OpenAI', exact: true });
@@ -1481,7 +1491,7 @@ test('OpenAI chat settings pair fields when wide and persist the encrypted reaso
   await settings.getByRole('button', { name: 'Save', exact: true }).click();
   await page.reload();
   await showSettings(page); await addKey(page); await closeSettings(page);
-  await expectChatModel(page);
+  await chooseChatModel(page);
   await showOpenAI();
   await expect(encrypted).not.toBeChecked();
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
@@ -1520,7 +1530,7 @@ test('Gateway chat settings share context and replay catalog and approved text-o
   });
   await page.goto('/');
   await showSettings(page); await addKey(page); await closeSettings(page);
-  await expectChatModel(page);
+  await chooseChatModel(page);
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   async function send(text: string) { await composer.fill(text); await composer.press('Enter'); }
   await send(privateText);
@@ -1703,7 +1713,7 @@ test('Images uses explicit routes and persists compatible records only for the c
   await page.getByRole('button', { name: 'Enable encrypted storage' }).click();
   await expect(page.getByText('Encrypted storage is on.')).toBeVisible();
   await closeSettings(page);
-  await expectChatModel(page);
+  await chooseChatModel(page);
   await openRoute(page);
   await expect(page.getByRole('menuitem', { name: 'Images', exact: true })).toHaveCount(0);
   await expect(page.getByRole('menuitemradio', { name: '/api/images', exact: true })).toHaveCount(0);
@@ -1834,7 +1844,7 @@ test('Images settings set the request count and show matching gallery shimmers b
   });
   await page.goto('/');
   await showSettings(page); await addKey(page); await closeSettings(page);
-  await expectChatModel(page);
+  await chooseChatModel(page);
   const chatPicker = await modelPicker(page).boundingBox();
   await page.getByRole('button', { name: 'Images', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Images', exact: true })).toBeVisible();
@@ -1939,7 +1949,7 @@ async function prepareImageDecisions(page: Page, useDirectChat = false) {
     await page.route('https://api.openai.com/v1/models', route => route.fulfill({ json: { data: [{ id: 'gpt-4.1-mini' }] } }));
     await openRoute(page, 'Direct');
     await page.getByRole('menuitemradio', { name: '/v1/responses', exact: true }).click();
-    await expectChatModel(page);
+    await chooseChatModel(page);
   }
   await page.getByRole('button', { name: 'Images', exact: true }).click();
   await expect(modelPicker(page)).toHaveText('Imagen');
@@ -2407,7 +2417,8 @@ test('BYOK can chat and persist Direct performance and cost with every gateway r
     }
     expect(request.url()).toBe('https://api.openai.com/v1/chat/completions');
     expect(request.postDataJSON()).toMatchObject({ model: 'gpt-4.1-mini', stream: true, store: false });
-    expect(request.postDataJSON().messages).not.toContainEqual(expect.objectContaining({ role: 'system' }));
+    expect(request.postDataJSON().messages.filter(({ role }: { role: string }) => role === 'system' || role === 'developer'))
+      .toEqual([expect.objectContaining({ content: 'Chat' })]);
     if (directCalls === 1) expect(JSON.stringify(request.postDataJSON().messages)).toContain('Direct reply 1');
     await route.fulfill({ headers: { ...headers, 'content-type': 'text/event-stream' }, body: nativeChatSse(`Direct reply ${++directCalls}`) });
   });
@@ -2419,7 +2430,7 @@ test('BYOK can chat and persist Direct performance and cost with every gateway r
   await openRoute(page, 'Direct');
   await page.getByRole('menuitemradio', { name: '/v1/chat/completions', exact: true }).click();
   await showSettings(page); await addKey(page); await closeSettings(page);
-  await expectChatModel(page);
+  await chooseChatModel(page);
   await modelPicker(page).click();
   const list = page.getByRole('listbox', { name: 'Model', exact: true });
   await expect(list).not.toHaveAttribute('aria-multiselectable', 'true');
@@ -2429,14 +2440,17 @@ test('BYOK can chat and persist Direct performance and cost with every gateway r
   await expect(list).toBeHidden();
   await modelPicker(page).click();
   await directModel.click();
-  await expectChatModel(page);
+  await chooseChatModel(page);
   await openRoute(page, 'Direct');
   await expect(page.getByRole('menuitemradio', { name: '/v1/chat/completions', exact: true })).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByRole('menuitemradio', { name: '/v1/messages', exact: true })).toHaveCount(0);
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'View context', exact: true }).click();
   const context = page.getByRole('dialog', { name: 'Context', exact: true });
-  await expect(context.getByRole('tabpanel', { name: 'System', exact: true })).toContainText('No extra context is sent on Direct routes.');
+  const system = context.getByRole('tabpanel', { name: 'System', exact: true });
+  await expect(system.getByRole('heading', { name: 'Instructions', exact: true })).toBeVisible();
+  await expect(system.getByText('Chat', { exact: true })).toBeVisible();
+  await expect(system.getByRole('heading', { name: 'System context', exact: true })).toHaveCount(0);
   await expect(context.getByRole('tab', { name: 'Skills', exact: true })).toHaveCount(0);
   await context.getByRole('button', { name: 'Close', exact: true }).click();
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
@@ -2478,7 +2492,7 @@ test('BYOK can leave a failed gateway model request and discover directly', asyn
   await expect(page.getByText(/Could not reach the configured gateway/)).toBeVisible();
   await openRoute(page, 'Direct');
   await page.getByRole('menuitemradio', { name: '/v1/responses', exact: true }).click();
-  await expectChatModel(page);
+  await chooseChatModel(page);
   expect(gatewayCalls).toBe(1);
 });
 
@@ -2509,7 +2523,7 @@ test('switching from API Chat to a native gateway route keeps inline history and
   });
   await page.goto('/');
   await showSettings(page); await addKey(page); await closeSettings(page);
-  await expectChatModel(page);
+  await chooseChatModel(page);
   const settings = await showChatSkills(page);
   await settings.getByRole('switch', { name: skill.name, exact: true }).check();
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
@@ -2548,7 +2562,7 @@ test('model tabs browse the shared catalog without changing the chat picker, dra
   });
   await page.goto('/');
   await showSettings(page); await addKey(page); await closeSettings(page);
-  await expectChatModel(page);
+  await chooseChatModel(page);
   const rail = page.getByRole('navigation', { name: 'Chat navigation' });
   await expect(rail.getByRole('button', { name: 'Chat', exact: true })).toHaveCount(0);
   await expect(rail.getByRole('button', { name: 'New chat', exact: true })).toBeVisible();
@@ -2744,7 +2758,7 @@ test.describe('Dutch regional settings with English interface', () => {
     await page.goto('/');
     await showSettings(page); await addKey(page); await closeSettings(page);
     await enableChatMetrics(page);
-    await expectChatModel(page);
+    await chooseChatModel(page);
     const composer = page.getByRole('textbox', { name: 'Message', exact: true });
     await composer.fill('Show regional metrics');
     await composer.press('Enter');
@@ -3045,7 +3059,7 @@ test('mobile chat: two turns, theme icon switching, draft continuity, and new ch
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Welcome', exact: true })).toBeVisible();
   await showSettings(page); await addKey(page); await closeSettings(page);
-  await expectChatModel(page);
+  await chooseChatModel(page);
   await modelPicker(page).click();
   await expect(page.getByRole('listbox').getByRole('option')).toHaveCount(1);
   await page.keyboard.press('Escape');
@@ -3137,7 +3151,7 @@ test('errors are recoverable and Stop aborts the in-flight request', async ({ pa
     // The retry stays pending until the browser aborts it.
   });
   await page.goto('/'); await showSettings(page); await addKey(page); await closeSettings(page);
-  await expectChatModel(page);
+  await chooseChatModel(page);
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   await composer.fill('Will retry'); await composer.press('Enter');
   await expect(page.getByRole('alert')).toContainText('rate-limited');
@@ -3348,7 +3362,7 @@ test('signed-in Entra has only gateway routes, can browse live models, and clear
     await route.fulfill({ contentType: 'text/event-stream', body: nativeChatSse('Entra native reply') });
   });
   await page.goto('http://localhost:15174');
-  await expectChatModel(page);
+  await chooseChatModel(page);
   await modelPicker(page).click();
   await page.getByRole('searchbox', { name: 'Search models', exact: true }).fill('OPENAI');
   await expect(page.getByRole('group', { name: 'OpenAI', exact: true }).getByRole('option')).toHaveText('gpt-4.1-mini');

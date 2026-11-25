@@ -2,6 +2,8 @@ import { GatewayError, imageBatchSizes, imageSource, maxImageCount } from '@stre
 import type { CatalogModel, Gateway, GatewayImageEndpoint } from '@streaik/gateway';
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { assignedAgent } from './agentCatalog';
+import { useAgents } from './AgentsProvider';
 import { ChatComposer } from './ChatComposer';
 import type { DraftAttachment } from './chatAttachments';
 import { listImages, saveImage } from './imageLibrary';
@@ -10,7 +12,8 @@ import { imageOptionsForModel, readImagePreferences, writeImagePreferences } fro
 import { canEditImage, canMaskImage, imageMaskIssue } from './imageRoute';
 import { ImageBadges, ImagePreview } from './ImagePreview';
 import { ImageSettingsDialog } from './ImageSettingsDialog';
-import { ModelPicker, resolveModelSelection } from './ModelPicker';
+import { ModelPicker } from './ModelPicker';
+import { defaultAgentModelIds, resolveModelSelection } from './modelSelection';
 import type { ModelRouter } from './modelDecisions';
 import { useAppTranslation } from './i18n';
 import './images.css';
@@ -29,6 +32,7 @@ export default function ImagesView({ gateway, scope, route, toolbar, catalog, lo
   catalog?: readonly CatalogModel[]; loading: boolean; router?: ModelRouter; status?: string;
 }) {
   const { t } = useAppTranslation();
+  const agent = assignedAgent(useAgents(), 'image');
   const heading = useId();
   const [selectedIds, setSelectedIds] = useState<string[]>();
   const [draft, setDraft] = useState<{ prompt: string; attachments: DraftAttachment[] }>({ prompt: '', attachments: [] });
@@ -44,7 +48,7 @@ export default function ImagesView({ gateway, scope, route, toolbar, catalog, lo
   const [warnings, setWarnings] = useState<string[]>([]);
   const running = useRef<AbortController>(null);
   const models = catalog?.filter(({ type }) => type === 'image') ?? [];
-  const { selected } = resolveModelSelection(models, selectedIds, !!router);
+  const { selected } = resolveModelSelection(models, selectedIds, !!router, defaultAgentModelIds(agent));
   const references = draft.attachments.length;
   const edit = route === '/v1/images/edits' || references > 0 || !!settings.mask;
   const eligible = edit ? selected.filter(({ id }) => canEditImage(route, id)) : selected;

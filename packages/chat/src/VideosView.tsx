@@ -2,9 +2,12 @@ import { GatewayError } from '@streaik/gateway';
 import type { CatalogModel, Gateway, VideoAsset, VideoStatus } from '@streaik/gateway';
 import { useEffect, useId, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { assignedAgent } from './agentCatalog';
+import { useAgents } from './AgentsProvider';
 import { ChatComposer } from './ChatComposer';
 import { useAppTranslation } from './i18n';
-import { ModelPicker, resolveModelSelection } from './ModelPicker';
+import { ModelPicker } from './ModelPicker';
+import { defaultAgentModelIds, resolveModelSelection } from './modelSelection';
 import type { useVideoJobs } from './useVideoJobs';
 import type { FinishedVideoJob, PendingVideoJob } from './videoLibrary';
 import './images.css';
@@ -75,11 +78,12 @@ export default function VideosView({ gateway, library, toolbar, catalog, loading
   catalog?: readonly CatalogModel[]; loading: boolean; ready: boolean; status?: string;
 }) {
   const { t } = useAppTranslation();
+  const agent = assignedAgent(useAgents(), 'video');
   const heading = useId();
   const [prompt, setPrompt] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>();
   const models = catalog?.filter(({ type }) => type === 'video') ?? [];
-  const { selected } = resolveModelSelection(models, selectedIds, false);
+  const { selected } = resolveModelSelection(models, selectedIds, false, defaultAgentModelIds(agent));
   const model = selected[0];
   const canSend = ready && !status && !!model && !library.loading;
 

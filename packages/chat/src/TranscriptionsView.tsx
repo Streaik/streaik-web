@@ -4,8 +4,11 @@ import type { CatalogModel, Gateway, GatewayTranscriptionEndpoint, Transcript } 
 import { Button, Tooltip } from '@streaik/themes';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { assignedAgent } from './agentCatalog';
+import { useAgents } from './AgentsProvider';
 import { ChatIcon } from './ChatIcon';
 import { ModelPicker } from './ModelPicker';
+import { defaultAgentModelIds, resolveModelSelection } from './modelSelection';
 import { browserNumberFormat, useAppTranslation } from './i18n';
 import { runMicrophone } from './liveTranscription';
 import { dictationFormat, recordDictation } from './microphone';
@@ -22,16 +25,10 @@ type Item = { id: string; file: File; issue?: string; dictation?: Target };
 type Tab = 'finished' | 'streaming';
 type Phase = 'upload' | 'connecting' | 'listening' | 'finishing' | 'dictate-connecting' | 'dictating' | 'dictate-finishing';
 type Preview = { name: string; text: string; partial?: string };
-const preferredModels = ['openai/gpt-transcribe', 'openai/gpt-4o-transcribe', 'openai/gpt-4o-mini-transcribe', 'openai/whisper-1'];
 const errorMessage = (error: unknown, fallback: string) => error instanceof GatewayError ? error.message : fallback;
 const wholeSeconds = browserNumberFormat({ maximumFractionDigits: 0 });
 const segmentSeconds = browserNumberFormat({ minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const transcriptSearchDocument = ({ name, transcript }: SavedTranscript) => ({ title: name, text: transcript.text });
-
-function defaultFileModel(models: readonly CatalogModel[]) {
-  return preferredModels.map(id => models.find(model => model.id === id)).find(Boolean)
-    ?? models.find(model => model.provider === 'openai') ?? models[0];
-}
 
 function TranscriptCard({ item, menuContainer, remove, onError }: {
   item: SavedTranscript; menuContainer: HTMLDivElement | null; remove: () => void; onError: () => void;
@@ -95,6 +92,7 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
   menuContainer: HTMLDivElement | null; catalog?: readonly CatalogModel[]; loading: boolean; status?: string;
 }) {
   const { t } = useAppTranslation();
+  const agent = assignedAgent(useAgents(), 'transcription');
   const id = useId();
   const [settings, change] = useTranscriptionPreferences(scope);
   const [tab, setTab] = useState<Tab>('finished');
@@ -119,7 +117,9 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
   const transcriptionModels = (catalog ?? []).filter(model => model.type === 'transcription');
   const fileModels = transcriptionModels.filter(({ id }) => supportsFileTranscription(route, id));
   const models = transcriptionModels.filter(model => fileModels.includes(model) || model.tags.includes('realtime'));
-  const selectedModel = models.find(({ id }) => id === settings.model) ?? defaultFileModel(fileModels) ?? models[0];
+  const selectedIds = settings.model === undefined ? undefined : settings.model ? [settings.model] : [];
+  const { selected } = resolveModelSelection(models, selectedIds, false, defaultAgentModelIds(agent));
+  const selectedModel = selected[0];
   const fileModel = selectedModel && supportsFileTranscription(route, selectedModel.id) ? selectedModel : undefined;
   // Dictation transcribes a finished clip, even when uploaded files are set to stream.
   const dictateRoute = route === '/api/transcriptions/stream' ? '/api/transcriptions' : route;
@@ -312,8 +312,8 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
   </Button>;
   const options = ['finished', 'streaming'] as const;
   return <main className="catalog-main images-main" aria-labelledby={`${id}-heading`}>
-    {toolbar && createPortal(<ModelPicker models={models} selected={selectedModel ? [selectedModel] : []} multiple={false} loading={loading}
-      disabled={busy} onChange={ids => change({ model: ids[0] })} />, toolbar)}
+    {toolbar && createPortal(<ModelPicker models={models} selected={selected} multiple={false} loading={loading}
+      disabled={busy} onChange={ids => change({ model: ids[0] ?? null })} />, toolbar)}
     <div className="images-content">
       <h1 id={`${id}-heading`}>{t('Transcriptions')}</h1>
       <form className="chat-composer transcription-composer" aria-label={t('Transcription composer')} data-file-drag={dragging || undefined}

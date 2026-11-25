@@ -3,17 +3,6 @@ import { Select } from '@streaik/themes';
 import { providerName } from './CatalogViews';
 import { useAppTranslation } from './i18n';
 
-export function resolveModelSelection<T extends ChatModel>(models: readonly T[], ids: string[] | undefined, multiple: boolean) {
-  const byId = new Map(models.map(model => [model.id, model]));
-  const checked = ids?.flatMap(id => {
-    const model = byId.get(id);
-    return model ? [model] : [];
-  }) ?? [];
-  // Default to the first model unless the user explicitly cleared the selection.
-  const selected = checked.length || ids?.length === 0 ? checked : models.slice(0, 1);
-  return { byId, selected: multiple ? selected : selected.slice(0, 1) };
-}
-
 function modelSummary(selected: readonly string[], models: readonly ChatModel[]) {
   if (selected.length < 2) return;
   const withoutProvider = (id: string) => id.slice(id.indexOf('/') + 1);

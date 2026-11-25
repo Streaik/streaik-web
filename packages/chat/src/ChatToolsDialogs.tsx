@@ -160,8 +160,10 @@ export function ViewContextDialog({ context, tools, onClose }: { context?: Reque
       aria-labelledby={`${id}-${key}-tab`} hidden={tab !== key}>
       {tab === key && context?.[key] && <section className="chat-tool-card"><h3>{t(key === 'system' ? 'System context' : 'User context')}</h3>
         <ToolValue value={context[key]} /></section>}
+      {key === 'system' && tab === key && context?.chatInstructions && <section className="chat-tool-card">
+        <h3>{t('Instructions')}</h3><ToolValue value={context.chatInstructions} /></section>}
       {key === 'system' && tab === key && context?.mcp && <section className="chat-tool-card"><h3>{t('MCP resource catalog')}</h3><ToolValue value={context.mcp} /></section>}
-      {!context?.[key] && !(key === 'system' && context?.mcp) && <p>{t(context ? 'No additional context.' : 'No extra context is sent on Direct routes.')}</p>}
+      {!context?.[key] && !(key === 'system' && (context?.mcp || context?.chatInstructions)) && <p>{t(context ? 'No additional context.' : 'No extra context is sent on Direct routes.')}</p>}
     </div>)}
     <div id={`${id}-tools-panel`} role="tabpanel" tabIndex={0} aria-labelledby={`${id}-tools-tab`} hidden={tab !== 'tools'}>
       {tab === 'tools' && (tools.length ? <div className="chat-tool-list">{tools.map(item => {
