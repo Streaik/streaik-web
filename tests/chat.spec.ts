@@ -1480,6 +1480,7 @@ test('OpenAI chat settings pair fields when wide and persist the encrypted reaso
   await encrypted.uncheck();
   await settings.getByRole('button', { name: 'Save', exact: true }).click();
   await page.reload();
+  await showSettings(page); await addKey(page); await closeSettings(page);
   await expectChatModel(page);
   await showOpenAI();
   await expect(encrypted).not.toBeChecked();
