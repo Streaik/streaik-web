@@ -12,6 +12,7 @@ const auth = { openai: { Authorization: 'Bearer browser-openai' }, google: { 'x-
   anthropic: { 'x-api-key': 'browser-anthropic' } };
 const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jf2sAAAAASUVORK5CYII=';
 const openAiError = 'OpenAI request failed (HTTP 400) [invalid_size, field: size]: This model does not support the requested size. Key: [redacted]';
+const openAiToolError = { isError: true, content: [{ type: 'text', text: openAiError }] };
 
 function sse(events: unknown[]) { return events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n'; }
 
@@ -109,11 +110,13 @@ async function exerciseChat(page: Page, approve: boolean, manual = false, reject
         approval: { id: 'fixture-review', approved: approve },
       });
       expect(reviewed.approval).not.toHaveProperty('signature');
-      if (approve) expect(reviewed.output).toBe(rejectUpstream ? `MCP tool failed: ${openAiError}` : 'MCP returned 1 image(s), displayed to the user.');
+      if (approve) expect(reviewed.output).toMatchObject(rejectUpstream ? openAiToolError : {
+        content: [{ type: 'image', mimeType: 'image/png', data: png.split(',')[1] }],
+      });
       else expect(reviewed).not.toHaveProperty('output');
       expect(JSON.stringify(sent)).not.toContain('browser-openai');
       expect(JSON.stringify(sent)).not.toContain('test-mcp-token');
-      expect(JSON.stringify(sent)).not.toContain('iVBOR');
+      if (!approve || rejectUpstream) expect(JSON.stringify(sent)).not.toContain('iVBOR');
       await route.fulfill({ headers, body: sse([
         { type: 'start', messageId: 'mcp-assistant' }, { type: 'start-step' },
         { type: 'text-start', id: 'reply' }, { type: 'text-delta', id: 'reply', delta: 'Chat continued after MCP.' },
@@ -158,7 +161,7 @@ async function exerciseChat(page: Page, approve: boolean, manual = false, reject
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Create a tiny landscape.');
   await page.getByRole('button', { name: 'Send', exact: false }).click();
   const review = page.getByRole('dialog', { name: 'Review tool result' });
-  await expect(review.getByRole('tabpanel', { name: 'Output' })).toContainText(rejectUpstream ? openAiError : 'MCP returned 1 image(s)');
+  if (rejectUpstream) await expect(review.getByRole('tabpanel', { name: 'Output' })).toContainText(openAiError);
   await expect(page.getByRole('dialog', { name: 'Approve tool execution' })).toHaveCount(0);
   if (!rejectUpstream) await expect(review.getByRole('img', { name: 'MCP image 1' })).toBeVisible();
   await review.getByRole('tab', { name: 'Input' }).click();
@@ -218,8 +221,10 @@ for (const approve of [true, false]) {
           { ...chunk, choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
         ]) });
       }
-      expect(sent.messages.at(-1)).toMatchObject({ role: 'tool', tool_call_id: 'native-call',
-        content: approve ? `MCP tool failed: ${openAiError}` : 'The user declined to share this tool result.' });
+      const result = sent.messages.at(-1);
+      expect(result).toMatchObject({ role: 'tool', tool_call_id: 'native-call' });
+      if (approve) expect(JSON.parse(result.content)).toMatchObject(openAiToolError);
+      else expect(result.content).toBe('The user declined to share this tool result.');
       expect(JSON.stringify(sent)).not.toContain('Key: browser-openai');
       return route.fulfill({ contentType: 'text/event-stream', body: sse([
         { ...chunk, choices: [{ index: 0, delta: { role: 'assistant', content: 'Native chat continued.' }, finish_reason: 'stop' }] },
@@ -251,6 +256,61 @@ for (const approve of [true, false]) {
     expect(toolCalls).toBe(1);
   });
 }
+
+test('approved REST Countries structured data reaches the next chat request', async ({ page }) => {
+  const endpoint = `${mcp}/github-rest-countries`;
+  const remoteName = 'github_rest_countries_get_detail';
+  let calls = 0, chats = 0;
+  await page.route(endpoint, async route => {
+    if (route.request().method() === 'POST') {
+      expect(route.request().headers().authorization).toBeUndefined();
+      const rpc = route.request().postDataJSON();
+      if (rpc.method === 'tools/call') {
+        calls++;
+        expect(rpc.params).toMatchObject({ name: remoteName, arguments: { cca: 'PL' } });
+      }
+    }
+    await route.continue();
+  });
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: model }] } }));
+  await page.route('**/gateway/api/chat', route => {
+    const sent = route.request().postDataJSON();
+    const headers = { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' };
+    if (++chats === 1) {
+      const name = sent.tools.find((tool: { name: string }) => tool.name.endsWith(`_${remoteName}`)).name;
+      return route.fulfill({ headers, body: sse([
+        { type: 'start', messageId: 'country-response' }, { type: 'start-step' },
+        { type: 'tool-input-available', toolCallId: 'country-call', toolName: name, input: { cca: 'PL' }, dynamic: true },
+        { type: 'tool-approval-request', toolCallId: 'country-call', approvalId: 'country-review' },
+        { type: 'finish-step' }, { type: 'finish', finishReason: 'tool-calls' },
+      ]) });
+    }
+    const reviewed = sent.messages.at(-1).parts.find((part: { toolCallId?: string }) => part.toolCallId === 'country-call');
+    expect(reviewed).toMatchObject({ state: 'output-available', approval: { approved: true },
+      output: { content: [], structuredContent: { name: { common: 'Poland' }, capital: ['Warsaw'] } } });
+    return route.fulfill({ headers, body: sse([
+      { type: 'start', messageId: 'country-response' }, { type: 'start-step' },
+      { type: 'text-start', id: 'country' }, { type: 'text-delta', id: 'country', delta: 'Warsaw is the capital of Poland.' },
+      { type: 'text-end', id: 'country' }, { type: 'finish-step' }, { type: 'finish', finishReason: 'stop' },
+    ]) });
+  });
+  await page.goto('/');
+  await setOpenAiKey(page);
+  await page.getByRole('button', { name: 'MCP Servers', exact: true }).click();
+  await page.getByRole('tab', { name: 'Registry', exact: true }).click();
+  await page.getByRole('button', { name: 'Install GitHub RESTCountries.NET', exact: true }).click();
+  await page.getByRole('button', { name: 'New chat', exact: true }).click();
+  await selectServer(page, 'GitHub RESTCountries.NET', 3);
+  await page.getByRole('textbox', { name: 'Message', exact: true }).fill('What is the capital of Poland?');
+  await page.getByRole('button', { name: 'Send', exact: false }).click();
+  const review = page.getByRole('dialog', { name: 'Review tool result' });
+  await expect(review.getByRole('tabpanel', { name: 'Output' })).toContainText('Poland');
+  expect(chats).toBe(1);
+  await review.getByRole('button', { name: 'Approve and share', exact: true }).click();
+  await expect(page.getByText('Warsaw is the capital of Poland.')).toBeVisible();
+  expect(calls).toBe(1);
+  expect(chats).toBe(2);
+});
 
 test('the registry controls which servers appear in chat and receives no credentials', async ({ page }) => {
   await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: model }] } }));
@@ -345,12 +405,14 @@ test('catalog is configured separately, and app credentials are not resolved out
   }
 });
 
-test('the bundled header-auth registry is not compatible with the Entra chat credential policy', async () => {
+test('the Entra chat policy never uses app credentials for provider header declarations', async () => {
   const options = readMcpConfig(new URL('http://localhost:15274/'), mcp, registryUrl)!;
   const { servers } = await fetchMcpCatalog(new URL(registryUrl), new AbortController().signal);
   const policy = { ...options, headersForRemote: (headers: Parameters<typeof acceptsEntraMcpToken>[0]) => acceptsEntraMcpToken(headers)
     ? { ready: true, headers: () => ({ Authorization: 'Bearer fixture' }) } : undefined };
-  for (const server of servers) for (const remote of server.remotes) expect(mcpAppAuth(policy, { ...remote, source: 'registry' })).toBeUndefined();
+  const credentialed = servers.flatMap(server => server.remotes).filter(remote => remote.declarations.length > 0);
+  expect(credentialed).not.toHaveLength(0);
+  for (const remote of credentialed) expect(mcpAppAuth(policy, { ...remote, source: 'registry' })).toBeUndefined();
   expect(acceptsEntraMcpToken([])).toBe(true);
   expect(acceptsEntraMcpToken([{ name: 'Authorization', value: 'Bearer {access_token}' }])).toBe(true);
 });

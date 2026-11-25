@@ -56,6 +56,7 @@ import type { McpEditorTarget } from './McpServersView';
 import { useMcpSelection, useMcpServers } from './useMcpServers';
 import type { McpServers } from './useMcpServers';
 export type { McpAppAuth, McpOptions, McpRemoteHeader } from './mcp';
+export { isMcpRuntime } from './mcp';
 import { chatDecisionInput, chatModelDecision, modelDecisionRouter, selectModelRoleId, useDecisionRoute } from './modelDecisions';
 import type { ModelDecision } from './modelDecisions';
 import { conversationNameRoleId, runTextAppAgent, welcomeRoleId } from './textAppAgents';
@@ -584,14 +585,14 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         if (!target || !server) output = 'Choose a connected MCP server and an absolute resource URI.';
         else try {
           const result = await readMcpResource(server, target.uri, controller.signal);
-          output = result.text || (result.images.length ? 'MCP returned an image resource for the user.' : 'The resource has no supported content.');
+          output = { contents: result.contents };
           images = result.images;
         } catch (error) { output = mcpFailure(error); }
       } else {
         if (!mcpServers.available) output = 'MCP is unavailable.';
         else try {
           const result = await callMcpTool(tool.tool, part.input, controller.signal);
-          output = result.text;
+          output = result.output;
           images = result.images;
         } catch (error) { output = mcpFailure(error); }
       }

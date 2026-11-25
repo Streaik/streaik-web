@@ -20,7 +20,7 @@ export function EntraApp({ appName, base, auth, mcpConfig }: { appName: string; 
     if (!mcpConfig?.base || !auth.hasMcpScope) return mcpConfig;
     const headersFor = createEntraMcpHeaders(mcpConfig.base, auth, auth.clientId);
     return { ...mcpConfig, headersForRemote: (headers, endpoint) => headers.length === 0
-      ? { ready: !!auth.getAccount(), headers: (signal) => headersFor(endpoint, signal) } : undefined };
+      ? { ready: !!auth.getAccount(), headers: (signal) => headersFor(endpoint, signal), challengeOnly: true } : undefined };
   });
 
   async function authenticate(signOut = false) {

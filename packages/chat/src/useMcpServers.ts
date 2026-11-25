@@ -62,7 +62,7 @@ export function useMcpServers(scope: string | undefined, options: McpOptions | u
     const server = { id: record.id, title: record.title, endpoint: record.endpoint };
     if (record.auth === 'app') {
       const auth = mcpAppAuth(options, record);
-      if (auth?.ready) return { ...server, requestHeaders: auth.headers };
+      if (auth?.ready) return { ...server, requestHeaders: auth.headers, challengeOnly: auth.challengeOnly };
       return;
     }
     const credentials = current.session.get(record.id);

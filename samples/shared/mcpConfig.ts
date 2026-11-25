@@ -3,8 +3,7 @@ import { normalizeGatewayBase } from '@streaik/gateway';
 
 export type McpConfig = Pick<McpOptions, 'base' | 'registryUrl'>;
 
-// A mixed registry publishes both transports. BYOK never installs the bundled OAuth remotes;
-// third-party remotes and Add by URL still support endpoints without declared headers.
+// Outside the configured BYOK host, keep bundled headerless remotes (which can be OAuth) out of the view.
 export const byokRegistryRemote: NonNullable<McpOptions['filterRegistryRemote']> = (name, remote) =>
   !name.startsWith('io.github.streaik/') || remote.declarations.length > 0;
 

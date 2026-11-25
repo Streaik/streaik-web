@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { discoverMcpServer, mcpAppAuth } from '../packages/chat/src/mcp.ts';
+import { callMcpTool, discoverMcpServer, mcpAppAuth } from '../packages/chat/src/mcp.ts';
 import { mcpDeclarations, mcpEndpoint, mcpHeaderFields, parseMcpServer, resolveMcpHeaders } from '../packages/chat/src/mcpConfiguration.ts';
 
 test('MCP endpoints accept HTTPS and local HTTP without credentials or ambiguous paths', () => {
@@ -59,4 +59,55 @@ test('MCP fails closed when a remote only supports an earlier protocol revision'
   await assert.rejects(discoverMcpServer({ id: 'remote', title: 'Remote', endpoint, requestHeaders: () => ({}) },
     new AbortController().signal));
   assert.deepEqual(attempts, [['POST', 'server/discover', '2026-07-28', '2026-07-28']]);
+});
+
+for (const protect of [false, true]) {
+  test(`managed MCP negotiates credentials only on a discovery challenge (${protect ? 'protected' : 'public'})`, async (t) => {
+    const endpoint = 'https://mcp.example.org/tools/arbitrary-route';
+    const calls = [];
+    let credentials = 0;
+    t.mock.method(globalThis, 'fetch', async (request, init) => {
+      const post = new Request(request, init);
+      const { id, method } = await post.json();
+      const authorization = post.headers.get('Authorization');
+      calls.push([method, authorization]);
+      if (protect && !authorization) return new Response(null, { status: 401, headers: { 'WWW-Authenticate': 'Bearer' } });
+      const result = method === 'server/discover' ? { supportedVersions: ['2026-07-28'], capabilities: { tools: {} } } : { tools: [], resultType: 'complete', ttlMs: 0, cacheScope: 'private' };
+      return Response.json({ jsonrpc: '2.0', id, result });
+    });
+    await discoverMcpServer({ id: 'fixture', title: 'Fixture', endpoint, challengeOnly: true,
+      requestHeaders: () => { credentials++; return { Authorization: 'Bearer fixture' }; } }, new AbortController().signal);
+    assert.deepEqual(calls, [['server/discover', null], ...(protect ? [['server/discover', 'Bearer fixture']] : []), ['tools/list', protect ? 'Bearer fixture' : null]]);
+    assert.equal(credentials, protect ? 2 : 0);
+  });
+}
+
+test('tool output carries full ordered content and structured data, not a display projection', async (t) => {
+  const endpoint = 'https://mcp.example.org/tools';
+  const content = [
+    { type: 'text', text: 'a'.repeat(140 * 1024) },
+    { type: 'image', mimeType: 'image/png', data: 'AQID' },
+    { type: 'audio', mimeType: 'audio/wav', data: 'BAUG' },
+    { type: 'resource_link', name: 'source', uri: 'fixture://source' },
+    { type: 'resource', resource: { uri: 'fixture://record', mimeType: 'text/plain', text: 'complete embedded record' } },
+  ];
+  const structuredContent = { country: { code: 'PL', name: 'Poland' } };
+  let rejectTool = false;
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (request, init) => {
+    const { id, method } = await new Request(request, init).json();
+    calls.push(method);
+    if (rejectTool && method === 'tools/call') return new Response(null, { status: 401, headers: { 'WWW-Authenticate': 'Bearer' } });
+    const result = method === 'server/discover' ? { supportedVersions: ['2026-07-28'], capabilities: { tools: {} } }
+      : { resultType: 'complete', content, structuredContent, isError: false, _meta: { private: 'not model-visible' } };
+    return Response.json({ jsonrpc: '2.0', id, result });
+  });
+  const server = { id: 'fixture', title: 'Fixture', endpoint, challengeOnly: true, requestHeaders: () => assert.fail('Unchallenged discovery must not request credentials') };
+  const tool = { name: 'fixture', remoteName: 'fixture', inputSchema: { type: 'object' }, server };
+  const result = await callMcpTool(tool, {}, new AbortController().signal);
+  assert.deepEqual(result.output, { content, structuredContent, isError: false });
+  assert.deepEqual(result.images, ['data:image/png;base64,AQID']);
+  rejectTool = true;
+  await assert.rejects(callMcpTool(tool, {}, new AbortController().signal), /401/);
+  assert.deepEqual(calls, ['server/discover', 'tools/call', 'server/discover', 'tools/call']);
 });

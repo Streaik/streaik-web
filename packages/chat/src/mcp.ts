@@ -6,7 +6,7 @@ export type { McpRemoteHeader } from './mcpConfiguration.ts';
 const revision = '2026-07-28';
 
 type RequestHeaders = (signal?: AbortSignal) => HeadersInit | Promise<HeadersInit>;
-export type McpAppAuth = { ready: boolean; headers: RequestHeaders };
+export type McpAppAuth = { ready: boolean; headers: RequestHeaders; challengeOnly?: boolean };
 export type McpOptions = {
   base?: URL;
   registryUrl?: URL;
@@ -15,6 +15,7 @@ export type McpOptions = {
 };
 export type McpServer = Pick<McpServerRecord, 'id' | 'title' | 'endpoint'> & {
   requestHeaders: RequestHeaders;
+  challengeOnly?: boolean;
 };
 export type McpTool = Pick<Tool, 'name' | 'title' | 'description' | 'inputSchema' | 'outputSchema' | 'annotations'> & { server: McpServer; remoteName: string };
 export type McpOutput = { text: string; images: string[] };
@@ -92,6 +93,7 @@ async function withClient<T>(server: McpServer, signal: AbortSignal, action: (cl
   const { Client, StreamableHTTPClientTransport } = await import('@modelcontextprotocol/client');
   // Transport compatibility is independent of whether the app trusts this URL with managed credentials.
   const client = new Client({ name: 'Streaik Web', version: '1.0.0' }, { versionNegotiation: { mode: { pin: revision } } });
+  let sendCredentials = !server.challengeOnly;
   const transport = new StreamableHTTPClientTransport(new URL(endpoint), {
     protocolVersion: revision,
     requestInit: { redirect: 'error' },
@@ -100,14 +102,22 @@ async function withClient<T>(server: McpServer, signal: AbortSignal, action: (cl
       // Bind credentials to the configured origin AND exact server path. Never follow redirects.
       if (request.url !== endpoint || request.method !== 'POST') throw new Error('Unexpected MCP request.');
       const headers = new Headers(request.headers);
-      signal.throwIfAborted();
-      const credentials = new Headers(await server.requestHeaders(signal));
-      credentials.forEach((value, key) => headers.set(key, value));
-      if (headers.has('Mcp-Session-Id')) throw new Error('Stateful MCP sessions are not supported.');
-      headers.set('Mcp-Protocol-Version', revision);
-      signal.throwIfAborted();
-      const response = await fetch(request, { headers, signal: AbortSignal.any([request.signal, signal]), redirect: 'error', credentials: 'omit',
-        cache: 'no-store', referrerPolicy: 'no-referrer' });
+      const canChallenge = !sendCredentials && headers.get('Mcp-Method') === 'server/discover';
+      async function send(message: Request) {
+        signal.throwIfAborted();
+        if (sendCredentials) new Headers(await server.requestHeaders(signal)).forEach((value, key) => headers.set(key, value));
+        if (headers.has('Mcp-Session-Id')) throw new Error('Stateful MCP sessions are not supported.');
+        headers.set('Mcp-Protocol-Version', revision);
+        signal.throwIfAborted();
+        return fetch(message, { headers, signal: AbortSignal.any([request.signal, signal]), redirect: 'error', credentials: 'omit',
+          cache: 'no-store', referrerPolicy: 'no-referrer' });
+      }
+      let response = await send(canChallenge ? request.clone() : request);
+      if (canChallenge && response.status === 401 && /^Bearer(?:\s|$)/i.test(response.headers.get('WWW-Authenticate') ?? '')) {
+        void response.body?.cancel().catch(() => {});
+        sendCredentials = true;
+        response = await send(request);
+      }
       if (!response.ok) {
         void response.body?.cancel().catch(() => {});
         throw new McpRequestError(`The MCP endpoint rejected the ${headers.get('Mcp-Method') === 'tools/call' ? 'tool call' : 'connection'} (HTTP ${response.status}).`);
@@ -205,14 +215,14 @@ export function expandMcpResource(template: string, values: Record<string, strin
   return uri;
 }
 
-export function readMcpResource(server: McpServer, uri: string, signal: AbortSignal): Promise<McpOutput> {
+export function readMcpResource(server: McpServer, uri: string, signal: AbortSignal) {
   if (!validMcpResourceUri(uri)) throw new McpRequestError('Use an absolute MCP resource URI.');
   const bounded = AbortSignal.any([signal, AbortSignal.timeout(45_000)]);
   return withClient(server, bounded, async client => {
     // A resource URI is an opaque RPC argument, not a browser fetch destination.
     const { contents } = await client.readResource({ uri }, { signal: bounded });
-    return mcpOutput(contents.map(content => 'text' in content ? { type: 'text', text: content.text }
-      : { type: 'image', mimeType: content.mimeType, data: content.blob }));
+    return { contents, ...mcpOutput(contents.map(content => 'text' in content ? { type: 'text', text: content.text }
+      : { type: 'image', mimeType: content.mimeType, data: content.blob })) };
   });
 }
 
@@ -234,12 +244,13 @@ function mcpOutput(content: readonly { type: string; text?: string; mimeType?: s
   return { text, images };
 }
 
-export async function callMcpTool(tool: McpTool, input: unknown, signal: AbortSignal): Promise<McpOutput> {
+export async function callMcpTool(tool: McpTool, input: unknown, signal: AbortSignal) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new McpRequestError('The MCP tool input must be a JSON object.');
   const result = await withClient(tool.server, signal, client => client.callTool({
     name: tool.remoteName, arguments: input as Record<string, unknown>,
   }, { signal, timeout: 130_000 }));
-  const { text, images } = mcpOutput(result.content);
-  if (result.isError) return { text: `MCP tool failed: ${text || 'The server returned an error.'}`, images: [] };
-  return { text: [text, images.length ? `MCP returned ${images.length} image(s), displayed to the user.` : ''].filter(Boolean).join('\n') || 'MCP tool completed.', images };
+  // Keep the model-visible fields intact. Request metadata (including result _meta) is for the client, not the model.
+  const { content, structuredContent, isError } = result;
+  const output = { content, ...(structuredContent !== undefined && { structuredContent }), ...(isError !== undefined && { isError }) };
+  return { output, images: isError ? [] : mcpOutput(content).images };
 }
