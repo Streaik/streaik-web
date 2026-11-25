@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { activeChatTools, filterLocalToolReplay, runLocalTool } from '../packages/chat/src/localPlugins.ts';
-import { normalizeChatPreferences } from '../packages/chat/src/chatPreferences.ts';
+import { defaultChatPreferences, normalizeChatPreferences } from '../packages/chat/src/chatPreferences.ts';
 import { buildRequestContext, withRequestContext } from '../packages/chat/src/chatContext.ts';
 
 const gateway = { mode: 'gateway', endpoint: '/api/chat' };
@@ -36,10 +36,10 @@ test('tools are opt-in, scoped, and Gateway-only; Direct and Gateway keep existi
   assert.equal(activeChatTools(gateway, selected, true, [mcp]).length, 9);
   assert.deepEqual(activeChatTools(direct, selected, true, [mcp]), [{ source: 'mcp', tool: mcp, definition: mcp }]);
   assert.deepEqual(normalizeChatPreferences({ delay: 496, plugins: [...selected, selected[0], 'unregistered'] }),
-    { delay: 500, plugins: selected, remoteSkillIds: [], convertAttachmentsToText: false, pinnedViews: [] });
+    { ...defaultChatPreferences, delay: 500, plugins: selected });
   assert.deepEqual(normalizeChatPreferences({ delay: -1, plugins: null, convertAttachmentsToText: true,
     remoteSkillIds: ['openai/skill_1', false, '  ', 'openai/skill_1', 'anthropic/skill_2'] }),
-    { delay: 0, plugins: [], remoteSkillIds: ['openai/skill_1', 'anthropic/skill_2'], convertAttachmentsToText: true, pinnedViews: [] });
+    { ...defaultChatPreferences, delay: 0, remoteSkillIds: ['openai/skill_1', 'anthropic/skill_2'], convertAttachmentsToText: true });
 });
 
 test('preferences only restore supported sidebar pins', () => {

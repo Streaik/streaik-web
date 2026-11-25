@@ -28,6 +28,11 @@ async function showSettings(page: Page, tab?: string) {
   return dialog;
 }
 async function closeSettings(page: Page) { await page.getByRole('button', { name: 'Close', exact: true }).click(); }
+async function enableChatMetrics(page: Page) {
+  const settings = await showSettings(page, 'Chat');
+  await settings.getByRole('switch', { name: 'Show metrics', exact: true }).check();
+  await closeSettings(page);
+}
 const railMore = (page: Page) => page.getByRole('button', { name: 'More pages', exact: true });
 const pagesMenu = (page: Page) => page.getByRole('menu', { name: 'More pages', exact: true });
 async function openCatalog(page: Page, name: 'Models' | 'Providers') {
@@ -838,6 +843,156 @@ function sse(text: string, turn: number, answerModel = model) {
     { type: 'finish', finishReason: 'stop', messageMetadata: { model: answerModel } },
   ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n';
 }
+
+test('global Chat preferences persist and control badges and context independently from conversation cost', async ({ page }) => {
+  let count = 0;
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: model, context_window: 2000, max_tokens: 256 }] } }));
+  await page.route('**/gateway/api/chat', route => {
+    count++;
+    const usage = { promptTokens: 2000, completionTokens: 34, totalTokens: 2034 };
+    const messageMetadata = { model, usage, providerMetadata: { gateway: { cost: count === 1 ? 0 : 0.125, ttft: 1.25, tps: 25 } } };
+    const body = sse(`Usage reply ${count}`, count).replace(JSON.stringify({ model }), JSON.stringify(messageMetadata));
+    return route.fulfill({ headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' }, body });
+  });
+  await page.goto('/');
+  const settings = await showSettings(page);
+  await addKey(page);
+  await settings.getByRole('tab', { name: 'Chat', exact: true }).click();
+  const panel = settings.getByRole('tabpanel', { name: 'Chat', exact: true });
+  const toggle = (name: string) => panel.getByRole('switch', { name, exact: true });
+  await expect(panel.getByRole('heading')).toHaveText(['Input', 'Output', 'Tool output']);
+  await expect(panel.getByRole('switch')).toHaveCount(11);
+  for (const name of ['Dictate', 'Show context size', 'Show tokens per message', 'Show provider logo', 'Text', 'Links']) await expect(toggle(name)).toBeChecked();
+  for (const name of ['Show metrics', 'Images', 'Audio', 'Video', 'Documents']) await expect(toggle(name)).not.toBeChecked();
+  await toggle('Dictate').uncheck();
+  await closeSettings(page);
+  await expectChatModel(page);
+
+  const bar = page.getByRole('progressbar', { name: 'Context window', exact: true });
+  const cost = page.getByRole('img', { name: /^Conversation cost \(USD\):/ });
+  const send = async (text: string) => {
+    const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+    await composer.fill(text);
+    await composer.press('Enter');
+  };
+  await expect(bar).toHaveCount(0);
+  await send('First usage question');
+  const lastReply = page.getByRole('article', { name: 'Assistant', exact: true }).last();
+  await expect(lastReply.locator('.chat-provider-logo')).toBeVisible();
+  await expect(lastReply.getByRole('img', { name: /^Total tokens:/ })).toHaveText('2,034');
+  await expect(lastReply.getByRole('img', { name: /^Time to first token:/ })).toHaveCount(0);
+  await expect(cost).toHaveCount(0);
+  await expect(bar).toHaveAttribute('aria-valuetext', /^Tokens used: 2,034 of 2,000/);
+  await expect(bar).toHaveAttribute('value', '2000');
+
+  await send('Second usage question');
+  await expect(cost).toHaveText('$0.125');
+  await showSettings(page, 'Chat');
+  for (const name of ['Show context size', 'Show tokens per message', 'Show provider logo', 'Links']) await toggle(name).uncheck();
+  await toggle('Show metrics').check();
+  await closeSettings(page);
+  await expect(bar).toHaveCount(0);
+  await expect(cost).toHaveText('$0.125');
+  await expect(lastReply.locator('.chat-provider-logo')).toHaveCount(0);
+  await expect(lastReply.locator('.chat-speaker')).toHaveText(model);
+  await expect(lastReply.getByRole('img', { name: /^Total tokens:/ })).toHaveCount(0);
+  await expect(lastReply.getByRole('img', { name: /^Time to first token:/ })).toHaveText('1.25 s');
+  await expect(lastReply.getByRole('img', { name: /^Tokens per second:/ })).toHaveText('25 tok/s');
+  await expect(lastReply.getByRole('img', { name: /^Gateway cost \(USD\):/ })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Chat settings', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Chat settings', exact: true }).getByRole('button', { name: 'Defaults', exact: true }).click();
+  await closeSettings(page);
+  await page.reload();
+  await expect(page.getByText('Usage reply 2', { exact: true })).toBeVisible();
+  await expect(cost).toHaveText('$0.125');
+  await showSettings(page, 'Chat');
+  for (const name of ['Dictate', 'Show context size', 'Show tokens per message', 'Show provider logo', 'Links']) await expect(toggle(name)).not.toBeChecked();
+  await expect(toggle('Show metrics')).toBeChecked();
+
+  await settings.getByRole('tab', { name: 'General', exact: true }).click();
+  await settings.getByLabel('Language', { exact: true }).selectOption('nl');
+  const localized = page.getByRole('dialog', { name: 'Instellingen', exact: true });
+  await localized.getByRole('tab', { name: 'Chat', exact: true }).click();
+  const localizedPanel = localized.getByRole('tabpanel', { name: 'Chat', exact: true });
+  await expect(localizedPanel.getByRole('heading')).toHaveText(['Invoer', 'Uitvoer', 'Tooluitvoer']);
+  for (const name of ['Dicteren', 'Toon contextgrootte', 'Toon tokens per bericht', 'Toon providerlogo', 'Toon metingen',
+    'Tekst', 'Links', 'Afbeeldingen', 'Audio', 'Video', 'Documenten']) await expect(localizedPanel.getByRole('switch', { name, exact: true })).toBeVisible();
+});
+
+test('MCP Tool output preferences filter approved requests and replay without changing the reviewed result', async ({ page }) => {
+  await mockModels(page);
+  const result = {
+    content: [{ type: 'text', text: 'Fixture text' }, { type: 'image', mimeType: 'image/png', data: 'AQID' }],
+    structuredContent: { code: 'fixture-structured' },
+  };
+  let toolCalls = 0;
+  await page.route('**/mcp-output-fixture', route => {
+    const { id, method, params } = route.request().postDataJSON();
+    const reply = (value: unknown) => route.fulfill({ json: { jsonrpc: '2.0', id, result: value } });
+    if (method === 'server/discover') return reply({ supportedVersions: ['2026-07-28'], capabilities: { tools: {} } });
+    if (method === 'tools/list') return reply({ resultType: 'complete', ttlMs: 0, cacheScope: 'private',
+      tools: [{ name: 'lookup', title: 'Fixture tool', inputSchema: { type: 'object' } }] });
+    expect(method).toBe('tools/call');
+    expect(params.name).toBe('lookup');
+    toolCalls++;
+    return reply({ resultType: 'complete', ...result });
+  });
+  const signature = 'fixture-signature';
+  const requests: { messages: { parts: { toolCallId?: string; approval?: unknown; output?: unknown }[] }[] }[] = [];
+  await page.route('**/gateway/api/chat', route => {
+    const body = route.request().postDataJSON();
+    requests.push(body);
+    const headers = { 'x-vercel-ai-ui-message-stream': 'v1', 'content-type': 'text/event-stream' };
+    if (requests.length === 1) {
+      expect(body.tools).toHaveLength(1);
+      const frames = [
+        { type: 'start', messageId: 'mcp-fixture-answer' }, { type: 'start-step' },
+        { type: 'tool-input-available', toolName: body.tools[0].name, toolCallId: 'lookup-fixture', input: {}, dynamic: true, providerExecuted: false },
+        { type: 'tool-approval-request', toolCallId: 'lookup-fixture', approvalId: 'review-fixture', signature },
+        { type: 'finish-step' }, { type: 'finish', finishReason: 'tool-calls' },
+      ];
+      return route.fulfill({ headers, body: frames.map(frame => `data: ${JSON.stringify(frame)}\n\n`).join('') + 'data: [DONE]\n\n' });
+    }
+    const response = sse(`MCP fixture reply ${requests.length}`, requests.length);
+    return route.fulfill({ headers, body: requests.length === 2 ? response.replace(/^data: [^\n]+\n\n/, '') : response });
+  });
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await expectChatModel(page);
+  await page.getByRole('button', { name: 'Add to message', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Model Context', exact: true }).click();
+  const context = page.getByRole('dialog', { name: 'Model Context', exact: true });
+  await context.getByRole('tab', { name: 'Installed', exact: true }).click();
+  await context.getByRole('button', { name: 'Add by URL' }).click();
+  const editor = page.getByRole('dialog', { name: 'Add MCP server' });
+  await editor.getByLabel('Server name').fill('Output fixture');
+  await editor.getByLabel('Server URL').fill(new URL('/mcp-output-fixture', page.url()).href);
+  await editor.getByRole('button', { name: 'Save server' }).click();
+  await context.getByRole('switch', { name: 'Output fixture' }).check();
+  await expect(context.getByRole('status')).toHaveText('1 tools available');
+  await context.getByRole('button', { name: 'Close', exact: true }).click();
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('Run the MCP fixture'); await composer.press('Enter');
+  const review = page.getByRole('dialog', { name: 'Review tool result' });
+  await expect(review.getByRole('tabpanel', { name: 'Output', exact: true })).toContainText('AQID');
+  await expect(review.getByRole('tabpanel', { name: 'Output', exact: true })).toContainText('fixture-structured');
+  expect(requests).toHaveLength(1);
+  await review.getByRole('button', { name: 'Approve and share', exact: true }).click();
+  await expect(page.getByText('MCP fixture reply 2', { exact: true })).toBeVisible();
+  const toolResult = (index: number) => requests[index].messages.flatMap(message => message.parts).find(part => part.toolCallId === 'lookup-fixture');
+  const approval = { id: 'review-fixture', approved: true, signature };
+  expect(toolResult(1)).toMatchObject({ approval, output: { ...result, content: [result.content[0], { type: 'text', text: 'Image content omitted by user settings.' }] } });
+  expect(JSON.stringify(requests[1])).not.toContain('AQID');
+  const settings = await showSettings(page, 'Chat');
+  await settings.getByRole('switch', { name: 'Images', exact: true }).check();
+  await settings.getByRole('switch', { name: 'Text', exact: true }).uncheck();
+  await closeSettings(page);
+  await composer.fill('Replay after changing preferences'); await composer.press('Enter');
+  await expect(page.getByText('MCP fixture reply 3', { exact: true })).toBeVisible();
+  expect(toolResult(2)).toMatchObject({ approval, output: { ...result, content: [{ type: 'text', text: 'Text content omitted by user settings.' }, result.content[1]] } });
+  expect(toolCalls).toBe(1);
+});
 
 for (const approved of [true, false]) test(`MCP composer discovers resources and prompts and ${approved ? 'shares' : 'withholds'} read_resource results`, async ({ page }) => {
   await mockModels(page);
@@ -1797,6 +1952,8 @@ test('BYOK can chat and persist Direct performance and cost with every gateway r
   const lastReply = page.getByRole('article', { name: 'Assistant', exact: true }).last();
   const badge = (label: string) => lastReply.getByRole('img', { name: new RegExp(`^${label.replace(/[()]/g, '\\$&')}:`) });
   await expect(badge('Estimated direct cost (USD)')).toHaveText('0.0000104');
+  await expect(page.getByRole('img', { name: /^Conversation cost \(USD\):/ })).toHaveCount(0);
+  await enableChatMetrics(page);
   await expect(badge('Time to first token')).toBeVisible();
   await expect(badge('Tokens per second')).toBeVisible();
   const ttft = await badge('Time to first token').textContent();
@@ -2089,6 +2246,7 @@ test.describe('Dutch regional settings with English interface', () => {
     });
     await page.goto('/');
     await showSettings(page); await addKey(page); await closeSettings(page);
+    await enableChatMetrics(page);
     await expectChatModel(page);
     const composer = page.getByRole('textbox', { name: 'Message', exact: true });
     await composer.fill('Show regional metrics');
@@ -2217,6 +2375,7 @@ test('compact badges, logo fallback, copy, pinned history and conversation repla
   });
   await page.goto('/');
   await showSettings(page); await addKey(page); await closeSettings(page);
+  await enableChatMetrics(page);
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   await composer.fill('Persistent first question'); await composer.press('Enter');
   const reply = page.getByRole('article', { name: 'Assistant' });
