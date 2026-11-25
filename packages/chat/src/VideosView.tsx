@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { assignedAgent } from './agentCatalog';
 import { useAgents } from './AgentsProvider';
 import { ChatComposer } from './ChatComposer';
+import type { ComposerDictation } from './composerDictation';
 import { useAppTranslation } from './i18n';
 import { ModelPicker } from './ModelPicker';
 import { defaultAgentModelIds, resolveModelSelection } from './modelSelection';
@@ -73,9 +74,9 @@ function VideoPlayer({ video }: { video: VideoAsset }) {
   </>;
 }
 
-export default function VideosView({ gateway, library, toolbar, catalog, loading: loadingModels, ready, status }: {
+export default function VideosView({ gateway, library, toolbar, catalog, loading: loadingModels, ready, status, dictation }: {
   gateway: Gateway; library: ReturnType<typeof useVideoJobs>; toolbar: HTMLDivElement | null;
-  catalog?: readonly CatalogModel[]; loading: boolean; ready: boolean; status?: string;
+  catalog?: readonly CatalogModel[]; loading: boolean; ready: boolean; status?: string; dictation: ComposerDictation;
 }) {
   const { t } = useAppTranslation();
   const agent = assignedAgent(useAgents(), 'video');
@@ -98,7 +99,8 @@ export default function VideosView({ gateway, library, toolbar, catalog, loading
       disabled={library.busy} onChange={setSelectedIds} />, toolbar)}
     <div className="images-content">
       <h1 id={heading}>{t('Videos')}</h1>
-      <ChatComposer busy={library.busy} canSend={canSend} video={{ prompt, onChange: setPrompt, onSend: () => { void generate(); } }} />
+      <ChatComposer busy={library.busy} canSend={canSend} dictation={dictation}
+        video={{ prompt, onChange: setPrompt, onSend: () => { void generate(); } }} />
       {status && <p className="chat-attachment-notice" role="status">{status}</p>}
       {!status && !models.length && <p className="chat-attachment-notice" role="status">{t('No video models are available.')}</p>}
       {library.startError && <p className="chat-attachment-notice" role="alert">{t(library.startError)}</p>}

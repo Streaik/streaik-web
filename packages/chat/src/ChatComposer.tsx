@@ -4,11 +4,14 @@ import type { FormEvent, KeyboardEvent, ReactNode } from 'react';
 import { ChatIcon } from './ChatIcon';
 import { attachmentByteLimit, attachmentCountLimit, composeAttachmentParts, fileMediaType, httpLink, isTextAttachment, linkMediaType } from './chatAttachments';
 import type { AttachmentPart, DraftAttachment } from './chatAttachments';
+import { appendDictation } from './composerDictation';
+import type { ComposerDictation } from './composerDictation';
 import { useAppTranslation } from './i18n';
 import { hasMcpPickerResources, McpComposerPicker } from './McpComposerPicker';
 import type { ConnectedMcpServer } from './mcpChatContext';
 import type { McpOutput, McpServer } from './mcp';
 import type { McpServerRecord } from './mcpConfiguration';
+import { useComposerDictation } from './useComposerDictation';
 
 export function AttachmentChip({ name, url, note, icon, children }: { name: string; url?: URL; note?: string; icon?: Parameters<typeof ChatIcon>[0]['name']; children?: ReactNode }) {
   return <Tooltip content={url?.href ?? name} visualOnly><span className="chat-attachment">
@@ -23,7 +26,7 @@ export type ComposerBadge = { key: string; label: string; icon: 'providers' | 't
 type DraftMcpResource = { record: McpServerRecord; uri: string; label: string; parts: AttachmentPart[]; size: number };
 type ComposerMcp = { count: number; disabled: boolean; open: () => void; servers: readonly ConnectedMcpServer[];
   connect: (record: McpServerRecord) => McpServer | undefined };
-type ComposerProps = { busy: boolean; canSend: boolean } & (
+type ComposerProps = { busy: boolean; canSend: boolean; dictation?: ComposerDictation } & (
   { image?: undefined; video?: undefined; convert: boolean; onSend: (parts: AttachmentPart[]) => void; onChatSettings: () => void; onViewContext: () => void;
     mcp?: ComposerMcp; badges?: readonly ComposerBadge[]; onStop: () => void } |
   { image: { draft: ImageDraft; onChange: (value: ImageDraft) => void; onSend: () => void; onSettings: () => void }; video?: undefined; onStop: () => void } |
@@ -55,6 +58,9 @@ export function ChatComposer(props: ComposerProps) {
   const setAttachments = (items: DraftAttachment[]) => image ? image.onChange({ prompt: draft, attachments: items }) : setLocalAttachments(items);
   const [notice, setNotice] = useState('');
   const [preparing, setPreparing] = useState(false);
+  const dictation = useComposerDictation(props.dictation, busy || preparing, text => setDraft(appendDictation(draft, text)));
+  const dictating = dictation.phase !== undefined;
+  const dictateLabel = t(dictation.phase === 'finishing' ? 'Finishing dictation…' : dictating ? 'Stop Dictate' : 'Dictate');
   const [dragging, setDragging] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [linkInput, setLinkInput] = useState('');
@@ -125,7 +131,7 @@ export function ChatComposer(props: ComposerProps) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if ((!draft.trim() && (media || !fileCount)) || !canSend || busy || pending.current) return;
+    if ((!draft.trim() && (media || !fileCount)) || !canSend || busy || pending.current || dictation.active()) return;
     const mediaComposer = image ?? video;
     if (mediaComposer) { setNotice(''); mediaComposer.onSend(); return; }
     try { await sendText(draft); }
@@ -133,7 +139,7 @@ export function ChatComposer(props: ComposerProps) {
   }
 
   async function sendText(text: string, signal?: AbortSignal) {
-    if (pending.current || !canSend || busy) throw new Error('The composer is unavailable.');
+    if (pending.current || !canSend || busy || dictation.active()) throw new Error('The composer is unavailable.');
     pending.current = true;
     setPreparing(true);
     setNotice('');
@@ -212,15 +218,17 @@ export function ChatComposer(props: ComposerProps) {
         </li>)}
       </ul>}
       <Textarea aria-label={t(image ? 'Image prompt' : video ? 'Video prompt' : 'Message')}
-        placeholder={t(image ? 'Describe a new image' : video ? 'Describe a new video' : 'Ask anything')} rows={media ? 3 : 2} value={draft} readOnly={preparing || media && busy}
-        onChange={event => setDraft(event.currentTarget.value)} onKeyDown={event => {
+        placeholder={t(image ? 'Describe a new image' : video ? 'Describe a new video' : 'Ask anything')} rows={media ? 3 : 2}
+        value={appendDictation(draft, dictation.preview ?? '')} readOnly={dictating || preparing || media && busy}
+        onChange={event => { if (!dictation.active()) setDraft(event.currentTarget.value); }} onKeyDown={event => {
           if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
             event.preventDefault();
-            event.currentTarget.form?.requestSubmit();
+            if (!dictation.active()) event.currentTarget.form?.requestSubmit();
           }
         }} />
       {dragging && <span className="chat-drop-label" aria-hidden="true">{t('Drop files to attach')}</span>}
       {notice && <p className="chat-attachment-notice" role="alert">{t(notice)}</p>}
+      {dictation.error && <p className="chat-attachment-notice" role="alert">{t(dictation.error)}</p>}
       {preparing && <p className="chat-attachment-notice" role="status">{t('Preparing attachments…')}</p>}
       <div className="chat-composer-actions">
         {!video && <div className="chat-attachment-actions">
@@ -237,7 +245,7 @@ export function ChatComposer(props: ComposerProps) {
               dialog.current?.showModal();
             }}><ChatIcon name="link" />{t('Link')}</button>
             {mcp?.servers.some(({ discovery }) => discovery.hasPrompts) && <button type="button" role="menuitem" tabIndex={-1} aria-haspopup="dialog"
-              disabled={mcp.disabled || preparing} onClick={() => { closeMenu(true); setMcpPicker('prompts'); }}><ChatIcon name="compose" />{t('Prompts')}</button>}
+              disabled={mcp.disabled || preparing || dictating} onClick={() => { closeMenu(true); setMcpPicker('prompts'); }}><ChatIcon name="compose" />{t('Prompts')}</button>}
             {mcp && hasMcpPickerResources(mcp.servers) && <button type="button" role="menuitem" tabIndex={-1} aria-haspopup="dialog"
               disabled={mcp.disabled || preparing} onClick={() => { closeMenu(true); setMcpPicker('resources'); }}><ChatIcon name="docs" />{t('Resources')}</button>}
             {mcp && <button type="button" role="menuitem" tabIndex={-1} aria-haspopup="dialog" disabled={mcp.disabled || preparing}
@@ -257,13 +265,20 @@ export function ChatComposer(props: ComposerProps) {
           <Button className="chat-composer-icon" type="button" variant="subtle" aria-label={t('View context')}
             title={t('View context')} aria-haspopup="dialog" onClick={props.onViewContext}><ChatIcon name="info" /></Button>
         </>}
-        {busy && onStop ? <Button key="stop" className="chat-send" type="button" aria-label={t('Stop')} title={t('Stop')}
+        <div className="chat-composer-submit">
+          {props.dictation !== undefined && <Button className="chat-composer-icon" type="button" aria-label={dictateLabel} title={dictateLabel}
+            aria-pressed={dictating} aria-busy={dictation.phase === 'finishing' || undefined} variant={dictating ? 'primary' : 'subtle'}
+            disabled={dictation.phase === 'finishing' || !props.dictation || busy || preparing} onClick={() => { if (!pending.current) void dictation.toggle(); }}>
+            <ChatIcon name={dictating ? 'stop' : 'mic'} />
+          </Button>}
+          {busy && onStop ? <Button key="stop" className="chat-send" type="button" aria-label={t('Stop')} title={t('Stop')}
             onClick={onStop}><ChatIcon name="stop" /></Button>
           : <Button key="send" className="chat-send" type="submit" variant="primary" aria-label={t('Send')} title={t('Send')}
-            disabled={busy || !canSend || preparing || (!draft.trim() && (media || !fileCount))}><ChatIcon name="send" /></Button>}
+            disabled={busy || !canSend || preparing || dictating || (!draft.trim() && (media || !fileCount))}><ChatIcon name="send" /></Button>}
+        </div>
       </div>
     </form>
-    {mcp && mcpPicker && <McpComposerPicker mode={mcpPicker} servers={mcp.servers} canSend={canSend} connect={mcp.connect}
+    {mcp && mcpPicker && <McpComposerPicker mode={mcpPicker} servers={mcp.servers} canSend={canSend && !dictating} connect={mcp.connect}
       onPrompt={sendText} onResource={attachResource} close={() => setMcpPicker(undefined)} />}
     {!video && <dialog ref={dialog} className="chat-settings chat-link-dialog" aria-labelledby={`${id}-link-title`}>
       <form onSubmit={addLink}>

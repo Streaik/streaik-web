@@ -15,23 +15,33 @@ async function expectIconOnly(control: Locator) {
   await expect(control.locator('svg')).toBeVisible();
 }
 
-async function openTranscriptions(page: Page, provider = 'OpenAI', models: { id: string; type: string; tags?: string[] }[] = [
-    { id: batchModel, type: 'transcription' }, { id: liveModel, type: 'transcription', tags: ['realtime'] },
-    { id: 'gladia/solaria-1', type: 'transcription', tags: ['realtime'] },
-  ]) {
+type FixtureModel = { id: string; type: string; tags?: string[] };
+async function connectFixture(page: Page, provider: string, models: FixtureModel[]) {
   await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: models } }));
   await page.route('**/gateway/v1/skills?*', route => route.fulfill({ json: { data: [], has_more: false } }));
   await page.goto('/');
-  await page.getByRole('button', { name: 'Account menu' }).click();
-  await page.getByRole('menuitem', { name: 'Settings' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
-  await dialog.getByRole('tab', { name: 'API keys' }).click();
+  const dialog = await appSettings(page, 'API keys');
   await dialog.getByRole('button', { name: 'Add API key' }).click();
   await dialog.getByLabel('Provider', { exact: true }).selectOption({ label: provider });
   await dialog.getByLabel(`${provider} API key`, { exact: true }).fill('fixture-provider-key');
   await dialog.getByRole('button', { name: `Save ${provider} key` }).click();
   await expect(dialog.getByRole('status')).toHaveText('Provider key saved.');
   await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+}
+
+async function appSettings(page: Page, tab: string) {
+  await page.getByRole('button', { name: 'Account menu' }).click();
+  await page.getByRole('menuitem', { name: 'Settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
+  await dialog.getByRole('tab', { name: tab, exact: true }).click();
+  return dialog;
+}
+
+async function openTranscriptions(page: Page, provider = 'OpenAI', models: FixtureModel[] = [
+  { id: batchModel, type: 'transcription' }, { id: liveModel, type: 'transcription', tags: ['realtime'] },
+  { id: 'gladia/solaria-1', type: 'transcription', tags: ['realtime'] },
+]) {
+  await connectFixture(page, provider, models);
   await page.getByRole('button', { name: 'Transcriptions', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Transcriptions', exact: true })).toBeVisible();
   if (models.some(({ id }) => id === batchModel)) await chooseModel(page, batchModel);
@@ -48,6 +58,178 @@ async function chooseModel(page: Page, model: string) {
   await modelPicker(page).click();
   await page.getByRole('option', { name: model.split('/').at(-1), exact: true }).click();
 }
+
+const composerModel = 'openai/gpt-transcribe';
+const composerCatalog = [
+  { id: 'openai/gpt-6.1-terra', type: 'language' },
+  { id: 'openai/gpt-image-2.6-sunburst', type: 'image' },
+  { id: 'openai/gemini-omni-1.2-flash', type: 'video' },
+];
+const chatComposer = (page: Page) => page.getByRole('form', { name: 'Message composer' });
+const dictateButton = (composer: Locator) => composer.getByRole('button', { name: 'Dictate', exact: true });
+const stopDictate = (composer: Locator) => composer.getByRole('button', { name: 'Stop Dictate', exact: true });
+
+test('composer dictation requires an assigned agent and an available configured model', async ({ page }) => {
+  const catalog = [{ id: batchModel, type: 'transcription' }];
+  await connectFixture(page, 'OpenAI', catalog);
+  const dictate = dictateButton(chatComposer(page));
+  const refresh = page.getByRole('button', { name: 'Refresh models' });
+  await expect(refresh).toBeVisible();
+  await expect(dictate).toBeDisabled(); // A different transcription model is not an implicit default.
+  catalog.push({ id: composerModel, type: 'transcription' });
+  await refresh.click();
+  await expect(dictate).toBeEnabled();
+  const settings = await appSettings(page, 'Agents');
+  await settings.getByRole('combobox', { name: 'Create a transcription', exact: true }).click();
+  await settings.getByRole('option', { name: 'None', exact: true }).click();
+  await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(dictate).toBeDisabled();
+  const chatSettings = await appSettings(page, 'Chat');
+  await chatSettings.getByRole('switch', { name: 'Dictate', exact: true }).uncheck();
+  await chatSettings.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(dictate).toHaveCount(0);
+});
+
+test('recorded composer dictation streams only after Stop and preserves the prompt in Chat, Images, and Videos', async ({ page }) => {
+  await mockAudio(page);
+  await watchRecordedAudio(page);
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      const path = new URL(input instanceof Request ? input.url : String(input), location.href).pathname;
+      if (path !== '/gateway/api/transcriptions/stream') return nativeFetch(input, init);
+      const { model, audio, inputAudioFormat } = JSON.parse(String(init?.body));
+      document.documentElement.dataset.dictationRequest = JSON.stringify({ model, bytes: atob(audio).length, format: inputAudioFormat.type });
+      const body = new ReadableStream({ start(controller) {
+        const send = (event: object) => controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`));
+        send({ type: 'transcript-delta', delta: 'Interim words' });
+        window.addEventListener('fixture-dictation-finish', event => {
+          send(event instanceof CustomEvent && event.detail ? { type: 'error' } : { type: 'finish', text: 'Final words.' });
+          controller.close();
+        }, { once: true });
+      } });
+      return new Response(body, { headers: { 'Content-Type': 'text/event-stream' } });
+    };
+  });
+  await connectFixture(page, 'OpenAI', [...composerCatalog, { id: composerModel, type: 'transcription' }]);
+  let unexpectedRequests = 0;
+  await page.route(/\/gateway\/(api\/(chat|images?|videos?|transcriptions)|v1\/(images\/generations|videos|audio\/transcriptions))$/, route => {
+    unexpectedRequests++; return route.abort();
+  });
+  await chatComposer(page).locator('input[type="file"]').setInputFiles({ name: 'context.txt', mimeType: 'text/plain', buffer: Buffer.from('context') });
+  for (const [view, name] of [[undefined, 'Message composer'], ['Images', 'Image composer'], ['Videos', 'Video composer']] as const) {
+    if (view) await page.getByRole('button', { name: view, exact: true }).click();
+    await page.evaluate(() => {
+      delete document.documentElement.dataset.dictationRequest;
+      delete document.documentElement.dataset.audioRecorded;
+    });
+    const composer = page.getByRole('form', { name });
+    const input = composer.getByRole('textbox');
+    const send = composer.getByRole('button', { name: 'Send', exact: true });
+    await input.fill('Existing draft');
+    await expect(send).toBeEnabled();
+    await expectIconOnly(dictateButton(composer));
+    await dictateButton(composer).click();
+    await expect(page.locator('html')).toHaveAttribute('data-track', 'active');
+    await expect(input).not.toBeEditable();
+    await expect(send).toBeDisabled();
+    await input.press('Enter');
+    await expect(page.locator('html')).toHaveAttribute('data-audio-recorded', 'yes');
+    expect(await page.locator('html').getAttribute('data-dictation-request')).toBeNull();
+    await stopDictate(composer).click();
+    await expect(page.locator('html')).toHaveAttribute('data-track', 'stopped');
+    await expect(input).toHaveValue('Existing draft Interim words');
+    await expect(input).not.toBeEditable();
+    await expect(send).toBeDisabled();
+    const request = JSON.parse((await page.locator('html').getAttribute('data-dictation-request'))!);
+    expect(request).toEqual({
+      model: composerModel, bytes: expect.any(Number), format: expect.stringMatching(/^audio\/(webm|mp4|ogg)$/),
+    });
+    expect(request.bytes).toBeGreaterThan(0);
+    await page.evaluate(() => window.dispatchEvent(new Event('fixture-dictation-finish')));
+    await expect(input).toHaveValue('Existing draft Final words.');
+    await expect(input).toBeEditable();
+    await expect(send).toBeEnabled();
+    if (!view) await expect(composer.getByText('context.txt', { exact: true })).toBeVisible();
+  }
+  const video = page.getByRole('form', { name: 'Video composer' });
+  await page.evaluate(() => { delete document.documentElement.dataset.audioRecorded; });
+  await dictateButton(video).click();
+  await expect(page.locator('html')).toHaveAttribute('data-audio-recorded', 'yes');
+  await stopDictate(video).click();
+  const prompt = video.getByRole('textbox');
+  await expect(prompt).toHaveValue('Existing draft Final words. Interim words');
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('fixture-dictation-finish', { detail: 'error' })));
+  await expect(video.getByRole('alert')).toHaveText('The transcription stream failed.');
+  await expect(prompt).toHaveValue('Existing draft Final words.');
+  await expect(prompt).toBeEditable();
+  await expect(video.getByRole('button', { name: 'Send' })).toBeEnabled();
+  expect(unexpectedRequests).toBe(0);
+});
+
+test('composer prefers a configured realtime model, reports failures without retry, and stops capture on navigation', async ({ page }) => {
+  const model = 'openai/gpt-live-transcribe';
+  await mockAudio(page);
+  let tokens = 0, recorded = 0;
+  await page.route('**/gateway/v1/realtime/client_secrets', async route => {
+    expect(route.request().postDataJSON().session.audio.input.transcription.model).toBe(model);
+    if (++tokens === 2) return route.fulfill({ status: 503 });
+    await route.fulfill({ json: { value: 'fixture-ephemeral-secret' } });
+  });
+  await page.route('**/gateway/api/transcriptions/stream', route => { recorded++; return route.abort(); });
+  let sockets = 0;
+  const closed = new Set<string>();
+  await page.routeWebSocket('wss://api.openai.com/v1/realtime?intent=transcription', socket => {
+    const id = `live-${++sockets}`;
+    let started = false;
+    socket.onClose(() => { closed.add(id); });
+    socket.onMessage(raw => {
+      const { type } = JSON.parse(String(raw));
+      const event = (name: string, data = {}) => socket.send(JSON.stringify({ type: name, item_id: id, ...data }));
+      if (type === 'input_audio_buffer.append' && !started) {
+        started = true;
+        event('conversation.item.input_audio_transcription.delta', { delta: 'Live preview' });
+      } else if (type === 'input_audio_buffer.commit') {
+        event('input_audio_buffer.committed');
+        event('conversation.item.input_audio_transcription.completed', { transcript: 'Final realtime.' });
+      }
+    });
+  });
+  await connectFixture(page, 'OpenAI', [...composerCatalog, { id: composerModel, type: 'transcription' }, { id: model, type: 'transcription', tags: ['realtime'] }]);
+  await page.getByRole('button', { name: 'Agents', exact: true }).click();
+  await page.getByRole('article', { name: 'TranscriptionAgent', exact: true }).getByRole('button', { name: 'Edit', exact: true }).click();
+  const editor = page.getByRole('dialog', { name: 'Edit agent', exact: true });
+  await editor.getByRole('button', { name: 'Add model', exact: true }).click();
+  await editor.getByRole('option', { name: /gpt-live-transcribe/ }).click();
+  await editor.getByRole('button', { name: 'Save agent', exact: true }).click();
+  await page.getByRole('button', { name: 'New chat', exact: true }).click();
+  const composer = chatComposer(page);
+  const input = composer.getByRole('textbox');
+  await input.fill('Draft');
+  await dictateButton(composer).click();
+  await expect(input).toHaveValue('Draft Live preview');
+  await stopDictate(composer).click();
+  await expect(input).toHaveValue('Draft Final realtime.');
+  await expect(input).toBeEditable();
+  await expect.poll(() => closed.has('live-1')).toBe(true);
+
+  await dictateButton(composer).click();
+  await expect(composer.getByRole('alert')).toBeVisible();
+  await expect(input).toHaveValue('Draft Final realtime.');
+  await expect(input).toBeEditable();
+  await expect(page.locator('html')).toHaveAttribute('data-track', 'stopped');
+  expect(tokens).toBe(2);
+
+  await dictateButton(composer).click();
+  await expect(input).toHaveValue('Draft Final realtime. Live preview');
+  await page.getByRole('button', { name: 'Images', exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-track', 'stopped');
+  await expect.poll(() => closed.has('live-2')).toBe(true);
+  await page.goBack();
+  await expect(input).toHaveValue('Draft Final realtime.');
+  await expect(input).toBeEditable();
+  expect(recorded).toBe(0);
+});
 
 test('Real-time follows the transcription picker and explains tagged models without a live adapter', async ({ page }) => {
   const unsupported = 'deepgram/nova-3';
@@ -562,8 +744,7 @@ test('Google Live Transcribe rejects untrusted socket targets, cleans up on canc
   await expect(finished).not.toContainText('Unconfirmed before disconnect');
 });
 
-test('Dictate warns, records only on confirmation, submits on Stop, and keeps a failed recording for retry', async ({ page }) => {
-  await mockAudio(page);
+async function watchRecordedAudio(page: Page) {
   await page.addInitScript(() => {
     const start = MediaRecorder.prototype.start;
     MediaRecorder.prototype.start = function (timeslice?: number) {
@@ -574,6 +755,11 @@ test('Dictate warns, records only on confirmation, submits on Stop, and keeps a 
       return start.call(this, timeslice);
     };
   });
+}
+
+test('Dictate warns, records only on confirmation, submits on Stop, and keeps a failed recording for retry', async ({ page }) => {
+  await mockAudio(page);
+  await watchRecordedAudio(page);
   let uploads = 0;
   await page.route('**/gateway/api/transcriptions', async route => {
     expect(await route.request().headerValue('x-openai-key')).toBe('fixture-provider-key');

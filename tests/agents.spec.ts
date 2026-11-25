@@ -281,7 +281,9 @@ test('catalog-backed models and Realtime settings persist without starting audio
   await editor.getByLabel('Argument hint').fill('Describe the result');
   const addModel = editor.getByRole('button', { name: 'Add model', exact: true });
   await addModel.click();
-  await expect(editor.getByRole('option')).toHaveCount(2);
+  await expect(editor.getByRole('option')).toHaveCount(4);
+  await expect(editor.getByRole('option', { name: /Live transcription/ })).toBeVisible();
+  await expect(editor.getByRole('option', { name: /Batch transcription/ })).toBeVisible();
   await editor.getByRole('option', { name: /Answer model/ }).click();
   await addModel.click();
   await editor.getByRole('option', { name: /Decision router/ }).click();

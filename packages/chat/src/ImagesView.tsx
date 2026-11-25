@@ -6,6 +6,7 @@ import { assignedAgent } from './agentCatalog';
 import { useAgents } from './AgentsProvider';
 import { ChatComposer } from './ChatComposer';
 import type { DraftAttachment } from './chatAttachments';
+import type { ComposerDictation } from './composerDictation';
 import { listImages, saveImage } from './imageLibrary';
 import type { ImageItem } from './imageLibrary';
 import { imageOptionsForModel, readImagePreferences, writeImagePreferences } from './imagePreferences';
@@ -27,9 +28,9 @@ function imageWarningMessage(warning: unknown) {
   return typeof type === 'string' && typeof feature === 'string' ? `${type}: ${feature}. ${detail}`.trim() : detail;
 }
 
-export default function ImagesView({ gateway, scope, route, toolbar, catalog, loading: loadingModels, router, status }: {
+export default function ImagesView({ gateway, scope, route, toolbar, catalog, loading: loadingModels, router, status, dictation }: {
   gateway: Gateway; scope?: string; route: GatewayImageEndpoint; toolbar: HTMLDivElement | null;
-  catalog?: readonly CatalogModel[]; loading: boolean; router?: ModelRouter; status?: string;
+  catalog?: readonly CatalogModel[]; loading: boolean; router?: ModelRouter; status?: string; dictation: ComposerDictation;
 }) {
   const { t } = useAppTranslation();
   const agent = assignedAgent(useAgents(), 'image');
@@ -137,7 +138,7 @@ export default function ImagesView({ gateway, scope, route, toolbar, catalog, lo
       disabled={busy} onChange={setSelectedIds} />, toolbar)}
     <div className="images-content">
       <h1 id={heading}>{t('Images')}</h1>
-      <ChatComposer busy={busy} canSend={canSend} onStop={() => running.current?.abort()}
+      <ChatComposer busy={busy} canSend={canSend} onStop={() => running.current?.abort()} dictation={dictation}
         image={{ draft, onChange: setDraft, onSettings: () => setShowSettings(true), onSend: () => { void generate(); } }} />
       {status && <p className="chat-attachment-notice" role="status">{status}</p>}
       {!status && routeIssue && !busy && <p className="chat-attachment-notice" role="status">{t(routeIssue)}</p>}

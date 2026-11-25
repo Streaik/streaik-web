@@ -100,6 +100,7 @@ body { margin: 0; }
 .chat-welcome-skeleton { display: block; width: min(65%, 12ch); height: .75em; margin-inline: auto;
   border-block: .2em solid transparent; box-sizing: content-box; border-radius: .45em; background: currentColor; background-clip: padding-box; opacity: .14; }
 .chat-composer-actions { display: flex; align-items: center; gap: .4rem; margin-top: .4rem; }
+.chat-composer-submit { display: flex; align-items: center; gap: inherit; }
 .chat-composer-settings { margin-inline-end: auto; }
 .chat-composer :is(.chat-send, .chat-composer-icon).ui-button { display: inline-grid; place-items: center; width: 2.375rem; height: 2.375rem; padding: 0; }
 .chat-composer, .chat-attachment-actions { position: relative; min-width: 0; }

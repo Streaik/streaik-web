@@ -32,6 +32,7 @@ export const chatMessages = {
   'Audio attachments': ['Audiobijlagen', 'Archivos de audio adjuntos'],
   'Dictate': ['Dicteren', 'Dictar'],
   'Stop Dictate': ['Dicteren stoppen', 'Detener dictado'],
+  'Could not complete dictation.': ['Het dicteren kon niet worden voltooid.', 'No se pudo completar el dictado.'],
   'Real-time': ['Real-time', 'Tiempo real'],
   'Stop Real-time': ['Real-time stoppen', 'Detener tiempo real'],
   'Dictate is for short messages': ['Dicteren is voor korte berichten', 'El dictado es para mensajes cortos'],

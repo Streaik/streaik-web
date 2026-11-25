@@ -21,6 +21,9 @@ import { chatLocation, conversationPath, pagePaths } from './chatLocation';
 import { ModelsView, ProvidersView } from './CatalogViews';
 import { ModelPicker } from './ModelPicker';
 import { defaultAgentModelIds, resolveModelSelection } from './modelSelection';
+import { selectDictationTarget } from './composerDictation';
+import type { ComposerDictation } from './composerDictation';
+import { dictationFormat } from './microphone';
 import { pageRouteMenu } from './routeMenu';
 import { AgentsProvider, useAgents } from './AgentsProvider';
 import { AgentsView } from './AgentsView';
@@ -423,7 +426,11 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const direct = connection.direct;
   // Agents and media use the gateway catalog even when chat is routed directly.
   const mediaView = view === 'images' || view === 'videos' || view === 'transcriptions';
-  const fetchGatewayModels = route.mode === 'direct' && (view === 'agents' || mediaView && gateway.historyScope !== 'direct');
+  const dictateChat = preferences.dictate && view === 'chat' && !locationIssue;
+  const dictateView = dictateChat || preferences.dictate && (view === 'images' || view === 'videos');
+  const transcriptionModelIds = dictateView ? defaultAgentModelIds(assignedAgent(agents, 'transcription')) : [];
+  const fetchGatewayModels = route.mode === 'direct' && (view === 'agents' ||
+    gateway.historyScope !== 'direct' && (mediaView || transcriptionModelIds.length > 0));
   const gatewayModels = useModels(gateway, connection.ready && fetchGatewayModels, connection.modelRevision ?? 0, scope);
   const transport = useMemo<ReturnType<Gateway['chatTransport']>>(() => {
     const apiChat = gateway.chatTransport();
@@ -695,6 +702,12 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const agentModels = route.mode === 'direct' ? gatewayModels.result : result;
   const hasGateway = gateway.historyScope !== 'direct';
   const mediaModels = hasGateway ? agentModels : undefined;
+  const dictationTarget = dictateView && transcriptionModelIds.length > 0 && mediaModels && !mediaModels.error &&
+    typeof globalThis.navigator?.mediaDevices?.getUserMedia === 'function' && selectDictationTarget(mediaModels.catalog, transcriptionModelIds, {
+      socket: typeof WebSocket !== 'undefined' && typeof AudioContext !== 'undefined' && typeof AudioWorkletNode !== 'undefined',
+      peer: typeof RTCPeerConnection !== 'undefined', recorder: !!dictationFormat(),
+    });
+  const dictation: ComposerDictation = dictateView ? dictationTarget ? { ...dictationTarget, gateway } : null : undefined;
   const imageRouter = view === 'images' && mediaModels ? modelDecisionRouter(agents, mediaModels.catalog, decisions.selected) : undefined;
   const mediaStatus = !hasGateway ? t('No gateway is configured.') : !connection.ready ? connection.emptyMessage
     : !mediaModels ? t('Loading models…') : mediaModels.error;
@@ -784,7 +797,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
              {progress || (restoringSkills ? t('Loading provider skills…') : t('Connecting to MCP servers…'))}</>}</div>
           <ComposerUsage context={contextUsage} cost={conversationCost} />
           <ChatComposer busy={busy || (status === 'ready' && toolParts.length > 0)} canSend={canSend} onStop={stopTurn}
-            convert={preferences.convertAttachmentsToText} badges={badges}
+            convert={preferences.convertAttachmentsToText} badges={badges} dictation={dictateChat ? dictation : undefined}
             mcp={view === 'chat' && mcpServers.available ? { count: mcpSelection.entries.length, disabled: routesLocked, open: () => setModelContextOpen(true),
               servers: mcpSelection.connected, connect: mcpServers.connection } : undefined}
             onChatSettings={() => chatSettings.current?.showModal()} onViewContext={() => setContextOpen(true)}
@@ -807,10 +820,10 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
        <footer className="chat-disclaimer" hidden={view !== 'chat' || !!locationIssue}>{t('{{appName}} can make mistakes. Check important information.', { appName })}</footer>
       {view === 'images' ? <Suspense fallback={<main className="catalog-main"><p role="status">{t('Loading images…')}</p></main>}>
         <ImagesView gateway={gateway} scope={scope} route={images.selected} toolbar={mediaToolbar} catalog={mediaModels?.catalog}
-          loading={hasGateway && connection.ready && !mediaModels} router={imageRouter} status={mediaStatus} />
+          loading={hasGateway && connection.ready && !mediaModels} router={imageRouter} status={mediaStatus} dictation={dictation} />
       </Suspense> : view === 'videos' ? <Suspense fallback={<main className="catalog-main"><p role="status">{t('Loading videos…')}</p></main>}>
         <VideosView gateway={gateway} library={videos} toolbar={mediaToolbar} catalog={mediaModels?.catalog}
-          loading={hasGateway && connection.ready && !mediaModels} ready={hasGateway && connection.ready} status={mediaStatus} />
+          loading={hasGateway && connection.ready && !mediaModels} ready={hasGateway && connection.ready} status={mediaStatus} dictation={dictation} />
       </Suspense> : view === 'transcriptions' ? <Suspense fallback={<main className="catalog-main"><p role="status">{t('Loading transcriptions…')}</p></main>}>
         <TranscriptionsView gateway={gateway} scope={scope} route={transcriptions.selected} toolbar={mediaToolbar} catalog={mediaModels?.catalog}
           menuContainer={menuContainer} loading={hasGateway && connection.ready && !mediaModels} status={mediaStatus} />

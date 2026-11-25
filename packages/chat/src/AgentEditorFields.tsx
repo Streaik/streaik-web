@@ -39,9 +39,11 @@ function modelOptions(models: readonly CatalogModel[], groupFor?: (model: Catalo
 export function AgentGeneralFields({ draft, initial, patch, catalog, catalogStatus, sample }: ModelFields & { sample: boolean }) {
   const { t } = useAppTranslation();
   const search = useSelectSearch();
-  const models = catalog.filter(({ type, tags }) => (type === 'language' || type === 'decision') && !tags.includes('realtime'));
+  const models = catalog.filter(({ type, tags }) => type === 'transcription' ||
+    (type === 'language' || type === 'decision') && !tags.includes('realtime'));
   const available = modelOptions(models.filter(({ id }) => !draft.models.some((model) => model.id === id)), ({ type }) =>
-    type === 'decision' ? { id: 'decision', label: t('Decision') } : { id: 'language', label: t('Language') });
+    type === 'transcription' ? { id: 'transcription', label: t('Transcription') } :
+      type === 'decision' ? { id: 'decision', label: t('Decision') } : { id: 'language', label: t('Language') });
 
   function move(index: number, target: number) {
     const next = [...draft.models];
@@ -67,12 +69,12 @@ export function AgentGeneralFields({ draft, initial, patch, catalog, catalogStat
           </div>
         </li>;
       })}</ol>}
-      <Select search={search(t('Add model'))} label={t('Add model')} placeholder={t('Choose a language or decision model')} value="" options={available}
+      <Select search={search(t('Add model'))} label={t('Add model')} placeholder={t('Choose a model')} value="" options={available}
         disabled={!available.length} onValueChange={(id) => {
           const item = models.find((model) => model.id === id);
           if (item) patch({ models: [...draft.models, initial.models.find((model) => model.id === id) ?? { id, type: item.type! }] });
         }} />
-      <CatalogStatus status={catalogStatus ?? (!models.length ? t('No language or decision models are available from the gateway.') : undefined)} />
+      <CatalogStatus status={catalogStatus ?? (!models.length ? t('No models are available for this agent.') : undefined)} />
     </Group>
   </>;
 }
