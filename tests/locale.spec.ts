@@ -1,6 +1,24 @@
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 
 test.use({ locale: 'nl-NL' });
+
+async function expectProtocolLinks(page: Page, title: string, protocol: string, urls: [website: string, specification: string]) {
+  const heading = page.getByRole('heading', { name: title, level: 1, exact: true });
+  await expect(heading).toBeVisible();
+  const header = page.getByRole('main').locator('header').filter({ has: heading });
+  const website = header.getByRole('link', { name: `Officiële website van ${protocol}`, exact: true });
+  const specification = header.getByRole('link', { name: `Specificatie van ${protocol}`, exact: true });
+  await expect(header.getByRole('link')).toHaveCount(2);
+  for (const [link, href] of [[website, urls[0]], [specification, urls[1]]] as const) {
+    await expect(link).toHaveAttribute('href', href);
+    await expect(link).toHaveAttribute('target', '_blank');
+    await expect(link).toHaveText('');
+    await expect(link.locator('svg')).toBeVisible();
+  }
+  await website.press('Tab');
+  await expect(specification).toBeFocused();
+}
 
 test('localizes the MCP overview tabs and uses matching cards for registry and installed servers', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
@@ -19,7 +37,7 @@ test('localizes the MCP overview tabs and uses matching cards for registry and i
     ] } });
   });
   await page.goto('http://localhost:15175/mcp');
-  await expect(page.getByRole('heading', { name: 'Model Context', exact: true })).toBeVisible();
+  await expectProtocolLinks(page, 'Model Context', 'Model Context Protocol', ['https://modelcontextprotocol.io/', 'https://modelcontextprotocol.io/specification']);
   await expect(page.getByText(/^Installeer servers uit het register/)).toHaveCount(0);
   const tabs = page.getByRole('tablist', { name: 'Model Context' });
   await expect(tabs.getByRole('tab')).toHaveText(['Geïnstalleerd', 'Register']);
@@ -107,6 +125,7 @@ test('localizes the MCP overview tabs and uses matching cards for registry and i
   await page.getByRole('button', { name: /^(Bijlagen toevoegen|Aan bericht toevoegen)$/ }).click();
   await page.getByRole('menuitem', { name: 'Model Context', exact: true }).click();
   const picker = page.getByRole('dialog', { name: 'Model Context', exact: true });
+  await expect(picker.getByRole('link', { name: /Model Context Protocol/ })).toHaveCount(0);
   const pickerCard = picker.getByRole('article').filter({ has: page.getByRole('heading', { name: 'Fixture Tools' }) });
   await expect(pickerCard.getByRole('img', { name: 'Versie 1.2.3', exact: true })).toHaveText('v1.2.3');
   const pickerCopy = pickerCard.getByRole('button', { name: copyLabel, exact: true });
@@ -147,7 +166,8 @@ test('localizes the transcription search field in Dutch', async ({ page }) => {
 test('translates the Dutch Skills overview and shows a simplified skill editor', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Skills', exact: true }).click();
-  await expect(page.getByText('Maak Agent Skills in je browser of download ze bij providers en zet ze over.', { exact: true })).toBeVisible();
+  await expectProtocolLinks(page, 'Skills', 'Agent Skills', ['https://agentskills.io', 'https://agentskills.io/specification']);
+  await expect(page.getByText('Maak Agent Skills in je browser of download ze bij providers en zet ze over.', { exact: true })).toHaveCount(0);
   const sources = page.getByRole('tablist', { name: 'Bronnen van skills', exact: true });
   await expect(sources.getByRole('tab')).toHaveText(['Lokaal', 'Centraal']);
 

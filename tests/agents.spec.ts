@@ -171,6 +171,8 @@ test('browser-only agent creation, search, deletion and assignments', async ({ p
   const draft = page.getByRole('textbox', { name: 'Message', exact: true });
   await draft.fill('Keep this unsent draft');
   await agents(page).click();
+  await expect(page.getByRole('heading', { name: 'Agents', level: 1, exact: true })).toBeVisible();
+  await expect(page.getByText('Manage agent definitions in this browser. Agent chat is not available yet.', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Back to chat', exact: true })).toHaveCount(0);
   await expect(page.getByRole('main').getByRole('button', { name: 'Create agent', exact: true })).toHaveCount(0);
   await expect(card(page, welcome)).toContainText('Sample agent');
