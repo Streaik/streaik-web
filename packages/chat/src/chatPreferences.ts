@@ -1,5 +1,7 @@
 import { localPlugins } from './localPlugins.ts';
 import type { LocalPluginId } from './localPlugins.ts';
+import { defaultMcpPreferences, mcpTimeoutRange } from './mcpPreferences.ts';
+import type { McpPreferences } from './mcpPreferences.ts';
 
 export const pinnableViews = ['models', 'providers'] as const;
 export type PinnableView = (typeof pinnableViews)[number];
@@ -19,12 +21,16 @@ export type ChatPreferences = {
   showProviderLogo: boolean;
   showMetrics: boolean;
   toolOutput: ToolOutputPreferences;
+  mcp: McpPreferences;
 };
 export const composerToolDefaults: Pick<ChatPreferences, 'delay' | 'plugins' | 'remoteSkillIds'> = { delay: 40, plugins: [], remoteSkillIds: [] };
 export const defaultChatPreferences: ChatPreferences = { ...composerToolDefaults, convertAttachmentsToText: false, pinnedViews: [],
-  dictate: true, showContextSize: true, showMessageTokens: true, showProviderLogo: true, showMetrics: false, toolOutput: toolOutputDefaults };
+  dictate: true, showContextSize: true, showMessageTokens: true, showProviderLogo: true, showMetrics: false,
+  toolOutput: toolOutputDefaults, mcp: defaultMcpPreferences };
 
-type StoredPreferences = Partial<Omit<ChatPreferences, 'toolOutput'> & { toolOutput: Partial<ToolOutputPreferences> }>;
+type StoredPreferences = Partial<Omit<ChatPreferences, 'toolOutput' | 'mcp'> & {
+  toolOutput: Partial<ToolOutputPreferences>; mcp: Partial<McpPreferences>;
+}>;
 
 const booleanPreference = (value: unknown, fallback: boolean) => typeof value === 'boolean' ? value : fallback;
 
@@ -32,6 +38,7 @@ export function normalizeChatPreferences(value: StoredPreferences | null | undef
   const delay = value?.delay;
   const plugins = value?.plugins;
   const pinned = value?.pinnedViews;
+  const timeout = value?.mcp?.toolTimeoutMinutes;
   const toolOutput = { ...toolOutputDefaults };
   for (const key of Object.keys(toolOutput) as (keyof ToolOutputPreferences)[]) {
     toolOutput[key] = booleanPreference(value?.toolOutput?.[key], toolOutputDefaults[key]);
@@ -48,6 +55,12 @@ export function normalizeChatPreferences(value: StoredPreferences | null | undef
     showProviderLogo: booleanPreference(value?.showProviderLogo, defaultChatPreferences.showProviderLogo),
     showMetrics: booleanPreference(value?.showMetrics, defaultChatPreferences.showMetrics),
     toolOutput,
+    mcp: {
+      formElicitation: booleanPreference(value?.mcp?.formElicitation, defaultMcpPreferences.formElicitation),
+      toolTimeoutMinutes: typeof timeout === 'number' && Number.isFinite(timeout)
+        ? Math.round(Math.max(mcpTimeoutRange.min, Math.min(mcpTimeoutRange.max, timeout))) : defaultMcpPreferences.toolTimeoutMinutes,
+      resetTimeoutOnProgress: booleanPreference(value?.mcp?.resetTimeoutOnProgress, defaultMcpPreferences.resetTimeoutOnProgress),
+    },
   };
 }
 

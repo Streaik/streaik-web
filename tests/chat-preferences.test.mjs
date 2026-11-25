@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { defaultChatPreferences, normalizeChatPreferences } from '../packages/chat/src/chatPreferences.ts';
+import { defaultChatPreferences, loadChatPreferences, normalizeChatPreferences, saveChatPreferences } from '../packages/chat/src/chatPreferences.ts';
+import { defaultMcpPreferences } from '../packages/chat/src/mcpPreferences.ts';
 import { conversationGatewayCost, latestContextUsage } from '../packages/chat/src/messageMetadata.ts';
 import { filterToolOutputContent } from '../packages/chat/src/toolOutputContent.ts';
 
@@ -13,6 +14,24 @@ test('old profiles get Chat defaults; only explicit, valid booleans override eac
   assert.deepEqual(normalizeChatPreferences({ dictate: false, showContextSize: 'false', showMetrics: true,
     toolOutput: { text: false, links: 0, images: true, documents: 'true', extra: true } }),
   { ...defaultChatPreferences, dictate: false, showMetrics: true, toolOutput: { ...defaults, text: false, images: true } });
+});
+
+test('MCP defaults are backward compatible and saved settings remain scoped and bounded', (t) => {
+  const storage = new Map();
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  t.after(() => { if (original) Object.defineProperty(globalThis, 'localStorage', original); else delete globalThis.localStorage; });
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value),
+  } });
+  assert.deepEqual(normalizeChatPreferences({ delay: 50 }).mcp, defaultMcpPreferences);
+  const mcp = { formElicitation: false, toolTimeoutMinutes: 19, resetTimeoutOnProgress: false };
+  saveChatPreferences('alpha', { ...defaultChatPreferences, mcp });
+  assert.deepEqual(loadChatPreferences('alpha').mcp, mcp);
+  assert.deepEqual(loadChatPreferences('beta').mcp, defaultMcpPreferences);
+  assert.equal(normalizeChatPreferences({ mcp: { toolTimeoutMinutes: 70 } }).mcp.toolTimeoutMinutes, 60);
+  assert.equal(normalizeChatPreferences({ mcp: { toolTimeoutMinutes: 0 } }).mcp.toolTimeoutMinutes, 1);
+  assert.equal(normalizeChatPreferences({ mcp: { toolTimeoutMinutes: 2.7 } }).mcp.toolTimeoutMinutes, 3);
+  assert.deepEqual(normalizeChatPreferences({ mcp: { toolTimeoutMinutes: NaN, formElicitation: 'false' } }).mcp, defaultMcpPreferences);
 });
 
 const assistant = (metadata, parts = []) => ({ role: 'assistant', metadata, parts });

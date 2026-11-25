@@ -52,6 +52,7 @@ import type { Conversation } from './conversations';
 import type { createConversationSearch, SearchHistory } from './conversationSearch';
 import { callMcpTool, mcpFailure, readMcpResource } from './mcp';
 import type { McpOptions } from './mcp';
+import { McpElicitationProvider, useMcpElicitation } from './McpElicitation';
 import { mcpResourceCatalog, readResourceTool, resolveResourceRead } from './mcpChatContext';
 import { McpServerEditor, McpServersView, ModelContextDialog } from './McpServersView';
 import type { McpEditorTarget } from './McpServersView';
@@ -193,9 +194,11 @@ export function ChatApp({ appName = 'Streaik', gateway, connection, agents }: { 
   }
   return <ThemeRoot>
     <AgentsProvider config={agents} scope={scope}>
-      <HistoryChat key={JSON.stringify([scope, mcpSession])} appName={appName} gateway={gateway} connection={connection} scope={scope} models={models} mcpSession={mcpSession}
-        route={route} onRoute={setRoute} decisions={decisions} images={images} transcriptions={transcriptions} onSettings={() => settings.current?.showModal()}
-        preferences={preferences} onPreferences={updatePreferences} />
+      <McpElicitationProvider key={JSON.stringify([scope, mcpSession])} enabled={preferences.mcp.formElicitation}>
+        <HistoryChat appName={appName} gateway={gateway} connection={connection} scope={scope} models={models} mcpSession={mcpSession}
+          route={route} onRoute={setRoute} decisions={decisions} images={images} transcriptions={transcriptions} onSettings={() => settings.current?.showModal()}
+          preferences={preferences} onPreferences={updatePreferences} />
+      </McpElicitationProvider>
       <SettingsDialog dialog={settings} apiKeySettings={connection.apiKeySettings} accountSettings={connection.settings}
         preferences={preferences} onPreferences={updatePreferences} />
     </AgentsProvider>
@@ -479,6 +482,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const [staged, setStaged] = useState<{ turn: Turn; callId: string; result: ToolResult }>();
   const [toolImages, setToolImages] = useState<string[]>([]);
   const operation = useRef<AbortController | null>(null);
+  const elicit = useMcpElicitation();
   const hasHistory = !!readHistory;
   const language = i18n.resolvedLanguage ?? i18n.language ?? 'en';
   const gatewayRoute = route.mode === 'gateway';
@@ -590,14 +594,14 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         const server = enabled ? mcpServers.connection(target.record) : undefined;
         if (!target || !server) output = 'Choose a connected MCP server and an absolute resource URI.';
         else try {
-          const result = await readMcpResource(server, target.uri, controller.signal);
+          const result = await readMcpResource(server, target.uri, controller.signal, elicit);
           output = { contents: result.contents };
           images = result.images;
         } catch (error) { output = mcpFailure(error); }
       } else {
         if (!mcpServers.available) output = 'MCP is unavailable.';
         else try {
-          const result = await callMcpTool(tool.tool, part.input, controller.signal);
+          const result = await callMcpTool(tool.tool, part.input, controller.signal, preferences.mcp, elicit);
           output = result.output;
           images = result.images;
         } catch (error) { output = mcpFailure(error); }

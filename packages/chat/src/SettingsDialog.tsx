@@ -5,15 +5,59 @@ import type { ReactNode, RefObject } from 'react';
 import { useAgents } from './AgentsProvider';
 import { AgentSettings } from './AgentSettings';
 import { ChatIcon } from './ChatIcon';
+import { DialogTabs } from './ChatToolsDialogs';
+import { mcpTimeoutRange } from './mcpPreferences';
+import type { McpPreferences } from './mcpPreferences';
 import type { ChatPreferences, ToolOutputPreferences } from './chatPreferences';
 import { languages, useAppTranslation } from './i18n';
 
 type SettingsTab = { id: string; label: string; icon: IconName; content: ReactNode };
 const toolOutputLabels = { text: 'Text', links: 'Links', images: 'Images', audio: 'Audio', video: 'Video', documents: 'Documents' } as const;
 
-function SettingSwitch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
-  return <label><input type="checkbox" role="switch" checked={checked} onChange={event => onChange(event.currentTarget.checked)} />
+function SettingSwitch({ label, checked, onChange, hint }: { label: string; checked: boolean; onChange?: (value: boolean) => void; hint?: string }) {
+  const id = useId();
+  return <label><input type="checkbox" role="switch" checked={checked} disabled={!onChange} title={hint}
+    aria-describedby={hint ? id : undefined} onChange={onChange && (event => onChange(event.currentTarget.checked))} />
+    {hint && <span id={id} hidden>{hint}</span>}
     <span>{label}</span></label>;
+}
+
+function ModelContextSettings({ value, onChange }: { value: McpPreferences; onChange: (value: McpPreferences) => void }) {
+  const { t } = useAppTranslation();
+  const id = useId();
+  const [tab, setTab] = useState<'client' | 'extensions'>('client');
+  return <div className="chat-preference-cards">
+    <DialogTabs id={id} label={t('Model Context')} tabs={[[ 'client', t('Client') ], [ 'extensions', t('Extensions') ]]}
+      value={tab} onChange={setTab} />
+    <div role="tabpanel" id={`${id}-client-panel`} aria-labelledby={`${id}-client-tab`} hidden={tab !== 'client'}>
+      <div className="chat-preference-cards">
+        <section className="chat-tool-card" aria-labelledby={`${id}-elicitation`}>
+          <h3 id={`${id}-elicitation`}>{t('Elicitation')}</h3>
+          <div className="chat-tool-switches">
+            <SettingSwitch label={t('Form')} checked={value.formElicitation}
+              onChange={formElicitation => onChange({ ...value, formElicitation })} />
+            <SettingSwitch label={t('URL')} checked={false} hint={t('URL elicitation is not supported yet.')} />
+          </div>
+        </section>
+        <section className="chat-tool-card" aria-labelledby={`${id}-tools`}>
+          <h3 id={`${id}-tools`}>{t('Tools')}</h3>
+          <label htmlFor={`${id}-timeout`}>{t('Tool timeout ({{minutes}} minutes)', { minutes: value.toolTimeoutMinutes })}</label>
+          <input id={`${id}-timeout`} type="range" min={mcpTimeoutRange.min} max={mcpTimeoutRange.max} step={1} value={value.toolTimeoutMinutes}
+            onChange={event => onChange({ ...value, toolTimeoutMinutes: event.currentTarget.valueAsNumber })} />
+          <div className="chat-tool-switches">
+            <SettingSwitch label={t('Reset timeout on progress')} checked={value.resetTimeoutOnProgress}
+              onChange={resetTimeoutOnProgress => onChange({ ...value, resetTimeoutOnProgress })} />
+          </div>
+        </section>
+      </div>
+    </div>
+    <div role="tabpanel" id={`${id}-extensions-panel`} aria-labelledby={`${id}-extensions-tab`} hidden={tab !== 'extensions'} tabIndex={0}>
+      <div className="chat-tool-card"><div className="chat-tool-switches">
+        <SettingSwitch label={t('Apps')} checked={false} />
+        <SettingSwitch label={t('Skills')} checked={false} />
+      </div></div>
+    </div>
+  </div>;
 }
 
 export function SettingsDialog({ dialog, apiKeySettings, accountSettings, preferences, onPreferences }: {
@@ -45,6 +89,8 @@ export function SettingsDialog({ dialog, apiKeySettings, accountSettings, prefer
   }];
   if (apiKeySettings) tabs.push({ id: 'api-keys', label: t('API keys'), icon: 'key', content: apiKeySettings });
   if (accountSettings) tabs.push({ id: 'account', label: t('Account'), icon: 'user', content: accountSettings });
+  tabs.push({ id: 'model-context', label: t('Model Context'), icon: 'tool', content:
+    <ModelContextSettings value={preferences.mcp} onChange={mcp => onPreferences({ ...preferences, mcp })} /> });
   function preference(key: 'dictate' | 'showContextSize' | 'showMessageTokens' | 'showProviderLogo' | 'showMetrics' | 'convertAttachmentsToText', label: string) {
     return <SettingSwitch label={t(label)} checked={preferences[key]} onChange={value => onPreferences({ ...preferences, [key]: value })} />;
   }

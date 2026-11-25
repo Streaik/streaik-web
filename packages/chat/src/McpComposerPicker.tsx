@@ -7,6 +7,7 @@ import { forUser } from './mcpChatContext';
 import type { ConnectedMcpServer } from './mcpChatContext';
 import type { McpServerRecord } from './mcpConfiguration';
 import { useAppTranslation } from './i18n';
+import { useMcpElicitation } from './McpElicitation';
 
 type Mode = 'prompts' | 'resources';
 type Field = { name: string; required?: boolean; description?: string };
@@ -48,6 +49,7 @@ function pickerItems(mode: Mode, servers: readonly ConnectedMcpServer[]): Item[]
 export function McpComposerPicker(props: Props) {
   const { mode, servers, canSend, close } = props;
   const { t } = useAppTranslation();
+  const elicit = useMcpElicitation();
   const id = useId();
   const title = t(mode === 'prompts' ? 'Prompts' : 'Resources');
   const [query, setQuery] = useState('');
@@ -82,13 +84,13 @@ export function McpComposerPicker(props: Props) {
     setError('');
     try {
       if (item.kind === 'prompt') {
-        const text = await getMcpPrompt(server, item.prompt.name, values, controller.signal);
+        const text = await getMcpPrompt(server, item.prompt.name, values, controller.signal, elicit);
         controller.signal.throwIfAborted();
         if (!text.trim()) { setError('This prompt has no supported text.'); return; }
         await latest.current.onPrompt(text, controller.signal);
       } else {
         const uri = item.kind === 'resource' ? item.uri : expandMcpResource(item.uriTemplate, values);
-        const output = await readMcpResource(server, uri, controller.signal);
+        const output = await readMcpResource(server, uri, controller.signal, elicit);
         controller.signal.throwIfAborted();
         const failure = latest.current.onResource(item.record, uri, item.label, output);
         if (failure) { setError(failure); return; }

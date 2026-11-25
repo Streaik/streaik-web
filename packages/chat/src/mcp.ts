@@ -1,4 +1,7 @@
 import type { Client, Tool } from '@modelcontextprotocol/client';
+import { defaultMcpPreferences } from './mcpPreferences.ts';
+import type { McpPreferences } from './mcpPreferences.ts';
+import type { RequestElicitation } from './elicitation.ts';
 import { isObject, mcpDeclarations, mcpEndpoint } from './mcpConfiguration.ts';
 import type { McpRemoteHeader, McpServerRecord } from './mcpConfiguration.ts';
 export type { McpRemoteHeader } from './mcpConfiguration.ts';
@@ -95,12 +98,19 @@ export async function fetchMcpCatalog(registryUrl: URL, signal: AbortSignal, cur
   return { servers, cursor: typeof next === 'string' && next.length <= 2048 && next !== cursor ? next : undefined };
 }
 
-async function withClient<T>(server: McpServer, signal: AbortSignal, action: (client: Client) => Promise<T>): Promise<T> {
+async function withClient<T>(server: McpServer, signal: AbortSignal, action: (client: Client) => Promise<T>, elicit?: RequestElicitation): Promise<T> {
   const endpoint = mcpEndpoint(server.endpoint);
   if (!endpoint || endpoint !== server.endpoint) throw new Error('Invalid MCP endpoint.');
   const { Client, StreamableHTTPClientTransport } = await import('@modelcontextprotocol/client');
   // Transport compatibility is independent of whether the app trusts this URL with managed credentials.
-  const client = new Client({ name: 'Streaik Web', version: '1.0.0' }, { versionNegotiation: { mode: { pin: revision } } });
+  const client = new Client({ name: 'Streaik Web', version: '1.0.0' }, {
+    versionNegotiation: { mode: { pin: revision } },
+    ...(elicit ? { capabilities: { elicitation: { form: {} } } } : {}),
+  });
+  if (elicit) client.setRequestHandler('elicitation/create', ({ params }, context) => {
+    if (params.mode === 'url') throw new McpRequestError('URL elicitation is not supported yet.');
+    return elicit(params, { title: server.title, origin: new URL(endpoint).origin }, AbortSignal.any([signal, context.mcpReq.signal]));
+  });
   let sendCredentials = !server.challengeOnly;
   const transport = new StreamableHTTPClientTransport(new URL(endpoint), {
     protocolVersion: revision,
@@ -223,7 +233,7 @@ export function expandMcpResource(template: string, values: Record<string, strin
   return uri;
 }
 
-export function readMcpResource(server: McpServer, uri: string, signal: AbortSignal) {
+export function readMcpResource(server: McpServer, uri: string, signal: AbortSignal, elicit?: RequestElicitation) {
   if (!validMcpResourceUri(uri)) throw new McpRequestError('Use an absolute MCP resource URI.');
   const bounded = AbortSignal.any([signal, AbortSignal.timeout(45_000)]);
   return withClient(server, bounded, async client => {
@@ -231,17 +241,17 @@ export function readMcpResource(server: McpServer, uri: string, signal: AbortSig
     const { contents } = await client.readResource({ uri }, { signal: bounded });
     return { contents, ...mcpOutput(contents.map(content => 'text' in content ? { type: 'text', text: content.text }
       : { type: 'image', mimeType: content.mimeType, data: content.blob })) };
-  });
+  }, elicit);
 }
 
-export function getMcpPrompt(server: McpServer, name: string, args: Record<string, string>, signal: AbortSignal) {
+export function getMcpPrompt(server: McpServer, name: string, args: Record<string, string>, signal: AbortSignal, elicit?: RequestElicitation) {
   const bounded = AbortSignal.any([signal, AbortSignal.timeout(45_000)]);
   return withClient(server, bounded, async client => {
     const { messages } = await client.getPrompt({ name, arguments: args }, { signal: bounded });
     // Like AI Happy, use the prompt as a user turn, never as trusted system instructions.
     return messages.flatMap(({ content }) => content.type === 'text' ? [content.text]
       : content.type === 'resource' && 'text' in content.resource ? [content.resource.text] : []).join('\n\n').slice(0, 128 * 1024);
-  });
+  }, elicit);
 }
 
 function mcpOutput(content: readonly { type: string; text?: string; mimeType?: string; data?: string }[]): McpOutput {
@@ -252,11 +262,17 @@ function mcpOutput(content: readonly { type: string; text?: string; mimeType?: s
   return { text, images };
 }
 
-export async function callMcpTool(tool: McpTool, input: unknown, signal: AbortSignal) {
+export async function callMcpTool(tool: McpTool, input: unknown, signal: AbortSignal,
+  preferences: McpPreferences = defaultMcpPreferences, elicit?: RequestElicitation) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new McpRequestError('The MCP tool input must be a JSON object.');
-  const result = await withClient(tool.server, signal, client => client.callTool({
+  const timeout = preferences.toolTimeoutMinutes * 60_000;
+  const resetTimeoutOnProgress = preferences.resetTimeoutOnProgress;
+  // Bound the whole operation, including time spent awaiting form input. The SDK's idle timeout applies per HTTP leg.
+  const bounded = AbortSignal.any([signal, AbortSignal.timeout(resetTimeoutOnProgress ? timeout * 2 : timeout)]);
+  const result = await withClient(tool.server, bounded, client => client.callTool({
     name: tool.remoteName, arguments: input as Record<string, unknown>,
-  }, { signal, timeout: 130_000 }));
+  }, { signal: bounded, timeout, resetTimeoutOnProgress, ...(resetTimeoutOnProgress ? { onprogress: () => {} } : {}) }),
+  preferences.formElicitation ? elicit : undefined);
   // Keep the model-visible fields intact. Request metadata (including result _meta) is for the client, not the model.
   const { content, structuredContent, isError } = result;
   const output = { content, ...(structuredContent !== undefined && { structuredContent }), ...(isError !== undefined && { isError }) };
