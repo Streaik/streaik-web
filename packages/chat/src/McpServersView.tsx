@@ -197,7 +197,7 @@ function InstalledServers({ store, selection, locked, onEdit, active, byEndpoint
     </div>}
     {!selection && <div className="catalog-filters"><input type="search" aria-label={t('Search MCP servers')} placeholder={t('Search MCP servers')}
       value={query} onChange={event => setQuery(event.currentTarget.value)} /></div>}
-    {selection && servers.length > 0 && <p>{t('Only enable servers you trust. Tool inputs are sent when a tool runs; approval controls sharing the result with the chat model.')}</p>}
+    {selection && servers.length > 0 && <p>{t('Only enable servers you trust. Tool inputs are sent to the server. On Direct routes, results are shared with the chat model without review.')}</p>}
     {error && <p role="alert" className="chat-error">{t('Could not remove this MCP server.')}</p>}
     {servers.length === 0 ? <p role="status">{t(searchMessage ?? (query.trim() ? 'No matching MCP servers.' : 'No MCP servers installed yet.'))}</p>
       : selection ? <ul className="mcp-list">{servers}</ul> : <div className="catalog-grid">{servers}</div>}

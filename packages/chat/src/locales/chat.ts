@@ -430,7 +430,7 @@ export const chatMessages = {
   '{{count, number}} tools available_one': ['{{count, number}} tool beschikbaar', '{{count, number}} herramienta disponible'],
   '{{count, number}} tools available_other': ['{{count, number}} tools beschikbaar', '{{count, number}} herramientas disponibles'],
   'Approve {{name}}?': ['{{name}} goedkeuren?', '¿Aprobar {{name}}?'],
-  'Only enable servers you trust. Tool inputs are sent when a tool runs; approval controls sharing the result with the chat model.': ['Schakel alleen servers in die u vertrouwt. De invoer wordt verstuurd zodra een tool wordt uitgevoerd. Met uw goedkeuring wordt het resultaat gedeeld met het chatmodel.', 'Habilita solo servidores de confianza. Los datos de entrada se envían al ejecutar la herramienta; la aprobación controla si se comparte el resultado con el modelo de chat.'],
+  'Only enable servers you trust. Tool inputs are sent to the server. On Direct routes, results are shared with the chat model without review.': ['Schakel alleen servers in die u vertrouwt. De invoer van tools wordt naar de server gestuurd. Op directe routes worden de resultaten zonder controle gedeeld met het chatmodel.', 'Habilita solo servidores de confianza. Los datos de entrada de las herramientas se envían al servidor. En las rutas directas, los resultados se comparten con el modelo de chat sin revisión.'],
   'Approve and run': ['Goedkeuren en uitvoeren', 'Aprobar y ejecutar'],
   'Decline': ['Weigeren', 'Rechazar'],
   'MCP image {{index, number}}': ['MCP-afbeelding {{index, number}}', 'Imagen MCP {{index, number}}'],

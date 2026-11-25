@@ -2606,7 +2606,7 @@ for (const endpoint of directToolRoutes) test(`Direct ${endpoint} runs browser t
   const requests: unknown[] = [];
   const toolName = 'local_conversations_list_all';
   const calls: FixtureToolCall[] = [{ id: 'call_local_history', name: toolName, input: {} }];
-  await page.route('**/gateway/**', route => route.abort());
+  await page.route(url => url.pathname.startsWith('/gateway/'), route => route.abort());
   if (testMcp) await page.route('**/mcp-direct-fixture', route => {
     const { id, method, params } = route.request().postDataJSON();
     const reply = (result: object) => route.fulfill({ json: { jsonrpc: '2.0', id, result } });
@@ -2673,7 +2673,7 @@ for (const endpoint of directToolRoutes) test(`Direct ${endpoint} runs browser t
     await editor.getByLabel('Server URL').fill(new URL('/mcp-direct-fixture', page.url()).href);
     await editor.getByRole('button', { name: 'Save server' }).click();
     await context.getByRole('switch', { name: 'Direct fixture' }).check();
-    await expect(context.getByText('Connected', { exact: true })).toBeVisible();
+    await expect(context.getByRole('status')).toHaveText('1 tools available');
     await context.getByRole('button', { name: 'Close', exact: true }).click();
   }
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
@@ -2692,7 +2692,7 @@ for (const endpoint of directToolRoutes) test(`Direct ${endpoint} runs browser t
     const blocks = followup.messages.flatMap(message => message.content);
     expect(blocks).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'tool_use', id: local.id, name: toolName }),
-      expect.objectContaining({ type: 'tool_result', tool_use_id: local.id, content: [expect.objectContaining({ type: 'text', text: history })] }),
+      expect.objectContaining({ type: 'tool_result', tool_use_id: local.id, content: history }),
     ]));
   } else {
     const outputs = [history, expect.stringContaining('Direct MCP lookup result'), expect.stringContaining('Direct MCP resource result')];
