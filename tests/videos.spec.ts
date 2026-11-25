@@ -75,10 +75,10 @@ test('a pending video resumes after reload and its playable result is saved', as
   await page.goto('/');
   await addKey(page);
   await openVideos(page);
+  await expect(page.getByRole('button', { name: 'Model', exact: true })).toHaveText('Select a model');
   await page.getByRole('button', { name: 'Model', exact: true }).click();
   await expect(page.getByRole('listbox', { name: 'Model', exact: true }).getByRole('option')).toHaveText(['Veo']);
-  await expect(page.getByRole('option', { name: 'Veo', exact: true })).toHaveAttribute('aria-selected', 'true');
-  await page.keyboard.press('Escape');
+  await page.getByRole('option', { name: 'Veo', exact: true }).click();
   await expect(page.getByRole('form', { name: 'Video composer' }).getByRole('button', { name: 'Add attachments' })).toHaveCount(0);
   await videoPrompt(page).fill(`  ${prompt}  `);
   await send(page).click();
@@ -119,6 +119,8 @@ test('transient status errors retry without a new submission; terminal failures 
   await page.goto('/');
   await addKey(page);
   await openVideos(page);
+  await page.getByRole('button', { name: 'Model', exact: true }).click();
+  await page.getByRole('option', { name: 'Veo', exact: true }).click();
   await videoPrompt(page).fill('A windy night');
   await send(page).click();
   await expect(page.getByText('Could not check video status. Retrying…')).toBeVisible();

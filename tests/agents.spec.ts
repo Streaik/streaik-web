@@ -131,6 +131,10 @@ test('conversation name uses the requested language and saves without losing lat
 
   await page.goto('/');
   await enableOpenAI(page);
+  await page.getByRole('button', { name: 'Model', exact: true }).click();
+  await page.getByRole('option', { name: 'Text agent model', exact: true }).click();
+  await page.getByRole('option', { name: 'Answer model', exact: true }).click();
+  await page.keyboard.press('Escape');
   const general = await settings(page, 'General');
   await general.getByRole('combobox', { name: 'Language' }).selectOption('nl');
   await page.getByRole('dialog').getByRole('button', { name: 'Sluiten', exact: true }).click();

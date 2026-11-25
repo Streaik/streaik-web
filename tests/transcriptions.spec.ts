@@ -34,6 +34,7 @@ async function openTranscriptions(page: Page, provider = 'OpenAI', models: { id:
   await dialog.getByRole('button', { name: 'Close', exact: true }).click();
   await page.getByRole('button', { name: 'Transcriptions', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Transcriptions', exact: true })).toBeVisible();
+  if (models.some(({ id }) => id === batchModel)) await chooseModel(page, batchModel);
 }
 
 async function chooseRoute(page: Page, path: string) {
@@ -425,8 +426,9 @@ for (const [model, languageOptions] of [
       }
     });
   });
-  await openTranscriptions(page, 'OpenAI', [{ id: model, type: 'transcription', tags: ['realtime'] }]);
-  await expect(start(page)).toBeEnabled();
+    await openTranscriptions(page, 'OpenAI', [{ id: model, type: 'transcription', tags: ['realtime'] }]);
+    await chooseModel(page, model);
+    await expect(start(page)).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Dictate', exact: true })).toBeDisabled();
   await expect(page.getByText('Dictate needs a file transcription model.')).toBeVisible();
   await page.getByRole('button', { name: 'Transcription settings' }).click();
@@ -535,6 +537,7 @@ test('Google Live Transcribe rejects untrusted socket targets, cleans up on canc
     });
   });
   await openTranscriptions(page, 'Google Gemini', [{ id: googleModel, type: 'transcription', tags: ['realtime'] }]);
+  await chooseModel(page, googleModel);
   await start(page).click();
   await expect(page.getByRole('alert')).toContainText('did not return a valid microphone session credential');
   await expect(page.locator('html')).toHaveAttribute('data-track', 'stopped');
