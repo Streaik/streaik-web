@@ -325,6 +325,105 @@ test('catalog-backed models and Realtime settings persist without starting audio
   expect(calls.every((method) => method === 'GET')).toBe(true);
 });
 
+test('Agents share provider forms and use the selected model’s saved native settings', async ({ page }) => {
+  const alternate = 'openai/example-alternate';
+  const cerebras = 'cerebras/gpt-oss-120b';
+  const together = 'together/openai/gpt-oss-20b';
+  const agentName = 'Configured text agent';
+  const unknownOption = { values: [0, false, null] };
+  const models = [
+    { id: textAgentModel, providerMetadata: { service_tier: 'flex' } },
+    { id: alternate, providerMetadata: { service_tier: 'default', future_field: unknownOption } },
+    { id: cerebras, providerMetadata: { reasoning_effort: 'high', seed: 0 } },
+    { id: together, providerMetadata: { reasoning_effort: 'low' } },
+  ];
+  await page.addInitScript(({ agentName, models }) => {
+    const scope = JSON.stringify([new URL('/gateway/api/chat', location.href).href, 'byok']);
+    const key = `streaik.agents.v1:${scope}`;
+    if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify({ version: 1, overrides: [], local: [{
+      id: 'configured', definition: { name: agentName, description: 'Portable native settings.', instructions: 'Write short text.', models },
+    }], assignments: { 'welcome-message': 'local:configured', 'conversation-name': 'local:configured' } }));
+  }, { agentName, models });
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [
+    { id: replyModel, name: 'Answer model', type: 'language' },
+    { id: textAgentModel, name: 'Text agent model', type: 'language' },
+    { id: alternate, name: 'Alternate model', type: 'language' },
+  ] } }));
+  const requests: { model: string; textAgent: boolean; welcome: boolean; metadata: unknown; beta: string | null }[] = [];
+  await page.route('**/gateway/api/chat', async route => {
+    const { model, messages, providerMetadata } = route.request().postDataJSON();
+    const textAgent = messages[1]?.id === 'streaik-app-agent-input';
+    const welcome = textAgent && messages[1].parts[0].text === 'Welcome the user to the app.';
+    const beta = await route.request().headerValue('openai-beta');
+    requests.push({ model, textAgent, welcome, metadata: providerMetadata, beta });
+    return finishText(route, welcome ? 'Welcome to Streak' : textAgent ? 'Configured title' : 'Regular chat response');
+  });
+
+  await page.goto('/');
+  await enableOpenAI(page);
+  await expect.poll(() => requests.find(request => request.welcome)).toMatchObject({
+    model: textAgentModel, metadata: { openai: { service_tier: 'flex' } },
+  });
+  await agents(page).click();
+  const openEditor = () => card(page, agentName).getByRole('button', { name: 'Edit', exact: true }).click();
+  await openEditor();
+  const editor = page.getByRole('dialog', { name: 'Edit agent', exact: true });
+  const tab = (name: string) => editor.getByRole('tab', { name, exact: true });
+  const modelPicker = editor.getByRole('combobox', { name: 'Model', exact: true });
+  const tier = editor.getByRole('combobox', { name: 'Service tier', exact: true });
+  await tab('OpenAI').click();
+  await expect(tier).toHaveValue('flex');
+  await expect(editor.getByText(/Add ordered native context management rules/)).toHaveCount(0);
+  await tier.selectOption('scale');
+  await modelPicker.selectOption({ label: `Alternate model (${alternate})` });
+  await expect(tier).toHaveValue('default');
+  await tier.selectOption('priority');
+  await editor.getByRole('button', { name: 'Add compaction rule' }).click();
+  await editor.getByRole('spinbutton', { name: 'Compaction threshold' }).fill('4096');
+  await editor.getByRole('switch', { name: 'Enable multi-agent responses' }).check();
+
+  await tab('Cerebras').click();
+  await expect(editor.getByRole('combobox', { name: 'Reasoning effort' })).toHaveValue('high');
+  await expect(editor.getByRole('spinbutton', { name: 'Seed', exact: true })).toHaveValue('0');
+  await tab('Together AI').click();
+  await expect(editor.getByRole('combobox', { name: 'Reasoning effort' })).toHaveValue('low');
+  await tab('General').click();
+  await editor.getByRole('button', { name: `Remove model ${together}` }).click();
+  await expect(tab('Together AI')).toHaveCount(0);
+  await editor.getByRole('button', { name: `Move ${alternate} up` }).click();
+  await tab('OpenAI').click();
+  await expect(tier).toHaveValue('priority');
+  await modelPicker.selectOption({ label: `Text agent model (${textAgentModel})` });
+  await expect(tier).toHaveValue('scale');
+  await editor.getByRole('button', { name: 'Save agent' }).click();
+
+  const native = { openai: {
+    service_tier: 'priority', future_field: unknownOption,
+    context_management: [{ type: 'compaction', compact_threshold: 4096 }],
+    multi_agent: { enabled: true, max_concurrent_subagents: 3 },
+  } };
+  await page.getByRole('button', { name: 'New chat', exact: true }).click();
+  await expect.poll(() => requests.findLast(request => request.welcome)).toMatchObject({
+    model: alternate, metadata: native, beta: 'responses_multi_agent=v1',
+  });
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('A normal chat message');
+  await composer.press('Enter');
+  await expect(page.getByText('Regular chat response', { exact: true })).toBeVisible();
+  await expect.poll(() => requests.find(request => request.textAgent && !request.welcome)).toMatchObject({
+    model: alternate, metadata: native, beta: 'responses_multi_agent=v1',
+  });
+  expect(requests.find(request => !request.textAgent)?.metadata).toBeUndefined();
+
+  await page.reload();
+  await agents(page).click();
+  await openEditor();
+  await tab('OpenAI').click();
+  await expect(tier).toHaveValue('priority');
+  await expect(editor.getByRole('spinbutton', { name: 'Compaction threshold' })).toHaveValue('4096');
+  await expect(tab('Together AI')).toHaveCount(0);
+});
+
 test('agent cards share provider icons and fall back when themed icons fail or are removed', async ({ page }) => {
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="purple"/></svg>';
   await page.route('**/agent-mark.svg', (route) => route.fulfill({ contentType: 'image/svg+xml', body: svg }));

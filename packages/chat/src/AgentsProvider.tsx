@@ -1,6 +1,6 @@
 import { createContext, useContext, useState } from 'react';
 import type { ReactNode } from 'react';
-import { buildAgentCatalog, emptyAgentData, readAgentData, removeAgentChange, saveAgentDefinition, setRoleAssignment } from './agentCatalog';
+import { buildAgentCatalog, emptyAgentData, readAgentData, removeAgentChange, saveAgentDefinition, serializeAgentData, setRoleAssignment } from './agentCatalog';
 import type { AgentData, AgentEntry, AgentKey, AgentRole, AgentsConfig } from './agentCatalog';
 import type { AgentDefinition } from './agentDefinition';
 
@@ -39,7 +39,7 @@ export function AgentsProvider({ config, scope, children }: { config?: AgentsCon
   function commit(data: AgentData) {
     if (!key || snapshot.readFailed) { setStored({ ...snapshot, data }); return; }
     try {
-      localStorage.setItem(key, JSON.stringify(data));
+      localStorage.setItem(key, serializeAgentData(data));
       setStored({ key, data });
     } catch {
       setStored({ key, data, notice: 'Could not save agents to this browser. Changes are kept only for this session.' });

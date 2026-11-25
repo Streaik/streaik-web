@@ -1,4 +1,5 @@
 import type { ChatMessage, Gateway } from '@streaik/gateway';
+import type { agentProviderRequest } from './agentProviderSettings';
 import { requestContextText } from './chatContext';
 import type { RequestContext } from './chatContext';
 
@@ -11,6 +12,7 @@ export type TextAppRequest = {
   instructions: string;
   context: RequestContext;
   transport: Pick<ReturnType<Gateway['chatTransport']>, 'sendMessages'>;
+  provider?: ReturnType<typeof agentProviderRequest>;
 };
 
 const textRoles = {
@@ -27,7 +29,7 @@ function shortText(value: string, { words, chars }: typeof textRoles[TextRole]) 
 
 /** Use the existing authenticated transport, but never attach app-agent messages to a user's transcript. */
 export async function runTextAppAgent(role: TextRole, request: TextAppRequest, input: string, signal: AbortSignal) {
-  const { model, instructions, context, transport } = request;
+  const { model, instructions, context, transport, provider } = request;
   const rules = textRoles[role];
   const abortSignal = AbortSignal.any([signal, AbortSignal.timeout(15_000)]);
   const messages: ChatMessage[] = [
@@ -40,7 +42,8 @@ export async function runTextAppAgent(role: TextRole, request: TextAppRequest, i
 
   try {
     const stream = await transport.sendMessages({ chatId: role, trigger: 'submit-message', messageId: undefined,
-      body: { model }, messages, abortSignal });
+      body: { model, ...(provider && { providerMetadata: provider.providerMetadata }) },
+      headers: provider?.headers, messages, abortSignal });
     const reader = stream.getReader();
     const cancel = () => { void reader.cancel().catch(() => {}); };
     abortSignal.addEventListener('abort', cancel, { once: true });

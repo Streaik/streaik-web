@@ -22,7 +22,6 @@ function ContextManagement({ value, onChange }: OptionsEditor) {
     save(next);
   };
   return <Card title="Context management">
-    <p>{t('Add ordered native context management rules. Compaction thresholds start at 1,000 tokens.')}</p>
     {rows.map((value, index) => {
       const entry = object(value);
       return <fieldset key={index}><legend>{t('Context rule {{index}}', { index: index + 1 })}</legend>

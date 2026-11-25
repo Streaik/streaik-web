@@ -1,5 +1,6 @@
 import { isAgentDefinition, isObject } from './agentDefinition.ts';
 import type { AgentDefinition } from './agentDefinition.ts';
+import { persistentAgentDefinition } from './agentProviderSettings.ts';
 
 export type AgentKey = `${'sample' | 'local' | 'remote'}:${string}`;
 type AgentRecord = { id: string; definition: AgentDefinition };
@@ -41,6 +42,11 @@ export function readAgentData(raw: string | null): AgentData {
     throw new Error('Unsupported local agent data.');
   }
   return { version: 1, local: data.local, overrides: data.overrides, assignments: data.assignments as AgentData['assignments'] };
+}
+
+export function serializeAgentData(data: AgentData) {
+  const persist = (records: AgentRecord[]) => records.map(record => ({ ...record, definition: persistentAgentDefinition(record.definition) }));
+  return JSON.stringify({ ...data, local: persist(data.local), overrides: persist(data.overrides) });
 }
 
 export function buildAgentCatalog(config: AgentsConfig, data: AgentData): AgentEntry[] {

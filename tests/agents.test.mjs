@@ -3,7 +3,8 @@ import test from 'node:test';
 import { primaryAgentModel } from '../packages/chat/src/agentDefinition.ts';
 import { agentIconSources, createAgentDraft, saveAgentDraft } from '../packages/chat/src/agentDraft.ts';
 import { buildAgentCatalog, defaultAgentKey, emptyAgentData, readAgentData, removeAgentChange, roleAssignment,
-  saveAgentDefinition, setRoleAssignment } from '../packages/chat/src/agentCatalog.ts';
+  saveAgentDefinition, serializeAgentData, setRoleAssignment } from '../packages/chat/src/agentCatalog.ts';
+import { agentProviderOptions, agentProviderRequest, withAgentProviderOptions } from '../packages/chat/src/agentProviderSettings.ts';
 
 const fixture = {
   name: 'ExampleAgent', description: 'An example.', instructions: 'Use the supplied context.',
@@ -62,6 +63,51 @@ test('model edits preserve the order and metadata of retained configurations and
   assert.equal(primaryAgentModel(cleared), undefined);
   assert.equal(Object.hasOwn(cleared, 'model'), false);
   assert.deepEqual(cleared.models, []);
+});
+
+test('agent provider edits round-trip as flat, model-specific native metadata', () => {
+  const model = { id: 'openai/gpt-6-luna', type: 'language', providerHeaders: { existing: 'untouched' },
+    providerMetadata: { reasoning: { effort: 'low', summary: 'auto' }, future_option: { values: [false, 0, null] } } };
+  const other = { id: 'openai/gpt-4.1-mini', providerMetadata: { service_tier: 'flex' } };
+  const legacy = { ...fixture, models: undefined, model };
+  const source = { ...legacy, models: [model, other] };
+  const editedModel = withAgentProviderOptions(model, { ...agentProviderOptions(model), service_tier: 'priority' });
+
+  const draft = createAgentDraft(source);
+  const edited = saveAgentDraft({ ...draft, models: [other, editedModel] }, source);
+  assert.deepEqual(edited.model, model);
+  assert.deepEqual(edited.models, [other, { ...model, providerMetadata: { ...model.providerMetadata, service_tier: 'priority' } }]);
+  const data = saveAgentDefinition(emptyAgentData(), [], edited, undefined, 'edited-model');
+  assert.deepEqual(readAgentData(serializeAgentData(data)), data);
+
+  const legacyEdit = saveAgentDraft({ ...createAgentDraft(legacy), models: [editedModel] }, legacy);
+  assert.deepEqual(legacyEdit.model, editedModel);
+  assert.equal(legacyEdit.models, undefined);
+  assert.deepEqual(withAgentProviderOptions(model, {}), { id: model.id, type: model.type, providerHeaders: model.providerHeaders });
+});
+
+test('agent requests adapt only the selected model and agent storage redacts session-only options', () => {
+  const tool = { type: 'shell', environment: { type: 'container_auto', skills: [
+    { type: 'inline', name: 'session-only' }, { type: 'skill_reference', skill_id: 'skill-1' },
+  ], network_policy: { type: 'allowlist', domain_secrets: [{ domain: 'example.test', name: 'TOKEN', value: 'session-token' }] } } };
+  const model = { id: 'openai/gpt-6-luna', providerMetadata: { multi_agent: { enabled: true }, tools: [tool] } };
+  const native = agentProviderRequest(model);
+  assert.deepEqual(native, { providerMetadata: { openai: model.providerMetadata }, headers: { 'OpenAI-Beta': 'responses_multi_agent=v1' } });
+  assert.deepEqual(agentProviderRequest({ id: 'cerebras/gpt-oss-120b', providerMetadata: { reasoning_effort: 'high', seed: 0 } })?.providerMetadata,
+    { cerebras: { reasoning_effort: 'high', seed: 0 } });
+  assert.equal(agentProviderRequest({ id: 'cerebras/llama-3.1-8b', providerMetadata: { reasoning_effort: 'high' } }), undefined);
+  assert.equal(agentProviderRequest({ id: 'openai/gpt-4.1-mini', providerMetadata: {} }), undefined);
+
+  const source = { ...fixture, model, models: [model] };
+  const data = saveAgentDefinition(emptyAgentData(), [], source, undefined, 'session-opts');
+  const serialized = serializeAgentData(data);
+  assert.doesNotMatch(serialized, /session-token|session-only/);
+  const [saved] = readAgentData(serialized).local;
+  assert.deepEqual(saved.definition.model, saved.definition.models[0]);
+  const environment = saved.definition.model.providerMetadata.tools[0].environment;
+  assert.deepEqual(environment.skills, [tool.environment.skills[1]]);
+  assert.deepEqual(environment.network_policy.domain_secrets, [{ domain: 'example.test', name: 'TOKEN' }]);
+  assert.equal(data.local[0].definition.model.providerMetadata.tools[0].environment.network_policy.domain_secrets[0].value, 'session-token');
 });
 
 test('nested edits keep unrelated audio and icon metadata and preserve other extensions', () => {

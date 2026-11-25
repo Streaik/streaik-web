@@ -49,6 +49,7 @@ import type { RemoteSkills } from './useRemoteSkills';
 import { assignedAgent } from './agentCatalog';
 import type { AgentsConfig } from './agentCatalog';
 import { agentModels as configuredAgentModels } from './agentDefinition';
+import { agentProviderRequest } from './agentProviderSettings';
 import { conversationOpeningText, deleteConversation, listConversations, newConversation, newestFirst, saveConversation } from './conversations';
 import type { Conversation } from './conversations';
 import type { createConversationSearch, SearchHistory } from './conversationSearch';
@@ -702,17 +703,20 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const contextUsage = preferences.showContextSize ? latestContextUsage(messages, selected) : undefined;
   const welcomeAgent = assignedAgent(agents, welcomeRoleId);
   const welcomeModels = configuredAgentModels(welcomeAgent).filter(({ type }) => type !== 'decision');
-  const welcomeModel = welcomeModels.find(({ id }) => compatibleById.has(id))?.id;
+  const welcomeModel = welcomeModels.find(({ id }) => compatibleById.has(id));
   const welcomeInstructions = welcomeAgent?.instructions;
+  const apiChatAgent = isApiChat(route);
   const welcomeRequest = useMemo(() => welcomeModel && welcomeInstructions && appAgentTransport
-    ? { model: welcomeModel, instructions: welcomeInstructions, transport: appAgentTransport, context: appAgentContext }
-    : undefined, [welcomeModel, welcomeInstructions, appAgentTransport, appAgentContext]);
+    ? { model: welcomeModel.id, instructions: welcomeInstructions, transport: appAgentTransport, context: appAgentContext,
+      provider: apiChatAgent ? agentProviderRequest(welcomeModel) : undefined }
+    : undefined, [welcomeModel, welcomeInstructions, appAgentTransport, appAgentContext, apiChatAgent]);
 
   function prepareName() {
     const agent = assignedAgent(agents, conversationNameRoleId);
     const model = configuredAgentModels(agent).find(({ id, type }) => type !== 'decision' && compatibleById.has(id));
     if (agent && model && appAgentTransport) {
-      nameRequest.current = { model: model.id, instructions: agent.instructions, transport: appAgentTransport, context: appAgentContext };
+      nameRequest.current = { model: model.id, instructions: agent.instructions, transport: appAgentTransport, context: appAgentContext,
+        provider: apiChatAgent ? agentProviderRequest(model) : undefined };
     }
   }
   useEffect(() => {

@@ -25,6 +25,13 @@ export type ChatProviderId = keyof typeof chatProviders;
 export type ProviderChatSettings = Readonly<Partial<Record<ChatProviderId, NativeOptions>>>;
 
 const isProvider = (id: string): id is ChatProviderId => Object.hasOwn(chatProviders, id);
+export function chatProviderForModel(modelId: string): ChatProviderId | undefined {
+  const separator = modelId.indexOf('/');
+  if (separator < 1 || separator === modelId.length - 1) return;
+  const provider = modelId.slice(0, separator);
+  if (isProvider(provider)) return provider;
+}
+
 export const nativeObject = (value: unknown): NativeOptions | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as NativeOptions : undefined;
 
@@ -50,19 +57,19 @@ export function activeChatProviders(models: readonly ChatModel[]) {
   const groups = new Map<ChatProviderId, ChatModel[]>();
   for (const model of models) {
     const { provider, id } = model;
-    if (isProvider(provider) && id.startsWith(`${provider}/`)) {
-      const group = groups.get(provider);
-      if (group) group.push(model);
-      else groups.set(provider, [model]);
-    }
+    const supported = chatProviderForModel(id);
+    if (!supported || supported !== provider) continue;
+    const group = groups.get(supported);
+    if (group) group.push(model);
+    else groups.set(supported, [model]);
   }
   return groups;
 }
 
 export function chatProviderRequest(settings: ProviderChatSettings | undefined, modelId: string | undefined) {
   if (!settings || !modelId) return;
-  const provider = modelId.split('/', 1)[0];
-  if (!isProvider(provider) || modelId.length <= provider.length + 1) return;
+  const provider = chatProviderForModel(modelId);
+  if (!provider) return;
   const saved = settings[provider];
   if (!saved) return;
   const adapter = chatProviders[provider];

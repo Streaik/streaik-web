@@ -7,10 +7,15 @@ import { AgentDraftError, createAgentDraft, saveAgentDraft } from './agentDraft'
 import type { AgentDraft, AgentTab } from './agentDraft';
 import type { AgentDefinition } from './agentDefinition';
 import { AgentDetailsFields, AgentGeneralFields, AgentRealtimeFields } from './AgentEditorFields';
+import { AgentProviderFields, agentProviderGroups } from './AgentProviderFields';
+import { withAgentProviderOptions } from './agentProviderSettings';
 import { ChatIcon } from './ChatIcon';
 import { useAppTranslation } from './i18n';
+import { chatProviders } from './providerChat/settings';
+import type { ChatProviderId, NativeOptions } from './providerChat/settings';
 
-const tabs = [['general', 'General'], ['details', 'Details'], ['realtime', 'Realtime']] as const;
+const baseTabs = [['general', 'General'], ['details', 'Details'], ['realtime', 'Realtime']] as const;
+type EditorTab = AgentTab | `provider-${ChatProviderId}`;
 
 function AgentDialog({ title, children, onClose }: { title: string; children: (close: () => void) => ReactNode; onClose: () => void }) {
   const { t } = useAppTranslation();
@@ -36,8 +41,12 @@ export function AgentEditor({ entry, seed, catalog, catalogStatus, tags, onSave,
   const source = entry?.definition ?? seed;
   const [initial] = useState(() => createAgentDraft(source));
   const [draft, setDraft] = useState(initial);
-  const [tab, setTab] = useState<AgentTab>('general');
+  const [requestedTab, setTab] = useState<EditorTab>('general');
   const [error, setError] = useState<Error>();
+  const providers = agentProviderGroups(draft.models, catalog);
+  const providerTabs = Array.from(providers, ([provider, entries]) => ({ provider, entries, key: `provider-${provider}` as const }));
+  const tabs = [...baseTabs, ...providerTabs.map(({ key, provider }) => [key, chatProviders[provider].label] as const)];
+  const tab = tabs.some(([key]) => key === requestedTab) ? requestedTab : 'general';
   const id = useId();
   const panels = useRef<HTMLDivElement>(null);
   const alert = useRef<HTMLParagraphElement>(null);
@@ -46,6 +55,11 @@ export function AgentEditor({ entry, seed, catalog, catalogStatus, tags, onSave,
 
   function patch(fields: Partial<AgentDraft>) {
     setDraft((old) => ({ ...old, ...fields }));
+    setError(undefined);
+  }
+
+  function patchModel(index: number, options: NativeOptions) {
+    setDraft(old => ({ ...old, models: old.models.map((model, i) => i === index ? withAgentProviderOptions(model, options) : model) }));
     setError(undefined);
   }
 
@@ -76,11 +90,15 @@ export function AgentEditor({ entry, seed, catalog, catalogStatus, tags, onSave,
           }}>{t(label)}</button>)}
       </div>
       <div className="agent-panels" ref={panels}>
-        {tabs.map(([key]) => <section key={key} className="agent-panel" id={`${id}-${key}-panel`} role="tabpanel"
+        {baseTabs.map(([key]) => <section key={key} className="agent-panel" id={`${id}-${key}-panel`} role="tabpanel"
           aria-labelledby={`${id}-${key}-tab`} hidden={key !== tab}>
           {key === 'general' ? <AgentGeneralFields {...{ draft, initial, patch, catalog, catalogStatus }} sample={entry?.source === 'sample'} />
             : key === 'details' ? <AgentDetailsFields {...{ draft, patch, tags }} />
               : <AgentRealtimeFields {...{ draft, initial, patch, catalog, catalogStatus }} />}
+        </section>)}
+        {providerTabs.map(({ key, provider, entries }) => <section key={key} className="agent-panel" id={`${id}-${key}-panel`}
+          role="tabpanel" aria-labelledby={`${id}-${key}-tab`} hidden={key !== tab}>
+          <AgentProviderFields provider={provider} entries={entries} onChange={patchModel} />
         </section>)}
       </div>
       {error && <p ref={alert} className="chat-error agent-save-error" role="alert" tabIndex={-1}>{t(error.message)}</p>}
