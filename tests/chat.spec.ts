@@ -498,6 +498,8 @@ test('a pinned remote skill can be downloaded, saved locally, and uploaded using
   expect(await search.evaluate(input => Math.abs(input.getBoundingClientRect().width - input.parentElement!.getBoundingClientRect().width))).toBeLessThan(1);
   const central = page.getByRole('tab', { name: 'Central', exact: true });
   const local = page.getByRole('tab', { name: 'Local', exact: true });
+  const centralPanel = page.getByRole('tabpanel', { name: 'Central', exact: true });
+  const localPanel = page.getByRole('tabpanel', { name: 'Local', exact: true });
   await expect(local).toHaveAttribute('aria-selected', 'true');
   expect(cursors).toEqual([]);
   await central.click();
@@ -506,7 +508,7 @@ test('a pinned remote skill can be downloaded, saved locally, and uploaded using
   expect(cursors).toEqual([null]);
   await expect(page.getByRole('button', { name: /^(Browse providers|Refresh)$/ })).toHaveCount(0);
   await search.fill('second openai');
-  await expect(page.getByText('No matching skills.')).toBeVisible();
+  await expect(centralPanel.getByText('No matching skills.')).toBeVisible();
   expect(cursors).toEqual([null]);
   await page.getByRole('button', { name: 'Load more', exact: true }).click();
   await expect(page.getByRole('article', { name: 'second-brief', exact: true })).toBeVisible();
@@ -529,7 +531,7 @@ test('a pinned remote skill can be downloaded, saved locally, and uploaded using
   await search.fill('source openai');
   await expect(card).toBeVisible();
   await local.click();
-  await expect(page.getByText('No matching skills.')).toBeVisible();
+  await expect(localPanel.getByText('No matching skills.')).toBeVisible();
   await search.clear();
   await card.getByRole('button', { name: 'Edit', exact: true }).click();
   const edit = page.getByRole('dialog', { name: 'Edit skill', exact: true });
@@ -555,7 +557,7 @@ test('a pinned remote skill can be downloaded, saved locally, and uploaded using
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
   await page.getByRole('button', { name: 'Skills', exact: true }).click();
   await central.click();
-  await expect(page.getByRole('tabpanel', { name: 'Central', exact: true }).getByText('openai/skill_uploaded', { exact: true })).toBeVisible();
+  await expect(centralPanel.getByText('openai/skill_uploaded', { exact: true })).toBeVisible();
   await expect(page.getByRole('article', { name: 'second-brief', exact: true })).toBeVisible();
   expect(cursors).toEqual([null, skill.id]);
 });
