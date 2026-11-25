@@ -231,7 +231,9 @@ body { margin: 0; }
 .chat-provider-fields { display: grid; gap: .65rem; margin: 0; padding: 0; border: 0; min-inline-size: 0; }
 .chat-provider-fields label, .chat-provider-select { display: grid; gap: .3rem; }
 .chat-provider-fields .chat-provider-switch { display: flex; gap: .5rem; align-items: center; }
-.chat-provider-fields :is(select, input[type=number], textarea) { max-width: 100%; box-sizing: border-box; color: var(--foreground); background: var(--background); border: 1px solid var(--border); border-radius: .35rem; padding: .4rem .55rem; font: inherit; }
+.chat-provider-fields :is(select, input:not([type=checkbox]), textarea) { max-width: 100%; box-sizing: border-box; color: var(--foreground); background: var(--background); border: 1px solid var(--border); border-radius: .35rem; padding: .4rem .55rem; font: inherit; }
+.chat-provider-fields fieldset { border: 0; padding: 0; margin: 0; min-inline-size: 0; display: grid; gap: .6rem; }
+.chat-provider-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
 .chat-context-skill-card { overflow-wrap: anywhere; }
 .chat-context-skill-card code { font-size: .85em; }
 .chat-tool-badges { display: flex; flex-wrap: wrap; gap: .3rem; }

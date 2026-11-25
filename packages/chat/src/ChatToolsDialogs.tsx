@@ -17,7 +17,7 @@ import type { LocalSkills } from './useLocalSkills';
 import type { RemoteSkills } from './useRemoteSkills';
 import { activeChatProviders, chatProviders, normalizeProviderChatSettings } from './providerChat/settings';
 import type { ChatProviderId, ProviderChatSettings } from './providerChat/settings';
-import { ProviderChatForm } from './providerChat/ProviderChatForm';
+import { ProviderChatForm } from './providerChat/forms';
 
 type DialogRef = RefObject<HTMLDialogElement | null>;
 type ChatSettingsTab = 'general' | 'tools' | 'skills' | ChatProviderId;
