@@ -183,7 +183,7 @@ export function AgentRealtimeFields({ draft, initial, patch, catalog, catalogSta
       <LongField label={t('Speech instructions')} rows={3} value={draft.speech.instructions} onChange={(event) => change({ instructions: event.currentTarget.value })} />
       <Field label={t('Language')} value={draft.speech.language} placeholder={t('Provider default')} onChange={(event) => change({ language: event.currentTarget.value })} />
       <Field label={t('Speed')} type="number" min="0" step="any" value={draft.speech.speed} placeholder={t('Provider default')} onChange={(event) => change({ speed: event.currentTarget.value })} />
-      <Field label={t('Audio format (MIME type)')} value={draft.speech.mime} placeholder="audio/mpeg" onChange={(event) => change({ mime: event.currentTarget.value, ...(!event.currentTarget.value.trim() && { rate: '' }) })} />
+      <Field label={t('Audio format')} value={draft.speech.mime} placeholder="audio/mpeg" onChange={(event) => change({ mime: event.currentTarget.value, ...(!event.currentTarget.value.trim() && { rate: '' }) })} />
       <Field label={t('Sample rate (Hz)')} type="number" min="1" step="1" value={draft.speech.rate} placeholder={t('Provider default')}
         disabled={!draft.speech.mime.trim()} onChange={(event) => change({ rate: event.currentTarget.value })} />
     </Group>

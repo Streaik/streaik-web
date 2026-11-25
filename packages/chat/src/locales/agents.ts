@@ -49,7 +49,7 @@ export const agentMessages = {
   'Provider default': ['Standaard van de provider', 'Valor predeterminado del proveedor'],
   'Speech instructions': ['Spraakinstructies', 'Instrucciones de voz'],
   'Speed': ['Snelheid', 'Velocidad'],
-  'Audio format (MIME type)': ['Audioformaat (MIME-type)', 'Formato de audio (tipo MIME)'],
+  'Audio format': ['Audioformaat', 'Formato de audio'],
   'Sample rate (Hz)': ['Bemonsteringsfrequentie (Hz)', 'Frecuencia de muestreo (Hz)'],
   'Speech speed must be a positive number.': ['De spreeksnelheid moet een positief getal zijn.', 'La velocidad del habla debe ser un número positivo.'],
   'Enter an audio MIME type, such as audio/mpeg.': ['Voer een MIME-type voor audio in, bijvoorbeeld audio/mpeg.', 'Introduce un tipo MIME de audio, como audio/mpeg.'],

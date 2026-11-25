@@ -10,6 +10,7 @@ import type { McpCatalogServer, McpOptions } from './mcp';
 import { mcpEndpoint, mcpHeaderFields, resolveMcpHeaders } from './mcpConfiguration';
 import type { McpHeaderRow, McpServerRecord } from './mcpConfiguration';
 import type { McpSelection, McpServers } from './useMcpServers';
+import { VersionBadge } from './VersionBadge';
 import './mcpServers.css';
 
 export type McpEditorTarget = { record?: McpServerRecord; installing?: boolean };
@@ -65,11 +66,10 @@ export function McpServerEditor({ target, options, store, close }: { target: Mcp
     setRows(rows.map((row, rowIndex) => rowIndex === index ? { ...row, [key]: value } : row));
   }
 
-  return <McpDialog title={t(installing ? 'Install MCP server' : record ? 'Configure MCP server' : 'Add MCP server')} close={close}>{closeDialog =>
+  return <McpDialog title={t(installing ? 'Install MCP server' : record ? 'Model Context Server' : 'Add MCP server')} close={close}>{closeDialog =>
     <form className="chat-settings-section mcp-form" onSubmit={event => submit(event, closeDialog)} autoComplete="off">
       <label>{t('Server name')}<input value={title} onChange={event => setTitle(event.target.value)} maxLength={160} /></label>
       <label>{t('Server URL')}<input type="url" required value={url} readOnly={!!record} onChange={event => setUrl(event.target.value)} maxLength={2048} /></label>
-      {endpoint && <p>{t('Headers are sent only to {{host}} at this server URL.', { host: new URL(endpoint).host })}</p>}
       {(appAuth || auth === 'app') && <label>{t('Authentication')}<select value={auth} onChange={event => setAuth(event.target.value === 'app' ? 'app' : 'manual')}>
         <option value="app">{t('Use app credentials')}</option><option value="manual">{t('Enter headers manually')}</option>
       </select></label>}
@@ -117,13 +117,13 @@ type ServerSectionsProps = { store: McpServers; options?: McpOptions; locked: bo
 function McpServerCard({ title, name, description, version, endpoint, actions, inDialog }: {
   title: string; name?: string; description?: string; version?: string; endpoint?: ReactNode; actions: ReactNode; inDialog?: boolean;
 }) {
-  const { t } = useAppTranslation();
   const Heading = inDialog ? 'h3' : 'h2';
   return <article className="catalog-card mcp-card">
     <div className="catalog-card-title"><span className="catalog-mark"><ChatIcon name="tool" /></span>
-      <div><Heading>{title}</Heading>{name && <small>{name}</small>}</div></div>
+      <div className="mcp-card-title-details"><Heading>{title}</Heading>
+        {version && <VersionBadge version={version} />}{name && <small>{name}</small>}
+      </div></div>
     {description && <p>{description}</p>}
-    {version && <small>{t('Version {{version}}', { version })}</small>}
     <div className="mcp-card-footer">
       {endpoint}
       <div className="mcp-actions">{actions}</div>
@@ -177,6 +177,19 @@ function InstalledServers({ store, selection, locked, onEdit }: ServerSectionsPr
   </section>;
 }
 
+function CopyServerUrl({ endpoint }: { endpoint: string }) {
+  const { t } = useAppTranslation();
+  const [status, setStatus] = useState<'Copied' | 'Copy failed'>();
+  return <>
+    <small role="status">{status && t(status)}</small>
+    <Tooltip content={endpoint}><Button type="button" variant="subtle" className="chat-composer-icon" aria-label={t('Copy server URL')}
+      onClick={async () => {
+        try { await navigator.clipboard.writeText(endpoint); setStatus('Copied'); }
+        catch { setStatus('Copy failed'); }
+      }}><ChatIcon name={status === 'Copied' ? 'check' : 'copy'} /></Button></Tooltip>
+  </>;
+}
+
 function CatalogCard({ item, installed, disabled, options, install, inDialog }: { item: McpCatalogServer; installed: ReadonlySet<string>; disabled: boolean; options?: McpOptions;
   install: (item: McpCatalogServer, remote: McpCatalogServer['remotes'][number]) => void; inDialog: boolean }) {
   const { t } = useAppTranslation();
@@ -186,12 +199,12 @@ function CatalogCard({ item, installed, disabled, options, install, inDialog }: 
   const installLabel = t('Install {{name}}', { name: item.title });
   const endpoint = item.remotes.length > 1 ? <label className="mcp-endpoint">{t('Server URL')} <select value={remote?.endpoint} onChange={event => setSelected(event.target.value)}>
       {item.remotes.map(choice => <option key={choice.endpoint}>{choice.endpoint}</option>)}
-    </select></label> : remote && <small className="mcp-endpoint">{remote.endpoint}</small>;
+    </select></label> : undefined;
   const actions = !remote ? <small>{t('No compatible Streamable HTTP endpoint')}</small> : isInstalled ? <small>{t('Installed')}</small>
     : <Tooltip content={installLabel}><Button type="button" variant="subtle" className="chat-composer-icon" aria-label={installLabel}
       disabled={disabled} onClick={() => install(item, remote)}><ChatIcon name="download" /></Button></Tooltip>;
   return <McpServerCard title={item.title} name={item.name} description={item.description} version={item.version}
-    endpoint={endpoint} actions={actions} inDialog={inDialog} />;
+    endpoint={endpoint} actions={<>{remote && <CopyServerUrl key={remote.endpoint} endpoint={remote.endpoint} />}{actions}</>} inDialog={inDialog} />;
 }
 
 function McpRegistry({ store, options, locked, onEdit, inDialog }: ServerSectionsProps & { inDialog: boolean }) {

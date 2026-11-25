@@ -11,6 +11,7 @@ import type { SkillBundle, SkillVersion } from './skillBundles';
 import { LocalSkillDetails, RemoteSkillDetails, SkillDialog, SkillEditor, SkillTabs, SkillUploadDialog, skillError } from './SkillDialogs';
 import type { LocalSkills } from './useLocalSkills';
 import type { RemoteSkills } from './useRemoteSkills';
+import { VersionBadge } from './VersionBadge';
 import './skills.css';
 
 type Action = { kind: 'create' } | { kind: 'edit' | 'details' | 'delete'; id: string }
@@ -96,9 +97,7 @@ export function SkillsView({ store, gateway, remote, toolbar, menuContainer }: {
     const { name, description } = version.metadata;
     return matches(name, description) ? [<article className="catalog-card agent-card" aria-label={name} key={skill.id}>
       <header className="agent-card-header"><div className="catalog-card-title"><CatalogMark provider="" name={name} />
-        <div><h2>{name}</h2><span className="chat-badge" role="img" aria-label={t('Version {{version}}', { version: version.version })}>
-          <ChatIcon name="tag" />v{version.version}
-        </span></div></div>
+        <div><h2>{name}</h2><VersionBadge version={version.version} /></div></div>
         <div className="agent-card-actions"><Tooltip content={t('Edit')}><button type="button" className="chat-row-button" aria-label={t('Edit')}
           onClick={event => open({ kind: 'edit', id: skill.id }, event.currentTarget)}><ChatIcon name="edit" /></button></Tooltip>
           <SkillCardMenu name={name} container={menuContainer} onAction={open} actions={[

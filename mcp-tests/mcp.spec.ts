@@ -361,7 +361,7 @@ test('manual headers are not persisted, and the disabled toggle has a separate c
   const configure = picker.getByRole('button', { name: 'Configure Private MCP' });
   await expect(configure).toHaveText('');
   await configure.click();
-  const editor = page.getByRole('dialog', { name: 'Configure MCP server' });
+  const editor = page.getByRole('dialog', { name: 'Model Context Server' });
   await expect(editor.getByLabel('Header value')).toHaveValue('');
   await editor.getByLabel('Header value').fill(auth.openai.Authorization);
   await editor.getByRole('button', { name: 'Save server' }).click();

@@ -291,7 +291,7 @@ test('catalog-backed models and Realtime settings persist without starting audio
   await editor.getByLabel('Language', { exact: true }).fill('en');
   await editor.getByLabel('Speed', { exact: true }).fill('-1');
   await expect(editor.getByLabel('Sample rate (Hz)')).toBeDisabled();
-  await editor.getByLabel('Audio format (MIME type)').fill('audio/pcm');
+  await editor.getByLabel('Audio format', { exact: true }).fill('audio/pcm');
   await editor.getByLabel('Sample rate (Hz)').fill('24000');
   await editor.getByRole('tab', { name: 'Details', exact: true }).click();
   await editor.getByRole('button', { name: 'Save agent' }).click();
@@ -313,7 +313,7 @@ test('catalog-backed models and Realtime settings persist without starting audio
   await expect(edit.getByRole('button', { name: 'Transcription model' })).toContainText('openai/live-transcribe (saved, unavailable)');
   await expect(edit.getByRole('button', { name: 'Speech model' })).toContainText('openai/example-tts (saved, unavailable)');
   for (const [label, value] of [['Voice', 'alloy'], ['Speech instructions', 'Speak clearly.'], ['Language', 'en'], ['Speed', '1.15'],
-    ['Audio format (MIME type)', 'audio/pcm'], ['Sample rate (Hz)', '24000']]) await expect(edit.getByLabel(label, { exact: true })).toHaveValue(value);
+    ['Audio format', 'audio/pcm'], ['Sample rate (Hz)', '24000']]) await expect(edit.getByLabel(label, { exact: true })).toHaveValue(value);
   await edit.getByRole('button', { name: 'Save agent' }).click();
   expect(calls.length).toBeGreaterThan(0);
   expect(calls.every((method) => method === 'GET')).toBe(true);

@@ -1107,7 +1107,8 @@ test('MCP elicitation queues forms and resumes the tool before its separate resu
 
   const dialog = page.getByRole('dialog', { name: 'Elicitation', exact: true });
   await expect(dialog.getByText('First request', { exact: true })).toBeVisible();
-  await expect(dialog.getByText(/Requested by Elicitation fixture/)).toBeVisible();
+  await expect(dialog.getByText(/Requested by Elicitation fixture/)).toHaveCount(0);
+  await expect(dialog.getByText('Only share information you want to send to this server.', { exact: true })).toHaveCount(0);
   await expect(dialog.getByText('Second request', { exact: true })).toHaveCount(0);
   const accept = dialog.getByRole('button', { name: 'Accept' });
   await accept.click();

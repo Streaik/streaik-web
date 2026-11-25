@@ -23,6 +23,7 @@
 .mcp-toggle input:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
 .mcp-toggle span, .mcp-endpoint { min-width: 0; overflow-wrap: anywhere; }
 .mcp-card .catalog-card-title :is(h2, h3) { font-size: 1.06rem; line-height: 1.25; margin: 0; }
+.mcp-card-title-details { display: grid; justify-items: start; gap: .2rem; min-width: 0; }
 .mcp-card p { margin: 0; }
 .mcp-card small, .mcp-form small { color: var(--muted); }
 .mcp-card-footer { display: grid; gap: .75rem; margin-block-start: auto; }

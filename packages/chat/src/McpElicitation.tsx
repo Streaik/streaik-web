@@ -4,10 +4,10 @@ import type { ReactNode } from 'react';
 import type { ElicitRequestFormParams, ElicitResult } from '@modelcontextprotocol/client';
 import { ChatIcon } from './ChatIcon';
 import { ElicitationForm } from './ElicitationForm';
-import type { ElicitationSource, RequestElicitation } from './elicitation';
+import type { RequestElicitation } from './elicitation';
 import { useAppTranslation } from './i18n';
 
-type Prompt = { id: number; request: ElicitRequestFormParams; source: ElicitationSource; answer: (result: ElicitResult) => void };
+type Prompt = { id: number; request: ElicitRequestFormParams; answer: (result: ElicitResult) => void };
 const ElicitationContext = createContext<RequestElicitation | undefined>(undefined);
 
 export function useMcpElicitation() { return useContext(ElicitationContext); }
@@ -18,7 +18,7 @@ export function McpElicitationProvider({ enabled, children }: { enabled: boolean
   const pending = useRef(new Map<number, () => void>());
   useLayoutEffect(() => () => { pending.current.forEach(dispose => dispose()); }, []);
 
-  const ask = useCallback<RequestElicitation>((request, source, signal) => new Promise((resolve, reject) => {
+  const ask = useCallback<RequestElicitation>((request, _source, signal) => new Promise((resolve, reject) => {
     signal.throwIfAborted();
     // The SDK may dispatch multiple forms in the same round. Show one at a time.
     if (pending.current.size >= 10) throw new Error('Too many MCP input requests.');
@@ -33,7 +33,7 @@ export function McpElicitationProvider({ enabled, children }: { enabled: boolean
     const abort = () => finish();
     signal.addEventListener('abort', abort, { once: true });
     pending.current.set(id, () => finish(undefined, true));
-    setQueue(prompts => [...prompts, { id, request, source, answer: finish }]);
+    setQueue(prompts => [...prompts, { id, request, answer: finish }]);
   }), []);
 
   return <ElicitationContext.Provider value={enabled ? ask : undefined}>
@@ -58,8 +58,6 @@ function ElicitationDialog({ prompt }: { prompt: Prompt }) {
       <h2 id={id}>{t('Elicitation')}</h2>
       <Button type="button" className="chat-close" variant="subtle" aria-label={t('Close')} onClick={cancel}><ChatIcon name="close" /></Button>
     </header>
-    <p className="elicitation-source">{t('Requested by {{server}} ({{origin}})', { server: prompt.source.title, origin: prompt.source.origin })}</p>
-    <p className="elicitation-source">{t('Only share information you want to send to this server.')}</p>
     <ElicitationForm request={prompt.request} onAnswer={prompt.answer} />
   </dialog>;
 }
