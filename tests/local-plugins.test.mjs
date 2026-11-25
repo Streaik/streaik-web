@@ -28,13 +28,14 @@ test('the eight local tools preserve AIHappey names, types, required parameters,
     ['World', 'Europe', 'Americas', 'Asia', 'Africa', 'Oceania']);
 });
 
-test('tools are opt-in, scoped, and Gateway-only; Direct and Gateway keep existing MCP registrations', () => {
+test('local plugins are opt-in and history-scoped on Gateway and all three Direct routes', () => {
   const mcp = { name: 'mcp_fixture_lookup', description: 'Fixture lookup', inputSchema: { type: 'object' },
     remoteName: 'lookup', server: { id: 'fixture', title: 'Fixture', path: '/fixture', provider: 'openai' } };
-  assert.deepEqual(activeChatTools(gateway, [], true, []).map(tool => tool.definition.name), []);
-  assert.equal(activeChatTools(gateway, selected, false, []).length, 5);
-  assert.equal(activeChatTools(gateway, selected, true, [mcp]).length, 9);
-  assert.deepEqual(activeChatTools(direct, selected, true, [mcp]), [{ source: 'mcp', tool: mcp, definition: mcp }]);
+  for (const route of [gateway, direct, { ...direct, endpoint: '/v1/messages' }, { ...direct, endpoint: '/v1/chat/completions' }]) {
+    assert.deepEqual(activeChatTools(route, [], true, []), []);
+    assert.deepEqual(activeChatTools(route, selected, false, []), tools.filter(tool => !tool.plugin.requiresHistory));
+    assert.deepEqual(activeChatTools(route, selected, true, [mcp]), [...tools, { source: 'mcp', tool: mcp, definition: mcp }]);
+  }
   assert.deepEqual(normalizeChatPreferences({ delay: 496, plugins: [...selected, selected[0], 'unregistered'] }),
     { ...defaultChatPreferences, delay: 500, plugins: selected });
   assert.deepEqual(normalizeChatPreferences({ delay: -1, plugins: null, convertAttachmentsToText: true,
@@ -93,6 +94,9 @@ test('context is request-only and disabled local results do not leak through rep
   assert.equal(requested[0].role, 'system');
   assert.deepEqual(requested[0].parts.map(part => JSON.parse(part.text)), [context.system, context.user]);
   assert.deepEqual(requested[1].parts, [mcpPart, localPart]);
+  const directDefinitions = activeChatTools(direct, selected, true, []).map(tool => tool.definition);
+  assert.deepEqual(filterLocalToolReplay(messages, directDefinitions, false)[0].parts, [mcpPart, localPart]);
+  assert.deepEqual(filterLocalToolReplay(messages, [], false)[0].parts, [mcpPart]);
   const filtered = filterLocalToolReplay(messages, []);
   assert.deepEqual(filtered[0].parts, [mcpPart]);
   assert.equal(messages[0].parts.length, 3);

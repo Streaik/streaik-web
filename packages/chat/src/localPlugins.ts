@@ -168,12 +168,10 @@ registeredNames.add(readResourceTool.name);
 export function activeChatTools(route: ChatRoute, enabled: readonly LocalPluginId[], historyAvailable: boolean, mcpTools: readonly McpTool[], hasSkills = false,
   resourceTool?: ToolDefinition): ChatTool[] {
   const tools: ChatTool[] = [];
-  if (route.mode === 'gateway') {
-    if (hasSkills) for (const definition of skillTools) tools.push({ source: 'skill', definition });
-    for (const plugin of localPlugins) {
-      if (enabled.includes(plugin.id) && (!plugin.requiresHistory || historyAvailable)) {
-        for (const spec of plugin.tools) tools.push({ source: 'local', plugin, spec, definition: spec.definition });
-      }
+  if (route.mode === 'gateway' && hasSkills) for (const definition of skillTools) tools.push({ source: 'skill', definition });
+  for (const plugin of localPlugins) {
+    if (enabled.includes(plugin.id) && (!plugin.requiresHistory || historyAvailable)) {
+      for (const spec of plugin.tools) tools.push({ source: 'local', plugin, spec, definition: spec.definition });
     }
   }
   for (const tool of mcpTools) {
@@ -211,7 +209,7 @@ export function toolPartName(part: ChatMessage['parts'][number]) {
   return part.type === 'dynamic-tool' ? part.toolName : part.type.startsWith('tool-') ? part.type.slice(5) : undefined;
 }
 
-// Never replay unfinished calls or local parts to Direct/after their plugin is switched off.
+// Never replay unfinished calls or results from local plugins that are no longer enabled.
 // Native routes use ordinary tool results, not signed API-chat approval records.
 export function filterLocalToolReplay(messages: ChatMessage[], definitions: readonly ToolDefinition[], apiChat = true, enabledSkillIds?: ReadonlySet<string>,
   enabledMcpResourceServers?: ReadonlySet<string>): ChatMessage[] {

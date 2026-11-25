@@ -609,7 +609,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       tools: turn.requestTools };
   }
 
-  // Stage browser results outside the SDK transcript. Nothing can replay an unreviewed output.
+  // When Gateway review is required, stage results outside the SDK transcript until approved.
   // Continue once per completed batch, with the original route, model and tool set.
   useEffect(() => {
     if (status !== 'ready' || toolBusy || operation.current || !turn || !toolParts.length) return;
@@ -629,15 +629,18 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       }
       return;
     }
-    if (pending?.part.state === 'input-available' && (pending.tool?.source === 'skill' || pending.tool?.source === 'mcp' || pending.tool?.source === 'mcp-resource' ||
-        (pending.tool?.source === 'local' && !pending.tool.plugin.approval))) {
+    if (pending?.part.state === 'input-available' && pending.tool) {
+      const { part, tool } = pending;
+      const gatewayTool = turn.route.mode === 'gateway';
+      if (gatewayTool && tool.source === 'local' && tool.plugin.approval) return;
       if (stagedResult) return;
       if (turn.automatic.calls >= 8) {
         setToolNotice('Local tool limit reached for this turn.');
         setTurn(undefined);
       } else {
         turn.automatic.calls++;
-        void completeTool(pending.part, pending.tool, pending.tool.source === 'skill' || pending.tool.source === 'local' ? 'run' : 'stage');
+        const reviewResult = gatewayTool && (tool.source === 'mcp' || tool.source === 'mcp-resource');
+        void completeTool(part, tool, reviewResult ? 'stage' : 'run');
       }
       return;
     }
@@ -691,7 +694,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   }
 
   function answerTool(approved: boolean) {
-    if (!turn || !pending || !last || toolBusy || operation.current || status !== 'ready') return;
+    if (!turn || turn.route.mode === 'direct' || !pending || !last || toolBusy || operation.current || status !== 'ready') return;
     const { part, tool } = pending;
     if (turn.resolved.has(part.toolCallId)) return;
     if (!isApiChat(turn.route)) {
@@ -740,7 +743,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   }
 
   function pendingReview(): ToolReview | undefined {
-    if (!turn || !pending || status !== 'ready') return;
+    if (!turn || turn.route.mode === 'direct' || !pending || status !== 'ready') return;
     const { tool, part } = pending;
     const name = tool?.source === 'mcp' ? tool.tool.title || tool.tool.remoteName : invocationName(part);
     const details = { id: part.toolCallId, name, input: part.input, disabled: toolBusy || !connection.ready };
@@ -904,7 +907,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         </div>
       </main>
       <ChatSettingsDialog dialog={chatSettings} value={preferences} onChange={onPreferences} gateway={gatewayRoute}
-        hasHistory={hasHistory} locked={routesLocked} localSkills={localSkills} remoteSkills={remoteSkills}
+        localPluginsSupported={!hostedRoute} hasHistory={hasHistory} locked={routesLocked} localSkills={localSkills} remoteSkills={remoteSkills}
         providerModels={!agentMode && isApiChat(route) ? selected : []} namespaceSupported={toolCapabilities.namespaces} toolOptionsSupported={toolCapabilities.options}
         toolRows={configuredTools.map(({ tool, source, options, namespace }) => ({ key: tool.definition.name, label: tool.definition.name, source,
           options, namespace: toolCapabilities.namespaces ? namespace?.name : undefined }))} />

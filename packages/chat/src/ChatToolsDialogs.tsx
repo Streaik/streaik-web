@@ -24,9 +24,9 @@ import type { ToolConfigurationRow } from './ToolConfigurationEditor';
 type DialogRef = RefObject<HTMLDialogElement | null>;
 type ChatSettingsTab = 'general' | 'tools' | 'tool-configuration' | 'skills' | ChatProviderId;
 
-export function ChatSettingsDialog({ dialog, value, onChange, gateway, hasHistory, locked, localSkills, remoteSkills, providerModels, toolRows, namespaceSupported, toolOptionsSupported }: {
+export function ChatSettingsDialog({ dialog, value, onChange, gateway, localPluginsSupported, hasHistory, locked, localSkills, remoteSkills, providerModels, toolRows, namespaceSupported, toolOptionsSupported }: {
   dialog: DialogRef; value: ChatPreferences; onChange: (preferences: ChatPreferences) => void;
-  gateway: boolean; hasHistory: boolean; locked: boolean; localSkills: LocalSkills; remoteSkills: RemoteSkills;
+  gateway: boolean; localPluginsSupported: boolean; hasHistory: boolean; locked: boolean; localSkills: LocalSkills; remoteSkills: RemoteSkills;
   providerModels: readonly ChatModel[];
   toolRows: readonly ToolConfigurationRow[]; namespaceSupported: boolean; toolOptionsSupported: boolean;
 }) {
@@ -65,17 +65,16 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hasHistor
     <div id={`${id}-tools-panel`} role="tabpanel" aria-labelledby={`${id}-tools-tab`} hidden={tab !== 'tools'}>
       <section className="chat-tool-card">
         <h3>{t('Local')}</h3>
-        {!gateway && <p>{t('Local plugins are available only on Gateway routes.')}</p>}
         <div className="chat-tool-switches">
           {localPlugins.map(plugin => <label key={plugin.id}>
             <input type="checkbox" role="switch" checked={value.plugins.includes(plugin.id)}
-              disabled={locked || !gateway || (plugin.requiresHistory && !hasHistory)}
+              disabled={locked || !localPluginsSupported || (plugin.requiresHistory && !hasHistory)}
               onChange={event => onChange({ ...value, plugins: event.currentTarget.checked ? [...value.plugins, plugin.id]
                 : value.plugins.filter(id => id !== plugin.id) })} />
             <span>{t(plugin.label)}</span>
           </label>)}
         </div>
-        {gateway && !hasHistory && <p>{t('Chat History requires a local history profile.')}</p>}
+        {localPluginsSupported && !hasHistory && <p>{t('Chat History requires a local history profile.')}</p>}
       </section>
     </div>
     <div id={`${id}-tool-configuration-panel`} role="tabpanel" aria-labelledby={`${id}-tool-configuration-tab`} hidden={tab !== 'tool-configuration'}>

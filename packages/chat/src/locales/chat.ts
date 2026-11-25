@@ -294,7 +294,6 @@ export const chatMessages = {
   'No tools enabled.': ['Geen tools ingeschakeld.', 'No hay herramientas habilitadas.'],
   'No additional context.': ['Geen aanvullende context.', 'No hay contexto adicional.'],
   'No extra context is sent on Direct routes.': ['Op directe routes wordt geen extra context verzonden.', 'Las rutas directas no envían contexto adicional.'],
-  'Local plugins are available only on Gateway routes.': ['Lokale plug-ins zijn alleen beschikbaar op gatewayroutes.', 'Los complementos locales solo están disponibles en rutas de la puerta de enlace.'],
   'Chat History requires a local history profile.': ['Chatgeschiedenis vereist een lokaal geschiedenisprofiel.', 'El historial de chats requiere un perfil de historial local.'],
   'Local tool limit reached for this turn.': ['De limiet voor lokale tools is bereikt voor deze beurt.', 'Se alcanzó el límite de herramientas locales para este turno.'],
   'Could not apply the tool result.': ['Kan het toolresultaat niet toepassen.', 'No se pudo aplicar el resultado de la herramienta.'],
