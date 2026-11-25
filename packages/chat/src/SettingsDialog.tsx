@@ -5,7 +5,7 @@ import type { ReactNode, RefObject } from 'react';
 import { useAgents } from './AgentsProvider';
 import { AgentSettings } from './AgentSettings';
 import { ChatIcon } from './ChatIcon';
-import { DialogTabs } from './ChatToolsDialogs';
+import { DialogTabs } from './DialogTabs';
 import { mcpTimeoutRange } from './mcpPreferences';
 import type { McpPreferences } from './mcpPreferences';
 import type { ChatPreferences, ToolOutputPreferences } from './chatPreferences';

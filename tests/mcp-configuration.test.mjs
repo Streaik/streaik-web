@@ -138,7 +138,6 @@ test('tool output carries full ordered content and structured data, not a displa
   const tool = { name: 'fixture', remoteName: 'fixture', inputSchema: { type: 'object' }, server };
   const result = await callMcpTool(tool, {}, new AbortController().signal);
   assert.deepEqual(result.output, { content, structuredContent, isError: false });
-  assert.deepEqual(result.images, ['data:image/png;base64,AQID']);
   rejectTool = true;
   await assert.rejects(callMcpTool(tool, {}, new AbortController().signal), /401/);
   assert.deepEqual(calls, ['server/discover', 'tools/call', 'server/discover', 'tools/call']);

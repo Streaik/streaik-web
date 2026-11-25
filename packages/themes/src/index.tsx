@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react';
+import { Suspense, createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
-import type { ButtonProps, ColorMode, IconName, MultiSelectProps, Preferences, SelectProps, TextareaProps, ThemeAdapter, ThemeEnv, TooltipProps } from './contract';
+import type { ButtonProps, ColorMode, IconName, JsonViewerProps, MultiSelectProps, Preferences, SelectProps, TextareaProps, ThemeAdapter, ThemeEnv, TooltipProps } from './contract';
+import { FallbackJsonViewer } from './FallbackJsonViewer';
 import { html } from './html';
 import { SearchableSelect } from './SearchableSelect';
 import './theme.css';
@@ -66,6 +67,14 @@ const Appearance = createContext<AppearanceState | null>(null);
 
 export function useColorScheme() {
   return useContext(Appearance)?.env.scheme ?? fallback.scheme;
+}
+
+export function JsonViewer(props: JsonViewerProps) {
+  const active = useContext(Appearance);
+  const Viewer = active?.adapter.JsonViewer;
+  const env = active?.env ?? fallback;
+  const generic = <FallbackJsonViewer {...props} scheme={env.scheme} />;
+  return Viewer ? <Suspense fallback={generic}><Viewer {...props} {...env} /></Suspense> : generic;
 }
 
 export function ThemeRoot({ children }: { children: ReactNode }) {

@@ -4,6 +4,7 @@ import type { McpPreferences } from './mcpPreferences.ts';
 import type { RequestElicitation } from './elicitation.ts';
 import { isObject, mcpDeclarations, mcpEndpoint } from './mcpConfiguration.ts';
 import type { McpRemoteHeader, McpServerRecord } from './mcpConfiguration.ts';
+import { maxMcpImagePreviews, mcpImagePreview } from './toolOutputContent.ts';
 export type { McpRemoteHeader } from './mcpConfiguration.ts';
 
 const revision = '2026-07-28';
@@ -269,9 +270,13 @@ export function getMcpPrompt(server: McpServer, name: string, args: Record<strin
 
 function mcpOutput(content: readonly { type: string; text?: string; mimeType?: string; data?: string }[]): McpOutput {
   const text = content.flatMap(block => block.type === 'text' && block.text ? [block.text] : []).join('\n\n').slice(0, 128 * 1024);
-  const images = content.flatMap(block => block.type === 'image' && block.data && block.mimeType &&
-    ['image/png', 'image/jpeg', 'image/webp'].includes(block.mimeType) && block.data.length <= 7_000_000 && /^[A-Za-z0-9+/=]+$/.test(block.data)
-    ? [`data:${block.mimeType};base64,${block.data}`] : []).slice(0, 4);
+  const images: string[] = [];
+  for (const block of content) {
+    if (block.type !== 'image') continue;
+    const preview = mcpImagePreview(block.mimeType, block.data);
+    if (preview) images.push(preview);
+    if (images.length === maxMcpImagePreviews) break;
+  }
   return { text, images };
 }
 
@@ -289,5 +294,5 @@ export async function callMcpTool(tool: McpTool, input: unknown, signal: AbortSi
   // Keep the model-visible fields intact. Request metadata (including result _meta) is for the client, not the model.
   const { content, structuredContent, isError } = result;
   const output = { content, ...(structuredContent !== undefined && { structuredContent }), ...(isError !== undefined && { isError }) };
-  return { output, images: isError ? [] : mcpOutput(content).images };
+  return { output };
 }

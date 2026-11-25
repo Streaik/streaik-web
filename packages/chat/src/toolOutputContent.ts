@@ -15,6 +15,71 @@ function record(value: unknown): Record<string, unknown> | undefined {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
 }
 
+const imageTypes = ['image/png', 'image/jpeg', 'image/webp'];
+export const maxMcpImagePreviews = 4;
+
+export function mcpImagePreview(mimeType: unknown, data: unknown): string | undefined {
+  if (typeof mimeType === 'string' && imageTypes.includes(mimeType) && typeof data === 'string' &&
+      data.length <= 7_000_000 && /^[A-Za-z0-9+/]+={0,2}$/.test(data)) {
+    return `data:${mimeType};base64,${data}`;
+  }
+}
+
+function resourceContent(value: unknown) {
+  const item = record(value);
+  return item && typeof item.uri === 'string' && (typeof item.text === 'string' || typeof item.blob === 'string') ? item : undefined;
+}
+
+type ToolResultDisplay = {
+  structured?: Record<string, unknown>;
+  text?: string[];
+  images?: string[];
+  output?: unknown;
+  isError?: boolean;
+};
+
+/** Project an MCP result for display only. Unsupported content and metadata remain inspectable in Output. */
+export function describeToolOutput(value: unknown): ToolResultDisplay {
+  const result = record(value);
+  if (!result) return { output: value };
+  const key = Array.isArray(result.content) ? 'content' : Array.isArray(result.contents) && result.contents.length &&
+    result.contents.every(resourceContent) ? 'contents' : undefined;
+  if (!key) return { output: value };
+
+  const isError = result.isError === true;
+  const structured = key === 'content' ? record(result.structuredContent) : undefined;
+  const text: string[] = [], images: string[] = [], unhandled: unknown[] = [];
+  for (const value of result[key] as unknown[]) {
+    const block = record(value);
+    if (!block) { unhandled.push(value); continue; }
+    const resource = key === 'contents' ? block : block.type === 'resource' ? resourceContent(block.resource) : undefined;
+    if (resource) {
+      const { text: body, blob, ...metadata } = resource;
+      const preview = !isError && images.length < maxMcpImagePreviews && mcpImagePreview(resource.mimeType, blob);
+      if (typeof body === 'string' && blob === undefined) text.push(body);
+      else if (preview && body === undefined) images.push(preview);
+      else { unhandled.push(value); continue; }
+      unhandled.push(key === 'contents' ? metadata : { ...block, resource: metadata });
+    } else if (block.type === 'text' && typeof block.text === 'string') {
+      const { type, text: body, ...metadata } = block;
+      text.push(body as string);
+      if (Object.keys(metadata).length) unhandled.push({ type, ...metadata });
+    } else {
+      const preview = block.type === 'image' && !isError && images.length < maxMcpImagePreviews && mcpImagePreview(block.mimeType, block.data);
+      if (!preview) { unhandled.push(value); continue; }
+      images.push(preview);
+      const { type, mimeType, data: _data, ...metadata } = block;
+      if (Object.keys(metadata).length) unhandled.push({ type, mimeType, ...metadata });
+    }
+  }
+
+  if (!structured && !text.length && !images.length) return { output: value, isError };
+  const remainder = Object.fromEntries(Object.entries(result).filter(([field, value]) => field !== key &&
+    !(field === 'structuredContent' && structured) && !(field === 'isError' && typeof value === 'boolean')));
+  if (unhandled.length) remainder[key] = unhandled;
+  return { structured, text, images, isError, ...(Object.keys(remainder).length && { output: remainder }) };
+}
+
 function contentCategory(value: unknown): Category | undefined {
   const block = record(value);
   if (!block) return;

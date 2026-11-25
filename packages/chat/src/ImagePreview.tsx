@@ -3,7 +3,7 @@ import type { ImageResponse } from '@streaik/gateway';
 import { Button } from '@streaik/themes';
 import { useEffect, useId, useRef, useState } from 'react';
 import { ChatIcon } from './ChatIcon';
-import { DialogTabs } from './ChatToolsDialogs';
+import { DialogTabs } from './DialogTabs';
 import { browserNumberFormat, useAppTranslation } from './i18n';
 
 const dollars = browserNumberFormat({ style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 8 });

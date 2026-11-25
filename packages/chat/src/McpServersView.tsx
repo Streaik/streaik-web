@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ChatIcon } from './ChatIcon';
-import { DialogTabs } from './ChatToolsDialogs';
+import { DialogTabs } from './DialogTabs';
 import { useAppTranslation } from './i18n';
 import { fetchMcpCatalog, filterMcpCatalog, mcpAppAuth, preferredMcpRemote } from './mcp';
 import type { McpCatalogServer, McpOptions } from './mcp';

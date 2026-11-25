@@ -136,6 +136,14 @@ async function exerciseChat(page: Page, approve: boolean, manual = false, reject
     await expect(page.getByRole('tabpanel', { name: 'Installed' }).getByRole('heading', { name: 'OpenAI Images', exact: true })).toBeVisible();
   }
   await page.getByRole('button', { name: 'New chat', exact: true }).click();
+  if (approve && !rejectUpstream) {
+    await page.getByRole('button', { name: 'Account menu', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
+    const settings = page.getByRole('dialog', { name: 'Settings' });
+    await settings.getByRole('tab', { name: 'Chat', exact: true }).click();
+    await settings.getByRole('switch', { name: 'Images', exact: true }).check();
+    await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  }
   if (routed) {
     await page.getByRole('button', { name: 'Agents', exact: true }).click();
     await page.getByRole('button', { name: 'Create agent', exact: true }).click();
@@ -161,9 +169,12 @@ async function exerciseChat(page: Page, approve: boolean, manual = false, reject
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Create a tiny landscape.');
   await page.getByRole('button', { name: 'Send', exact: false }).click();
   const review = page.getByRole('dialog', { name: 'Review tool result' });
-  if (rejectUpstream) await expect(review.getByRole('tabpanel', { name: 'Output' })).toContainText(openAiError);
+  if (rejectUpstream) await expect(review.getByRole('tabpanel', { name: 'Text' })).toContainText(openAiError);
   await expect(page.getByRole('dialog', { name: 'Approve tool execution' })).toHaveCount(0);
-  if (!rejectUpstream) await expect(review.getByRole('img', { name: 'MCP image 1' })).toBeVisible();
+  if (!rejectUpstream) {
+    await expect(review.getByRole('tab', { name: 'Images' })).toHaveAttribute('aria-selected', 'true');
+    await expect(review.getByRole('img', { name: 'MCP image 1' })).toBeVisible();
+  }
   await review.getByRole('tab', { name: 'Input' }).click();
   await expect(review.getByRole('tabpanel', { name: 'Input' })).toContainText(prompt);
   expect(calls).toEqual(['OpenAIImages_CreateImage']);
@@ -171,7 +182,10 @@ async function exerciseChat(page: Page, approve: boolean, manual = false, reject
   await review.getByRole('button', { name: approve ? 'Approve and share' : 'Decline', exact: true }).click();
   await expect(page.getByText('Chat continued after MCP.')).toBeVisible();
   if (approve && !rejectUpstream) {
-    const image = page.getByRole('img', { name: 'MCP image 1' });
+    const activity = page.getByRole('region', { name: 'Assistant activity' });
+    await expect(activity.getByRole('tab', { name: 'Input' })).toHaveAttribute('aria-selected', 'true');
+    await activity.getByRole('tab', { name: 'Images' }).click();
+    const image = activity.getByRole('img', { name: 'MCP image 1' });
     await expect(image).toBeVisible();
     await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1);
   } else await expect(page.getByRole('img', { name: 'MCP image 1' })).toHaveCount(0);
@@ -248,7 +262,7 @@ for (const approve of [true, false]) {
       await expect(review).toHaveCount(0);
       await expect(page.getByRole('dialog', { name: 'Approve tool execution' })).toHaveCount(0);
     } finally { release(); }
-    await expect(review.getByRole('tabpanel', { name: 'Output' })).toContainText(openAiError);
+    await expect(review.getByRole('tabpanel', { name: 'Text' })).toContainText(openAiError);
     expect(chatCalls).toBe(1);
     await review.getByRole('button', { name: approve ? 'Approve and share' : 'Decline', exact: true }).click();
     await expect(page.getByText('Native chat continued.')).toBeVisible();
@@ -315,7 +329,9 @@ test('approved REST Countries structured data reaches the next chat request', as
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill('What is the capital of Poland?');
   await page.getByRole('button', { name: 'Send', exact: false }).click();
   const review = page.getByRole('dialog', { name: 'Review tool result' });
-  await expect(review.getByRole('tabpanel', { name: 'Output' })).toContainText('Poland');
+  const structured = review.getByRole('tabpanel', { name: 'Structured' });
+  await structured.getByRole('button', { name: 'Expand all' }).click();
+  await expect(structured).toContainText('Poland');
   expect(chats).toBe(1);
   await review.getByRole('button', { name: 'Approve and share', exact: true }).click();
   await expect(page.getByText('Warsaw is the capital of Poland.')).toBeVisible();

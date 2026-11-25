@@ -5,7 +5,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { ComponentType } from 'react';
 import { attachmentByteLimit, fileMediaType } from './chatAttachments';
 import { ChatIcon } from './ChatIcon';
-import { DialogTabs } from './ChatToolsDialogs';
+import { DialogTabs } from './DialogTabs';
 import { providerName } from './CatalogViews';
 import { defaultImagePreferences, isDallE, supportsImageAspectRatio, supportsImageSeed } from './imagePreferences';
 import type { ImagePreferences } from './imagePreferences';

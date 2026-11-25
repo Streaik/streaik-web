@@ -31,3 +31,23 @@
   border-radius: var(--radius); background: var(--foreground); color: var(--background);
   font-size: .75rem; overflow-wrap: anywhere;
 }
+.shadcn-json-viewer {
+  --radius-panel: var(--radius);
+  --font-body: inherit;
+  --tracking-body: normal;
+  --border-subtle: var(--border);
+  --surface-muted: var(--soft);
+  --text-muted: var(--muted);
+  --text-secondary: var(--foreground);
+  --text-sm: .875rem;
+  --text-xs: .75rem;
+  --duration-fast: 150ms;
+  --duration-spring: 200ms;
+  --ease-standard: ease-out;
+  --ease-spring: ease-out;
+  --row-hover: var(--soft);
+  --success: #137243;
+  --accent: #1d4ed8;
+  --warning: #92570d;
+}
+[data-scheme=dark] .shadcn-json-viewer { --success: #86efac; --accent: #93c5fd; --warning: #fcd34d; }

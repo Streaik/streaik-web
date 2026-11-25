@@ -1,11 +1,13 @@
 import type { ChatMessage } from '@streaik/gateway';
 import { Button } from '@streaik/themes';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ChatIcon } from './ChatIcon';
 import { convertedAttachmentName } from './chatAttachments';
 import type { AttachmentPart } from './chatAttachments';
 import { useAppTranslation } from './i18n';
+import { ToolDetails } from './ToolDetails';
+import { describeToolOutput } from './toolOutputContent';
 
 type Part = ChatMessage['parts'][number];
 export type Invocation = Extract<Part, { toolCallId: string }>;
@@ -35,10 +37,6 @@ export function invocationName(part: Invocation) {
   return part.title || (part.type === 'dynamic-tool' ? part.toolName : part.type.slice(5));
 }
 
-export function ToolValue({ value }: { value: unknown }) {
-  return <pre className="chat-tool-value">{typeof value === 'string' ? value : JSON.stringify(value, null, 2)}</pre>;
-}
-
 const toolStates = {
   'input-streaming': 'Preparing tool',
   'input-available': 'Tool requested',
@@ -56,11 +54,14 @@ export function ChatActivity({ parts, renderMarkdown }: { parts: ActivityPart[];
   const page = Math.min(selected, parts.length - 1);
   const part = parts[page];
   const reasoning = part.type === 'reasoning';
+  const output = reasoning ? undefined : part.output;
+  const result = useMemo(() => describeToolOutput(output), [output]);
   const title = reasoning ? t('Reasoning') : invocationName(part);
   // API Chat reserves an approval record before execution, but MCP only asks to review the result.
   const mcpPending = !reasoning && part.state === 'approval-requested' &&
     (part.type === 'dynamic-tool' ? part.toolName.startsWith('mcp_') : part.type.startsWith('tool-mcp_'));
-  const state = reasoning ? undefined : part.approval?.approved === false ? 'Declined' : mcpPending ? 'Tool requested' : toolStates[part.state];
+  const state = reasoning ? undefined : part.approval?.approved === false ? 'Declined' : mcpPending ? 'Tool requested'
+    : result.isError ? 'Tool failed' : toolStates[part.state];
   return <section className="chat-activity" aria-label={t('Assistant activity')}>
     <header className="chat-activity-header">
       <ChatIcon name={reasoning ? 'brain' : 'tool'} />
@@ -76,8 +77,7 @@ export function ChatActivity({ parts, renderMarkdown }: { parts: ActivityPart[];
     </header>
     {reasoning ? <div className="chat-activity-body">{renderMarkdown(part.text)}</div> : <div className="chat-activity-body" key={part.toolCallId}>
       {part.errorText && <p>{part.errorText}</p>}
-      {part.input !== undefined && <details><summary>{t('Input')}</summary><ToolValue value={part.input} /></details>}
-      {part.output !== undefined && <details><summary>{t('Output')}</summary><ToolValue value={part.output} /></details>}
+      <ToolDetails input={part.input} result={result} />
     </div>}
   </section>;
 }

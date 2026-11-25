@@ -1,8 +1,10 @@
 import { Button } from '@streaik/themes';
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { ChatIcon } from './ChatIcon';
-import { ToolValue } from './ChatActivity';
+import { DialogTabs } from './DialogTabs';
+import { ToolDetails, ToolValue } from './ToolDetails';
+import { describeToolOutput } from './toolOutputContent';
 import { composerToolDefaults } from './chatPreferences';
 import type { ChatPreferences } from './chatPreferences';
 import type { RequestContext } from './chatContext';
@@ -14,25 +16,6 @@ import type { LocalSkills } from './useLocalSkills';
 import type { RemoteSkills } from './useRemoteSkills';
 
 type DialogRef = RefObject<HTMLDialogElement | null>;
-
-export function DialogTabs<T extends string>({ id, label, tabs, value, onChange, className = 'chat-tool-tabs' }: {
-  id: string; label: string; tabs: ReadonlyArray<readonly [T, string]>; value: T; onChange: (tab: T) => void; className?: string;
-}) {
-  return <div className={className} role="tablist" aria-label={label}>
-    {tabs.map(([key, title], index) => <button key={key} id={`${id}-${key}-tab`} type="button" role="tab"
-      aria-selected={value === key} aria-controls={`${id}-${key}-panel`} tabIndex={value === key ? 0 : -1}
-      onClick={() => onChange(key)} onKeyDown={event => {
-        const count = tabs.length;
-        const next = event.key === 'Home' ? 0 : event.key === 'End' ? count - 1
-          : event.key === 'ArrowRight' ? (index + 1) % count : event.key === 'ArrowLeft' ? (index + count - 1) % count : undefined;
-        if (next === undefined) return;
-        event.preventDefault();
-        const [target] = tabs[next];
-        onChange(target);
-        document.getElementById(`${id}-${target}-tab`)?.focus();
-      }}>{title}</button>)}
-  </div>;
-}
 
 export function ChatSettingsDialog({ dialog, value, onChange, gateway, hasHistory, locked, localSkills, remoteSkills }: {
   dialog: DialogRef; value: ChatPreferences; onChange: (preferences: ChatPreferences) => void;
@@ -122,13 +105,20 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hasHistor
   </dialog>;
 }
 
-export function ViewContextDialog({ dialog, context, tools }: { dialog: DialogRef; context?: RequestContext; tools: readonly ChatTool[] }) {
+function ToolSchema({ title, value }: { title: string; value: unknown }) {
+  const [open, setOpen] = useState(false);
+  return <details onToggle={event => setOpen(event.currentTarget.open)}><summary>{title}</summary>{open && <ToolValue value={value} />}</details>;
+}
+
+export function ViewContextDialog({ context, tools, onClose }: { context?: RequestContext; tools: readonly ChatTool[]; onClose: () => void }) {
   const { t } = useAppTranslation();
   const id = useId();
+  const dialog = useRef<HTMLDialogElement>(null);
   const [tab, setTab] = useState<'system' | 'user' | 'tools' | 'skills'>('system');
   const skills = context?.skills?.availableSkills.skills ?? [];
   if (tab === 'skills' && !skills.length) setTab('system');
-  return <dialog ref={dialog} className="chat-settings chat-tools-dialog" aria-labelledby={`${id}-title`} onClose={() => setTab('system')}>
+  useLayoutEffect(() => { dialog.current?.showModal(); }, []);
+  return <dialog ref={dialog} className="chat-settings chat-tools-dialog" aria-labelledby={`${id}-title`} onClose={onClose}>
     <header className="chat-settings-header">
       <h2 id={`${id}-title`}>{t('Context')}</h2>
       <Button className="chat-close" variant="subtle" aria-label={t('Close')} onClick={() => dialog.current?.close()}><ChatIcon name="close" /></Button>
@@ -138,13 +128,13 @@ export function ViewContextDialog({ dialog, context, tools }: { dialog: DialogRe
       value={tab} onChange={setTab} />
     {(['system', 'user'] as const).map(key => <div key={key} id={`${id}-${key}-panel`} role="tabpanel" tabIndex={0}
       aria-labelledby={`${id}-${key}-tab`} hidden={tab !== key}>
-      {context?.[key] && <section className="chat-tool-card"><h3>{t(key === 'system' ? 'System context' : 'User context')}</h3>
+      {tab === key && context?.[key] && <section className="chat-tool-card"><h3>{t(key === 'system' ? 'System context' : 'User context')}</h3>
         <ToolValue value={context[key]} /></section>}
-      {key === 'system' && context?.mcp && <section className="chat-tool-card"><h3>{t('MCP resource catalog')}</h3><ToolValue value={context.mcp} /></section>}
+      {key === 'system' && tab === key && context?.mcp && <section className="chat-tool-card"><h3>{t('MCP resource catalog')}</h3><ToolValue value={context.mcp} /></section>}
       {!context?.[key] && !(key === 'system' && context?.mcp) && <p>{t(context ? 'No additional context.' : 'No extra context is sent on Direct routes.')}</p>}
     </div>)}
     <div id={`${id}-tools-panel`} role="tabpanel" tabIndex={0} aria-labelledby={`${id}-tools-tab`} hidden={tab !== 'tools'}>
-      {tools.length ? <div className="chat-tool-list">{tools.map(item => {
+      {tab === 'tools' && (tools.length ? <div className="chat-tool-list">{tools.map(item => {
         const remote = item.source === 'mcp' ? item.tool : undefined;
         const labels = item.source === 'local' ? [t(item.plugin.label)] : item.source === 'skill' ? [t('Skills')] : remote ? [remote.server.title] : [t('MCP'), t('Read-only')];
         if (remote?.annotations?.readOnlyHint) labels.push(t('Read-only'));
@@ -156,10 +146,10 @@ export function ViewContextDialog({ dialog, context, tools }: { dialog: DialogRe
           {(remote?.title || remote?.remoteName) && <code>{item.definition.name}</code>}
           <div className="chat-tool-badges">{labels.map((label, index) => <span key={index} className="chat-tool-badge">{label}</span>)}</div>
           {item.definition.description && <p>{item.definition.description}</p>}
-          <details><summary>{t('Input schema')}</summary><ToolValue value={item.definition.inputSchema} /></details>
-          {remote?.outputSchema && <details><summary>{t('Output schema')}</summary><ToolValue value={remote.outputSchema} /></details>}
+          <ToolSchema title={t('Input schema')} value={item.definition.inputSchema} />
+          {remote?.outputSchema && <ToolSchema title={t('Output schema')} value={remote.outputSchema} />}
         </section>;
-      })}</div> : <p>{t('No tools enabled.')}</p>}
+      })}</div> : <p>{t('No tools enabled.')}</p>)}
     </div>
     {skills.length > 0 && <div id={`${id}-skills-panel`} className="chat-skill-cards" role="tabpanel" tabIndex={0}
       aria-labelledby={`${id}-skills-tab`} hidden={tab !== 'skills'}>
@@ -173,7 +163,7 @@ export function ViewContextDialog({ dialog, context, tools }: { dialog: DialogRe
 }
 
 export type ToolReview = { id: string; name: string; input: unknown; disabled?: boolean } & (
-  { kind: 'result'; output: unknown; images?: string[] } | { kind: 'execution' });
+  { kind: 'result'; output: unknown } | { kind: 'execution' });
 
 export function ToolApprovalDialog({ review, onAnswer, onStop }: {
   review: ToolReview; onAnswer: (approved: boolean) => void; onStop: () => void;
@@ -181,7 +171,8 @@ export function ToolApprovalDialog({ review, onAnswer, onStop }: {
   const { t } = useAppTranslation();
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null);
-  const [tab, setTab] = useState<'input' | 'output'>(review.kind === 'result' ? 'output' : 'input');
+  const output = review.kind === 'result' ? review.output : undefined;
+  const result = useMemo(() => describeToolOutput(output), [output]);
   useLayoutEffect(() => {
     const node = dialog.current;
     if (node && !node.open) node.showModal();
@@ -193,15 +184,7 @@ export function ToolApprovalDialog({ review, onAnswer, onStop }: {
       <h2 id={`${id}-title`}>{t(review.kind === 'result' ? 'Review tool result' : 'Approve tool execution')}</h2>
     </header>
     <div className="chat-approval-name"><ChatIcon name="tool" /><strong>{review.name}</strong></div>
-    <DialogTabs id={id} label={t('Tool details')} tabs={review.kind === 'result' ? [[ 'input', t('Input') ], [ 'output', t('Output') ]]
-      : [[ 'input', t('Input') ]]} value={tab} onChange={setTab} />
-    <div id={`${id}-input-panel`} role="tabpanel" tabIndex={0} aria-labelledby={`${id}-input-tab`} hidden={tab !== 'input'}>
-      <div className="chat-tool-card"><ToolValue value={review.input} /></div>
-    </div>
-    {review.kind === 'result' && <div id={`${id}-output-panel`} role="tabpanel" tabIndex={0} aria-labelledby={`${id}-output-tab`} hidden={tab !== 'output'}>
-      <div className="chat-tool-card"><ToolValue value={review.output} />{review.images?.map((image, index) =>
-        <img className="chat-mcp-image" key={index} alt={t('MCP image {{index, number}}', { index: index + 1 })} src={image} />)}</div>
-    </div>}
+    <ToolDetails input={review.input} result={result} mode={review.kind} />
     <footer className="chat-tool-footer">
       <Button type="button" variant="subtle" onClick={onStop}>{t('Stop')}</Button>
       <Button type="button" disabled={review.disabled} onClick={() => onAnswer(false)}>{t('Decline')}</Button>

@@ -373,7 +373,6 @@ function HistoryChat({ appName, gateway, connection, scope, models, route, onRou
     localSkills={localSkills} remoteSkills={remoteSkills} mcpServers={mcpServers} readHistory={scope ? () => latestHistory.current : undefined} />;
 }
 
-type ToolResult = { output: unknown; images?: string[] };
 type Turn = { model: string; route: ChatRoute; tools: ChatTool[]; context?: RequestContext;
   catalog: readonly CatalogModel[]; skills: readonly LocalSkill[]; remoteSkills?: TurnRemoteSkills;
   seen: Set<string>; resolved: Set<string>; automatic: { calls: number } };
@@ -409,7 +408,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const [deciding, setDeciding] = useState(false);
   const [turn, setTurn] = useState<Turn>();
   const chatSettings = useRef<HTMLDialogElement>(null);
-  const contextDialog = useRef<HTMLDialogElement>(null);
+  const [contextOpen, setContextOpen] = useState(false);
   const [menuContainer, setMenuContainer] = useState<HTMLDivElement | null>(null);
   const [catalogToolbar, setCatalogToolbar] = useState<HTMLDivElement | null>(null);
   const [mediaToolbar, setMediaToolbar] = useState<HTMLDivElement | null>(null);
@@ -479,8 +478,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const mcpSelection = useMcpSelection(mcpServers);
   const [toolNotice, setToolNotice] = useState('');
   const [toolBusy, setToolBusy] = useState(false);
-  const [staged, setStaged] = useState<{ turn: Turn; callId: string; result: ToolResult }>();
-  const [toolImages, setToolImages] = useState<string[]>([]);
+  const [staged, setStaged] = useState<{ turn: Turn; callId: string; result: { output: unknown } }>();
   const operation = useRef<AbortController | null>(null);
   const elicit = useMcpElicitation();
   const hasHistory = !!readHistory;
@@ -582,7 +580,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     if (action !== 'stage') turn.resolved.add(part.toolCallId);
     operation.current = controller; setToolBusy(true);
     try {
-      let output: unknown, images: string[] | undefined;
+      let output: unknown;
       if (tool.source === 'local') {
         output = action === 'decline' ? { isError: true, content: [{ type: 'text', text: 'The user declined to share local chat history.' }] }
           : runLocalTool(tool, part.input, { catalog: turn.catalog, history: tool.plugin.requiresHistory ? readHistory?.() ?? [] : [] });
@@ -594,24 +592,18 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         const server = enabled ? mcpServers.connection(target.record) : undefined;
         if (!target || !server) output = 'Choose a connected MCP server and an absolute resource URI.';
         else try {
-          const result = await readMcpResource(server, target.uri, controller.signal, elicit);
-          output = { contents: result.contents };
-          images = result.images;
+          const { contents } = await readMcpResource(server, target.uri, controller.signal, elicit);
+          output = { contents };
         } catch (error) { output = mcpFailure(error); }
       } else {
         if (!mcpServers.available) output = 'MCP is unavailable.';
         else try {
-          const result = await callMcpTool(tool.tool, part.input, controller.signal, preferences.mcp, elicit);
-          output = result.output;
-          images = result.images;
+          ({ output } = await callMcpTool(tool.tool, part.input, controller.signal, preferences.mcp, elicit));
         } catch (error) { output = mcpFailure(error); }
       }
       if (controller.signal.aborted) return;
-      if (action === 'stage') setStaged({ turn, callId: part.toolCallId, result: { output, images } });
-      else {
-        if (images?.length) setToolImages(images);
-        await addToolOutput({ tool: tool.definition.name, toolCallId: part.toolCallId, output });
-      }
+      if (action === 'stage') setStaged({ turn, callId: part.toolCallId, result: { output } });
+      else await addToolOutput({ tool: tool.definition.name, toolCallId: part.toolCallId, output });
     } catch {
       if (!controller.signal.aborted) { setToolNotice('Could not apply the tool result.'); setTurn(undefined); }
     } finally {
@@ -631,7 +623,6 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         if (!stagedResult || part.state !== 'input-available') return;
         turn.resolved.add(part.toolCallId);
         setStaged(undefined);
-        if (approved && stagedResult.images?.length) setToolImages(stagedResult.images);
         void addToolOutput({ tool: tool.definition.name, toolCallId: part.toolCallId,
           output: approved ? stagedResult.output : 'The user declined to share this tool result.' });
       } else if (tool) void completeTool(part, tool, approved ? 'run' : 'decline');
@@ -641,7 +632,6 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     if (part.state !== 'approval-requested' || !result) return;
     turn.resolved.add(part.toolCallId);
     setStaged(undefined);
-    if (approved && result.images?.length) setToolImages(result.images);
     // Apply the decision and approved output atomically, preserving a signature when provided.
     const approval = { ...part.approval, approved };
     const answered: Invocation = approved
@@ -770,9 +760,6 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
             {t(errorMessage(error, 'The reply was interrupted. You can retry or send another message.'))}
             <Button disabled={!canSend} onClick={() => { if (model && canSend) void regenerate({ body: beginTurn(model.id) }); }}>{t('Retry')}</Button>
           </div>}
-          {!!toolImages.length && <section className="chat-notice" aria-label={t('MCP output')}>
-             {toolImages.map((image, index) => <img className="chat-mcp-image" key={index} alt={t('MCP image {{index, number}}', { index: index + 1 })} src={image} />)}
-           </section>}
           {toolNotice && <p className="chat-notice" role="status">{t(toolNotice)}</p>}
            <div className="chat-progress" role="status">{(progress || restoringSkills || mcpSelection.loading) && <><span className="chat-spinner" aria-hidden="true" />
              {progress || (restoringSkills ? t('Loading provider skills…') : t('Connecting to MCP servers…'))}</>}</div>
@@ -781,7 +768,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
             convert={preferences.convertAttachmentsToText} badges={badges}
             mcp={view === 'chat' && mcpServers.available ? { count: mcpSelection.entries.length, disabled: routesLocked, open: () => setModelContextOpen(true),
               servers: mcpSelection.connected, connect: mcpServers.connection } : undefined}
-            onChatSettings={() => chatSettings.current?.showModal()} onViewContext={() => contextDialog.current?.showModal()}
+            onChatSettings={() => chatSettings.current?.showModal()} onViewContext={() => setContextOpen(true)}
             onSend={(parts) => {
               if (!model || !canSend) return;
               if (!messages.length) prepareName();
@@ -791,8 +778,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       </main>
       <ChatSettingsDialog dialog={chatSettings} value={preferences} onChange={onPreferences} gateway={gatewayRoute}
         hasHistory={hasHistory} locked={routesLocked} localSkills={localSkills} remoteSkills={remoteSkills} />
-      <ViewContextDialog dialog={contextDialog} context={(busy || toolParts.length > 0) && turn ? turn.context : context}
-        tools={(busy || toolParts.length > 0) && turn ? turn.tools : enabledTools} />
+      {contextOpen && <ViewContextDialog onClose={() => setContextOpen(false)} context={(busy || toolParts.length > 0) && turn ? turn.context : context}
+        tools={(busy || toolParts.length > 0) && turn ? turn.tools : enabledTools} />}
       {review && <ToolApprovalDialog key={`${review.id}:${review.kind}`} review={review} onAnswer={answerTool} onStop={stopTurn} />}
       {view === 'chat' && mcpServers.available && modelContextOpen && <ModelContextDialog store={mcpServers} options={connection.mcp}
         selection={mcpSelection} locked={routesLocked} onEdit={setMcpEditor} close={() => setModelContextOpen(false)} />}

@@ -3,6 +3,7 @@ import type { ComponentPropsWithRef, ComponentPropsWithoutRef, ComponentType, CS
 export type ColorMode = 'system' | 'light' | 'dark';
 export type Preferences = Readonly<Record<string, string>>;
 export type ThemeEnv = { scheme: Exclude<ColorMode, 'system'>; preferences: Preferences };
+export type JsonViewerProps = { value: object; label?: string };
 export type ButtonProps = ComponentPropsWithRef<'button'> & { variant?: 'primary' | 'subtle' };
 export type TooltipProps = { content?: string; children: ReactElement<{ title?: string }>; visualOnly?: boolean; side?: 'top' | 'right' | 'bottom' | 'left' };
 export type SelectGroup = { id: string; label: string };
@@ -35,6 +36,7 @@ export type IconName = 'images' | 'videos' | 'models' | 'providers' | 'agents' |
 type IconGlyphProps = Pick<ComponentPropsWithoutRef<'svg'>, 'className' | 'width' | 'height' | 'aria-hidden' | 'focusable'>;
 export type IconSet = Readonly<Record<IconName, ComponentType<IconGlyphProps>>>;
 export type ThemeAdapter = {
+  JsonViewer?: ComponentType<JsonViewerProps & ThemeEnv>;
   Button: ComponentType<ButtonProps & ThemeEnv>;
   Tooltip: ComponentType<TooltipProps & ThemeEnv>;
   Select: ComponentType<SelectProps & ThemeEnv>;

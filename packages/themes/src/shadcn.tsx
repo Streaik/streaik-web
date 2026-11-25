@@ -1,7 +1,7 @@
 import * as RadixSelect from '@radix-ui/react-select';
 import * as RadixTooltip from '@radix-ui/react-tooltip';
 import { Check, ChevronDown, ChevronUp } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { lazy, useCallback, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { choices } from './contract';
 import type { SelectProps, ThemeAdapter, TooltipProps } from './contract';
@@ -9,6 +9,7 @@ import { lucideIcons } from './lucideIcons';
 import { groupSelectOptions } from './selectOptions';
 import './shadcn.css';
 
+const JsonViewer = lazy(() => import('./ShadcnJsonViewer'));
 const parse = choices({ palette: ['neutral', 'blue', 'rose'], radius: ['default', 'sharp', 'rounded'] });
 const paletteOptions = [{ value: 'neutral', label: 'Neutral' }, { value: 'blue', label: 'Blue' }, { value: 'rose', label: 'Rose' }];
 const radiusOptions = [{ value: 'default', label: 'Default' }, { value: 'sharp', label: 'Sharp' }, { value: 'rounded', label: 'Rounded' }];
@@ -66,6 +67,7 @@ function Tooltip({ children, content, side }: TooltipProps) {
 export const shadcn: ThemeAdapter = {
   parse,
   icons: lucideIcons,
+  JsonViewer,
   Tooltip,
   style: ({ preferences, scheme }) => {
     const palette = preferences.palette === 'blue' || preferences.palette === 'rose' ? colors[preferences.palette][scheme] : undefined;
