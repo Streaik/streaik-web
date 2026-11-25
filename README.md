@@ -1,4 +1,4 @@
-# streaik-chat
+# streaik-web
 
 A browser-based AI chat client with streaming, provider switching, Agents, [MCP](https://modelcontextprotocol.io/), [Skills](https://agentskills.io), [Plugins](https://agent-plugins.org), files and rich response rendering.
 
