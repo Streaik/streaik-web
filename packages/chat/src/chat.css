@@ -128,7 +128,11 @@ body { margin: 0; }
 .mcp-composer-results li button:is(:hover, :focus-visible):not(:disabled) { border-color: var(--focus); }
 .mcp-composer-results li button:disabled { cursor: not-allowed; opacity: .6; }
 .mcp-composer-picker small { color: var(--muted); overflow-wrap: anywhere; }
-.mcp-composer-arguments label { display: grid; gap: .25rem; overflow-wrap: anywhere; }
+.mcp-argument-field { display: grid; gap: .25rem; min-width: 0; overflow-wrap: anywhere; }
+.mcp-argument-suggestions { list-style: none; margin: 0; padding: .2rem; max-height: 10rem; overflow: auto;
+  border: 1px solid var(--border); border-radius: .45rem; background: var(--surface); }
+.mcp-argument-suggestions li { padding: .4rem .55rem; border-radius: .3rem; cursor: pointer; white-space: pre-wrap; }
+.mcp-argument-suggestions li:is(:hover, [aria-selected=true]) { background: color-mix(in srgb, var(--foreground) 12%, var(--surface)); }
 .elicitation-dialog { overflow-wrap: anywhere; }
 .elicitation-form, .elicitation-field { display: grid; gap: .45rem; min-width: 0; }
 .elicitation-form { gap: .85rem; }

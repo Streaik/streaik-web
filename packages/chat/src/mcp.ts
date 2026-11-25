@@ -26,6 +26,9 @@ export type McpOutput = { text: string; images: string[] };
 export type McpResource = Awaited<ReturnType<Client['listResources']>>['resources'][number];
 export type McpResourceTemplate = Awaited<ReturnType<Client['listResourceTemplates']>>['resourceTemplates'][number];
 export type McpPrompt = Awaited<ReturnType<Client['listPrompts']>>['prompts'][number];
+type McpCompletionParams = Parameters<Client['complete']>[0];
+export type McpCompletionReference = McpCompletionParams['ref'];
+export const maxMcpArgumentLength = 2048;
 class McpRequestError extends Error {}
 
 export function mcpFailure(error: unknown): string {
@@ -203,7 +206,7 @@ export function discoverMcpServer(server: McpServer, signal: AbortSignal) {
       return { server, name, remoteName: tool.name, title: tool.title, description: tool.description,
         inputSchema: tool.inputSchema, outputSchema: tool.outputSchema, annotations: tool.annotations };
     }) : [];
-    return { tools, hasResources: !!caps?.resources, hasPrompts: !!caps?.prompts,
+    return { tools, hasResources: !!caps?.resources, hasPrompts: !!caps?.prompts, hasCompletions: !!caps?.completions,
       resources: resourcesResult.status === 'fulfilled' ? resourcesResult.value : [],
       resourceTemplates: templatesResult.status === 'fulfilled' ? templatesResult.value : [],
       prompts: promptsResult.status === 'fulfilled' ? promptsResult.value : [], promptsFailed: promptsResult.status === 'rejected' };
@@ -211,6 +214,16 @@ export function discoverMcpServer(server: McpServer, signal: AbortSignal) {
 }
 
 export type McpDiscovery = Awaited<ReturnType<typeof discoverMcpServer>>;
+
+export function completeMcpArgument(server: McpServer, params: McpCompletionParams, signal: AbortSignal) {
+  const bounded = AbortSignal.any([signal, AbortSignal.timeout(10_000)]);
+  return withClient(server, bounded, async client => {
+    if (!client.getServerCapabilities()?.completions) return [];
+    const { completion } = await client.complete(params, { signal: bounded });
+    return [...new Set(completion.values.slice(0, 100).filter(value =>
+      value.length <= maxMcpArgumentLength && value.trim() && !/[\r\n]/.test(value)))];
+  });
+}
 
 export function validMcpResourceUri(uri: unknown): uri is string {
   return typeof uri === 'string' && uri.length <= 8192 && /^[a-z][a-z\d+.-]*:[^\s]*$/i.test(uri);
@@ -226,7 +239,7 @@ export function expandMcpResource(template: string, values: Record<string, strin
   if (!mcpTemplateSlots(template)) throw new McpRequestError('This URI template is not supported.');
   const uri = template.replace(/\{([A-Za-z0-9_-]+)\}/g, (_, name: string) => {
     const value = Object.hasOwn(values, name) && values[name];
-    if (!value || value.length > 2048) throw new McpRequestError('Fill in the resource template values.');
+    if (!value || value.length > maxMcpArgumentLength) throw new McpRequestError('Fill in the resource template values.');
     return encodeURIComponent(value).replace(/[!'()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
   });
   if (uri.length > 8192) throw new McpRequestError('The resource URI is too long.');

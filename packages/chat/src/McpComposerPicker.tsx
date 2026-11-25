@@ -1,17 +1,18 @@
 import { Button } from '@streaik/themes';
-import { useId, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useId, useLayoutEffect, useRef, useState } from 'react';
 import { ChatIcon } from './ChatIcon';
-import { expandMcpResource, getMcpPrompt, mcpFailure, mcpTemplateSlots, readMcpResource } from './mcp';
-import type { McpOutput, McpPrompt, McpServer } from './mcp';
+import { completeMcpArgument, expandMcpResource, getMcpPrompt, mcpFailure, mcpTemplateSlots, readMcpResource } from './mcp';
+import type { McpCompletionReference, McpOutput, McpPrompt, McpServer } from './mcp';
 import { forUser } from './mcpChatContext';
 import type { ConnectedMcpServer } from './mcpChatContext';
 import type { McpServerRecord } from './mcpConfiguration';
 import { useAppTranslation } from './i18n';
 import { useMcpElicitation } from './McpElicitation';
+import { McpArgumentFields } from './McpArgumentFields';
+import type { McpArgumentField, SuggestMcpArgument } from './McpArgumentFields';
 
 type Mode = 'prompts' | 'resources';
-type Field = { name: string; required?: boolean; description?: string };
-type Item = { key: string; record: McpServerRecord; label: string; description?: string; fields: readonly Field[] } & (
+type Item = { key: string; record: McpServerRecord; label: string; description?: string; fields: readonly McpArgumentField[] } & (
   { kind: 'prompt'; prompt: McpPrompt } | { kind: 'resource'; uri: string } | { kind: 'template'; uriTemplate: string }
 );
 
@@ -60,6 +61,7 @@ export function McpComposerPicker(props: Props) {
   const search = useRef<HTMLInputElement>(null);
   const request = useRef<AbortController | null>(null);
   const latest = useRef(props);
+  const supportsCompletions = servers.find(({ record }) => record === selected?.record)?.discovery.hasCompletions;
   useLayoutEffect(() => { latest.current = props; });
   useLayoutEffect(() => {
     dialog.current?.showModal();
@@ -73,6 +75,17 @@ export function McpComposerPicker(props: Props) {
     setBusy(false);
     setError('This MCP server is no longer connected.');
   }, [selected, servers]);
+
+  const suggest = useCallback<SuggestMcpArgument>(async (argument, args, signal) => {
+    if (!selected || selected.kind === 'resource' || !dialog.current?.open) return [];
+    const current = latest.current;
+    if (!current.servers.some(({ record, discovery }) => record === selected.record && discovery.hasCompletions)) return [];
+    const server = current.connect(selected.record);
+    if (!server) return [];
+    const ref: McpCompletionReference = selected.kind === 'prompt' ? { type: 'ref/prompt', name: selected.prompt.name }
+      : { type: 'ref/resource', uri: selected.uriTemplate };
+    return completeMcpArgument(server, { ref, argument, ...(Object.keys(args).length ? { context: { arguments: args } } : {}) }, signal);
+  }, [selected]);
 
   async function apply(item: Item, values: Record<string, string>) {
     if (request.current || item.kind === 'prompt' && !latest.current.canSend) return;
@@ -124,10 +137,7 @@ export function McpComposerPicker(props: Props) {
     }}>
       <div><h3>{selected.label}</h3><small>{selected.record.title}</small></div>
       {selected.description && <p>{selected.description}</p>}
-      {selected.fields.map((field, index) => <label key={`${index}:${field.name}`}>
-        <span>{field.name}</span>{field.description && <small>{field.description}</small>}
-        <input name={field.name} type="text" autoFocus={index === 0} required={field.required} readOnly={busy} maxLength={2048} />
-      </label>)}
+      <McpArgumentFields fields={selected.fields} busy={busy} suggest={supportsCompletions ? suggest : undefined} />
       {busy && <p role="status">{t('Loading from MCP…')}</p>}
       {error && <p className="chat-error" role="alert">{t(error)}</p>}
       <footer className="chat-tool-footer">
