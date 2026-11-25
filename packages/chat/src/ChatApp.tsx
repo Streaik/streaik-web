@@ -30,7 +30,7 @@ import { ChatActivity, groupMessageParts, invocationName } from './ChatActivity'
 import type { Invocation } from './ChatActivity';
 import { loadChatPreferences, saveChatPreferences } from './chatPreferences';
 import type { ChatPreferences } from './chatPreferences';
-import { chatProviderMetadata } from './providerChat/settings';
+import { chatProviderRequest } from './providerChat/settings';
 import type { ProviderChatSettings } from './providerChat/settings';
 import { filterToolOutputContent } from './toolOutputContent';
 import { buildRequestContext, requestContextText, withRequestContext } from './chatContext';
@@ -454,8 +454,11 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           }
         }
         if (isApiChat(route)) {
-          const providerMetadata = chatProviderMetadata(providerSettings, model);
-          const stream = await apiChat.sendMessages({ ...request, body: { ...request.body, ...(providerMetadata && { providerMetadata }),
+          const provider = chatProviderRequest(providerSettings, model);
+          const headers = new Headers(request.headers);
+          for (const [key, value] of Object.entries(provider?.headers ?? {})) headers.set(key, value);
+          const stream = await apiChat.sendMessages({ ...request, headers, body: { ...request.body,
+            ...(provider && { providerMetadata: provider.providerMetadata }),
             ...(body.tools?.length && { clientToolResultApproval: true }) },
             messages: withRequestContext(request.messages, context) });
           return withReplyMetadata(stream, model, previous);

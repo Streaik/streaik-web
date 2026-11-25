@@ -2,7 +2,7 @@ import { localPlugins } from './localPlugins.ts';
 import type { LocalPluginId } from './localPlugins.ts';
 import { defaultMcpPreferences, mcpTimeoutRange } from './mcpPreferences.ts';
 import type { McpPreferences } from './mcpPreferences.ts';
-import { normalizeProviderChatSettings } from './providerChat/settings.ts';
+import { persistentProviderChatSettings } from './providerChat/settings.ts';
 import type { ProviderChatSettings } from './providerChat/settings.ts';
 
 export const pinnableViews = ['models', 'providers'] as const;
@@ -58,7 +58,7 @@ export function normalizeChatPreferences(value: StoredPreferences | null | undef
     showProviderLogo: booleanPreference(value?.showProviderLogo, defaultChatPreferences.showProviderLogo),
     showMetrics: booleanPreference(value?.showMetrics, defaultChatPreferences.showMetrics),
     toolOutput,
-    providerSettings: normalizeProviderChatSettings(value?.providerSettings),
+    providerSettings: persistentProviderChatSettings(value?.providerSettings),
     mcp: {
       formElicitation: booleanPreference(value?.mcp?.formElicitation, defaultMcpPreferences.formElicitation),
       toolTimeoutMinutes: typeof timeout === 'number' && Number.isFinite(timeout)
@@ -80,6 +80,7 @@ export function loadChatPreferences(scope?: string): ChatPreferences {
 
 export function saveChatPreferences(scope: string | undefined, preferences: ChatPreferences) {
   if (!scope) return;
-  try { localStorage.setItem(preferencesKey(scope), JSON.stringify(preferences)); }
+  try { localStorage.setItem(preferencesKey(scope), JSON.stringify({ ...preferences,
+    providerSettings: persistentProviderChatSettings(preferences.providerSettings) })); }
   catch { /* Preferences still work for this session when storage is unavailable. */ }
 }
