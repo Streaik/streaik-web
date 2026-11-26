@@ -52,7 +52,7 @@ import type { ChatTool } from './localPlugins';
 import { agentMcpAllows, agentMcpServers } from './agentTools';
 import { apiChatTools, chatRequestTools, chatToolCapabilities, configureChatTools } from './chatToolRequest';
 import type { ChatRequestTool } from './chatToolRequest';
-import { isClientToolSearch, searchClientTools } from './clientToolSearch';
+import { isClientToolSearch, searchClientTools, searchLocalToolCatalog } from './clientToolSearch';
 import { continueToolPolicy, toolComplete, toolPolicyForTurn } from './chatToolPolicy';
 import type { ChatToolPolicy, ToolProgress } from './chatToolPolicy';
 import { resolveSkillTool } from './skillTools';
@@ -772,7 +772,9 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       if (tool.source === 'local') {
         output = action === 'decline' ? { isError: true, content: [{ type: 'text', text: 'The user declined to share local chat history.' }] }
           : await runLocalTool(tool, part.input, { catalog: turn.catalog, history: tool.plugin.requiresHistory ? readHistory?.() ?? [] : [],
-            searchConversationText: tool.plugin.requiresHistory ? searchConversationText : undefined });
+            searchConversationText: tool.plugin.requiresHistory ? searchConversationText : undefined,
+            searchTools: goal => searchLocalToolCatalog(turn.toolSearchAgent, goal, turn.requestTools,
+              turn.model.startsWith('anthropic/') && (isApiChat(turn.route) || turn.route.endpoint === '/v1/messages'), controller.signal) });
       } else if (tool.source === 'skill') {
         output = await resolveSkillTool(tool.definition.name, part.input, turn.skills, turn.skillArchives, controller.signal);
       } else if (tool.source === 'mcp-resource') {
@@ -849,7 +851,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     const toolPolicy = toolPolicyForTurn(preferences.toolPolicy, new Set(enabledTools.map(tool => tool.definition.name)));
     const searchAgent = assignedAgent(agents, toolSearchRoleId);
     const searchModel = configuredAgentModels(searchAgent).find(({ id, type }) => type !== 'decision' && compatibleById.has(id));
-    const toolSearchAgent = !hostedRoute && (isApiChat(runRoute) || runRoute.endpoint === '/v1/responses') && searchModel && searchAgent && appAgentTransport
+    const toolSearchAgent = !hostedRoute && searchModel && searchAgent && appAgentTransport
       ? { model: searchModel.id, instructions: searchAgent.instructions, transport: appAgentTransport, context: appAgentContext } : undefined;
     return { model, route: runRoute, tools: enabledTools, context, catalog: runCatalog, skills: chatSkills.local,
       toolPolicy, toolChoice: hostedRoute ? undefined : toolPolicy.toolChoice, toolProgress: { seen, completed: 0 }, resolved: new Set(),

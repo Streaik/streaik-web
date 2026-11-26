@@ -1,4 +1,5 @@
 import type { CatalogModel, ChatMessage, ChatRoute } from '@streaik/gateway';
+import { clientToolSearchName } from '@streaik/gateway';
 import { chartInstructions } from '@streaik/themes/chart-spec';
 import type { McpTool } from './mcp.ts';
 import { conversationTitle, newestFirst } from './conversations.ts';
@@ -11,7 +12,8 @@ import { searchCatalog } from './catalogLookup.ts';
 type Property = { type: 'string' | 'integer' | 'number'; description: string; enum?: string[] };
 export type ToolDefinition = Pick<McpTool, 'name' | 'description' | 'inputSchema'>;
 type LocalResult = { content: { type: 'text'; text: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean };
-type PluginContext = { catalog: readonly CatalogModel[]; history: readonly Conversation[]; searchConversationText?: SearchConversationText };
+type PluginContext = { catalog: readonly CatalogModel[]; history: readonly Conversation[]; searchConversationText?: SearchConversationText;
+  searchTools?: (goal: unknown) => Promise<ToolDefinition[]> };
 type LocalToolSpec = {
   definition: ToolDefinition;
   run: (input: Record<string, unknown>, context: PluginContext) => Record<string, unknown> | Promise<Record<string, unknown>>;
@@ -131,6 +133,13 @@ export const localPlugins = [
   { id: 'local-charts', label: 'Charts', approval: false, requiresHistory: false, tools: [
     define('local_chart_instructions', 'Get the format and an example for displaying a bar, line, or doughnut chart in your reply. Call when a chart would help.',
       {}, [], () => chartInstructions),
+  ] },
+  { id: 'local-tool-search', label: 'Tool search', approval: false, requiresHistory: false, tools: [
+    define(clientToolSearchName, 'Find enabled tools that match a goal. Search before calling a deferred tool.',
+      { goal: string('The task the requested tools should help with.') }, ['goal'], async ({ goal }, { searchTools }) => {
+        if (!searchTools) throw new Error('The tool catalog is unavailable.');
+        return { selectedTools: await searchTools(goal) };
+      }),
   ] },
 ] as const;
 export type LocalPluginId = (typeof localPlugins)[number]['id'];

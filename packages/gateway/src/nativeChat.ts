@@ -5,6 +5,7 @@ import type { DirectMetricsOptions } from './directMetrics.ts';
 import { chatToolChoice, GatewayError } from './index.ts';
 import type { ChatMessage, ChatMessageMetadata, NativeChatEndpoint } from './index.ts';
 import { extendNativeTools, mergeOpenAIResponsesOptions } from './nativeToolOptions.ts';
+import { anthropicToolSearchBeta, clientToolSearchName, deferredToolReferences } from './toolSearch.ts';
 
 type NativeTarget = {
   url: string;
@@ -53,6 +54,14 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
         (part.type === 'dynamic-tool' && part.toolName === 'tool_search' || part.type === 'tool-tool_search') &&
         typeof part.callProviderMetadata?.openai?.itemId === 'string')));
       const beta = openAIResponses ? new Headers(headers).get('openai-beta') : null;
+      const definitionsList = Array.isArray(definitions) ? definitions : [];
+      const anthropicSearch = !target.requestBody && endpoint === '/v1/messages' && model.startsWith('anthropic/') &&
+        definitionsList.some(definition => asRecord(definition)?.name === clientToolSearchName);
+      const deferred = new Set<string>();
+      if (anthropicSearch) for (const definition of definitionsList) {
+        const entry = asRecord(definition);
+        if (entry?.defer_loading === true && typeof entry.name === 'string' && entry.name !== clientToolSearchName) deferred.add(entry.name);
+      }
       const inputInstructions = target.gateway ? gatewayInstructions : mcpInstructions;
       const instructions = typeof inputInstructions === 'string' ? inputInstructions
         : Array.isArray(inputInstructions) && inputInstructions.every(text => typeof text === 'string')
@@ -66,9 +75,10 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
         direct?.start();
         let body = target.requestBody ? target.requestBody(init.body) : extendNativeTools(init.body, definitions, endpoint, model);
         if (openAIResponses) body = mergeOpenAIResponsesOptions(body, nativeOptions, registerSearch);
-        if (!beta) return target.fetch(input, body === init.body ? init : { ...init, body });
+        if (!beta && !deferred.size) return target.fetch(input, body === init.body ? init : { ...init, body });
         const outgoing = new Headers(init.headers);
-        outgoing.set('OpenAI-Beta', beta);
+        if (beta) outgoing.set('OpenAI-Beta', beta);
+        if (deferred.size) outgoing.set('anthropic-beta', anthropicToolSearchBeta);
         return target.fetch(input, { ...init, body, headers: outgoing });
       };
       const sdk = { baseURL, apiKey: 'supplied-by-scoped-fetch', fetch: fetcher };
@@ -77,9 +87,16 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
         : (await import('@ai-sdk/anthropic')).createAnthropic(sdk)(target.model);
       abortSignal?.throwIfAborted();
 
-      const tools: ToolSet = Object.fromEntries((Array.isArray(definitions) ? definitions : []).map(
+      const tools: ToolSet = Object.fromEntries(definitionsList.map(
         ({ name, description, inputSchema }: { name: string; description?: string; inputSchema: JSONSchema7 }) =>
-          [name, tool({ description, inputSchema: jsonSchema(inputSchema) })],
+          [name, tool({ description, inputSchema: jsonSchema(inputSchema),
+            ...(name === clientToolSearchName && deferred.size > 0 && { toModelOutput({ output }: { output: unknown }) {
+              const names = deferredToolReferences(output, deferred);
+              return names.length ? { type: 'content', value: names.map(toolName => ({ type: 'custom' as const,
+                providerOptions: { anthropic: { type: 'tool-reference', toolName } } })) } as const
+                : { type: 'text', value: JSON.stringify(output) ?? '' } as const;
+            } }),
+          })],
       ));
       if (registerSearch && openai) tools.tool_search = openai.tools.toolSearch({ execution: search?.execution === 'client' ? 'client' : 'server' });
       let gateway: ChatMessageMetadata['gateway'];

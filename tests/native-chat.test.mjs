@@ -3,7 +3,9 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { readUIMessageStream } from 'ai';
 import { createDirectChat, createGateway, nativeChatEndpoints } from '../packages/gateway/src/index.ts';
-import { isClientToolSearch, searchClientTools } from '../packages/chat/src/clientToolSearch.ts';
+import { isClientToolSearch, searchClientTools, searchLocalToolCatalog } from '../packages/chat/src/clientToolSearch.ts';
+import { activeChatTools, runLocalTool } from '../packages/chat/src/localPlugins.ts';
+import { chatRequestTools, configureChatTools } from '../packages/chat/src/chatToolRequest.ts';
 
 const { providers } = JSON.parse(readFileSync(new URL('../packages/chat/src/provider-directory.json', import.meta.url)));
 const root = new URL('https://gateway.example.test/prefix/');
@@ -52,6 +54,49 @@ function response(endpoint, model, bridged = false) {
 
 async function send(transport, model, extras = {}) {
   return Array.fromAsync(await transport.sendMessages({ chatId: 'conversation', messages, body: { model }, trigger: 'submit-message', ...extras }));
+}
+
+test('Local Tool search is opt-in, stays eager, and searches the current catalog', async () => {
+  const route = { mode: 'gateway', endpoint: '/api/chat' };
+  const empty = activeChatTools(route, [], true, []);
+  assert.deepEqual(empty, []);
+  const local = activeChatTools(route, ['local-tool-search', 'local-conversations'], true, []);
+  const plugin = local.find(tool => tool.definition.name === 'client_tool_search');
+  assert.ok(plugin);
+  const definitions = chatRequestTools(configureChatTools(local, { client_tool_search: { defer_loading: true, allowed_callers: ['programmatic'] },
+    local_conversations_list_all: { defer_loading: true } }, true));
+  const search = definitions.find(tool => tool.name === 'client_tool_search');
+  assert.equal(search.defer_loading, undefined);
+  assert.equal(search.namespace, undefined);
+  assert.equal(search.allowed_callers, undefined);
+  const result = await runLocalTool(plugin, { goal: 'conversation summaries' }, { catalog: [], history: [],
+    searchTools: goal => searchLocalToolCatalog(undefined, goal, definitions, true, new AbortController().signal) });
+  assert.deepEqual(result.structuredContent.selectedTools.map(tool => tool.name), ['local_conversations_list_all']);
+});
+
+for (const direct of [false, true]) {
+  test(`${direct ? 'Direct' : 'Gateway'} Anthropic Messages replays Local Tool search as native references`, async () => {
+    const model = 'anthropic/claude-sonnet-4-6';
+    const inputSchema = { type: 'object', properties: {} };
+    const tools = [{ name: 'client_tool_search', inputSchema }, { name: 'lookup', inputSchema, defer_loading: true }, { name: 'eager', inputSchema }];
+    const tool = { type: 'dynamic-tool', toolName: 'client_tool_search', toolCallId: 'toolu_search', input: { goal: 'inventory' }, state: 'output-available',
+      output: { content: [], structuredContent: { selectedTools: [{ name: 'lookup' }, { name: 'lookup' }, { name: 'unknown' }, { name: 'eager' }] } } };
+    let sent;
+    const fetcher = async (_url, init) => {
+      sent = { body: JSON.parse(init.body), beta: init.headers.get('anthropic-beta') };
+      return response(messagesApi, sent.body.model);
+    };
+    const client = direct ? createDirectChat(providers, id => keys[id], fetcher) : createGateway(root, () => ({}), fetcher);
+    const replay = [messages[0], { id: 'search', role: 'assistant', parts: [tool] }, messages[2]];
+    const chunks = await send(client.chatTransport(messagesApi), model, { body: { model, tools }, messages: replay });
+    assert.deepEqual(chunks.filter(chunk => chunk.type === 'error'), []);
+    assert.equal(sent.beta, 'advanced-tool-use-2025-11-20');
+    assert.equal(sent.body.tools.find(tool => tool.name === 'client_tool_search').defer_loading, undefined);
+    assert.equal(sent.body.tools.find(tool => tool.name === 'lookup').defer_loading, true);
+    const blocks = sent.body.messages.flatMap(message => message.content);
+    assert.equal(blocks.find(block => block.type === 'tool_use').name, 'client_tool_search');
+    assert.deepEqual(blocks.find(block => block.type === 'tool_result').content, [{ type: 'tool_reference', tool_name: 'lookup' }]);
+  });
 }
 
 for (const direct of [false, true]) {

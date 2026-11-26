@@ -1,4 +1,5 @@
 import type { ChatRoute } from '@streaik/gateway';
+import { clientToolSearchName } from '@streaik/gateway';
 import type { ChatTool, ToolDefinition } from './localPlugins.ts';
 import type { AgentDefinition } from './agentDefinition.ts';
 import { agentMcpServers, agentToolOptions } from './agentTools.ts';
@@ -29,6 +30,7 @@ export function chatRequestTools(rows: readonly ConfiguredChatTool[]): ChatReque
   const namespaces = new Map<string, Namespace>();
   const used = new Set<string>();
   return rows.map(({ tool: { definition: { name, description, inputSchema } }, options, namespace }) => {
+    if (name === clientToolSearchName) return { name, description, inputSchema };
     let group = namespace && namespaces.get(namespace.id);
     if (namespace && !group) {
       const base = namespaceName(namespace.name);

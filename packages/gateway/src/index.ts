@@ -1,6 +1,7 @@
 import { DefaultChatTransport } from 'ai';
 import type { UIMessage } from 'ai';
 import { nativeChatTransport } from './nativeChat.ts';
+import { anthropicToolSearchBeta } from './toolSearch.ts';
 import { decisionChoiceBody, gatewayDecisionEndpoints, readDecisionChoice } from './decisionChoice.ts';
 import type { DecisionChoice, GatewayDecisionEndpoint } from './decisionChoice.ts';
 import { imageRequestBody, isImageEndpoint, readImageResponse } from './images.ts';
@@ -493,8 +494,11 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
         if (!root) throw new GatewayError('No gateway is configured. Choose Route → Direct to chat with a provider.');
         const url = new URL(endpoint.slice(1), root).href;
         return { url, model, gateway: true, fetch: async (_input, init) => {
-          const beta = endpoint === '/v1/responses' && provider === 'openai' && new Headers(init?.headers).get('openai-beta');
-          return expectEventStream(await request(url, { kind: 'chat', provider }, init, beta ? { 'OpenAI-Beta': beta } : undefined));
+          const headers = new Headers(init?.headers);
+          const beta = endpoint === '/v1/responses' && provider === 'openai' && headers.get('openai-beta');
+          const search = endpoint === '/v1/messages' && provider === 'anthropic' && headers.get('anthropic-beta') === anthropicToolSearchBeta;
+          return expectEventStream(await request(url, { kind: 'chat', provider }, init,
+            beta ? { 'OpenAI-Beta': beta } : search ? { 'Anthropic-Beta': anthropicToolSearchBeta } : undefined));
         } };
       });
       return new DefaultChatTransport<ChatMessage>({
@@ -524,3 +528,4 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
 }
 
 export type Gateway = ReturnType<typeof createGateway>;
+export { clientToolSearchName } from './toolSearch.ts';
