@@ -34,7 +34,7 @@ test('chart JSON rejects unsupported shapes, invalid or mismatched data and exce
   assert.equal(parseChartSpec(' '.repeat(chartLimits.source) + JSON.stringify(bar)), undefined);
 });
 
-test('Charts opts in to one instructions tool without history and the tool example parses', () => {
+test('Charts opts in to one instructions tool without history and the tool example parses', async () => {
   const route = { mode: 'gateway', endpoint: '/api/chat' };
   assert.deepEqual(activeChatTools(route, defaultChatPreferences.plugins, false, []), []);
   const { plugins } = normalizeChatPreferences({ plugins: ['local-charts'] });
@@ -45,7 +45,7 @@ test('Charts opts in to one instructions tool without history and the tool examp
   assert.equal(tool.plugin.approval, false);
   assert.equal(tool.definition.name, 'local_chart_instructions');
   assert.deepEqual(tool.definition.inputSchema.properties, {});
-  const result = runLocalTool(tool, {}, { catalog: [], history: [] });
+  const result = await runLocalTool(tool, {}, { catalog: [], history: [] });
   assert.deepEqual(Object.keys(result.structuredContent), ['instructions', 'example']);
   const [opening, source, closing] = result.structuredContent.example.split('\n');
   assert.equal(opening, '```' + chartFence);

@@ -1783,11 +1783,11 @@ test('Gateway chat shares context, keeps composer reasoning through approval, an
     betaHeaders.push(await route.request().headerValue('openai-beta'));
     const stream = requests.length === 2 ? [
       { type: 'start', messageId: 'tool-batch' }, { type: 'start-step' },
-      { type: 'tool-input-available', toolCallId: 'catalog-call', toolName: catalogTool, input: { query: 'router', limit: 5 }, dynamic: true },
+      { type: 'tool-input-available', toolCallId: 'catalog-call', toolName: catalogTool, input: { query: 'imager, image', limit: 5 }, dynamic: true },
       { type: 'tool-approval-request', toolCallId: 'catalog-call', approvalId: 'catalog-review', signature: 'fixture-catalog-signature' },
       { type: 'reasoning-start', id: 'thought' }, { type: 'reasoning-delta', id: 'thought', delta: 'Check past conversations next.' },
       { type: 'reasoning-end', id: 'thought' },
-      { type: 'tool-input-available', toolCallId: 'history-call', toolName: historyTool, input: { query: 'archived garden' }, dynamic: true },
+      { type: 'tool-input-available', toolCallId: 'history-call', toolName: historyTool, input: { query: 'archiv, gard' }, dynamic: true },
       { type: 'tool-approval-request', toolCallId: 'history-call', approvalId: 'history-review', signature: 'fixture-history-signature' },
       { type: 'finish-step' }, { type: 'finish', finishReason: 'tool-calls' },
     ].map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n'
@@ -1908,7 +1908,7 @@ test('Gateway chat shares context, keeps composer reasoning through approval, an
   await expect(structuredResult).toContainText(privateText);
   expect(requests).toHaveLength(2);
   await review.getByRole('tab', { name: 'Input', exact: true }).click();
-  await expect(review.getByRole('tabpanel', { name: 'Input' })).toContainText('archived garden');
+  await expect(review.getByRole('tabpanel', { name: 'Input' })).toContainText('archiv, gard');
   await review.getByRole('button', { name: 'Approve and share' }).click();
   await expect(page.getByText('Chat reply 3', { exact: true })).toBeVisible();
   expect(requests).toHaveLength(3);
@@ -3002,7 +3002,7 @@ test('model tabs browse the shared catalog without changing the chat picker, dra
     lists++;
     await route.fulfill({ json: { data: [
       { id: model, type: 'language', tags: ['streaming'], context_window: 8192 },
-      { id: 'imagerouter/vendor/img-xl', type: 'image', name: 'Image XL' },
+      { id: 'imagerouter/vendor/img-xl', type: 'image', name: lists === 1 ? 'Image XL' : 'Image XL 2' },
       { id: 'deepgram/nova-3', type: 'transcription', tags: ['realtime'] },
       { id: 'custom/not-classified', type: 'other' },
     ] } });
@@ -3051,16 +3051,19 @@ test('model tabs browse the shared catalog without changing the chat picker, dra
   await expect(page.getByRole('tabpanel').getByRole('heading', { name: 'nova-3' })).toBeVisible();
   await page.getByLabel('Provider', { exact: true }).selectOption('imagerouter');
   await image.click();
-  await expect(page.getByRole('tabpanel').getByRole('heading', { name: 'Image XL' })).toBeVisible();
-  await page.getByRole('searchbox', { name: 'Search models' }).fill('no-match');
+  const modelSearch = page.getByRole('searchbox', { name: 'Search models' });
+  await modelSearch.fill('no-match');
   await expect(page.getByText('No models match these filters.')).toBeVisible();
+  await modelSearch.fill('xl imager');
+  await expect(page.getByRole('tabpanel').getByRole('heading', { name: 'Image XL', exact: true })).toBeVisible();
   expect(lists).toBe(1);
   const refresh = page.getByRole('button', { name: 'Refresh models', exact: true });
   await expect(refresh).toHaveText('');
   await expect(refresh.locator('svg')).toBeVisible();
   await refresh.click();
   await expect.poll(() => lists).toBe(2);
-  await expect(refresh).toBeVisible();
+  await expect(modelSearch).toHaveValue('xl imager');
+  await expect(page.getByRole('tabpanel').getByRole('heading', { name: 'Image XL 2', exact: true })).toBeVisible();
   await conversation.click();
   await expect(composer).toHaveValue('A draft to keep');
   await modelPicker(page).click();
@@ -3269,7 +3272,7 @@ for (const [host, url] of [['BYOK', '/'], ['Entra', 'http://localhost:15174']] a
     await expect(page.getByText(countLabel(matching), { exact: true })).toBeVisible();
     await expect(cards).toHaveCount(Math.min(48, matching));
     const search = page.getByRole('searchbox', { name: 'Search providers' });
-    await search.fill('OpenAI');
+    await search.fill('valuab artific');
     const openai = cards.filter({ has: page.getByRole('heading', { name: 'OpenAI', exact: true }) });
     await expect(openai).toBeVisible();
     await expect(openai.locator('.catalog-mark img')).toHaveAttribute('src', openAiFavicon);

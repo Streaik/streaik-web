@@ -58,3 +58,22 @@ test('history search replaces updated text and titles and removes deleted docume
   assert.deepEqual(await index.search([other], 'revised'), []);
   assert.deepEqual(await index.search([], 'elsewhere'), []);
 });
+
+test('tool history index follows edits and removals and remains scoped to its own profile', async () => {
+  const first = createConversationSearch();
+  const second = createConversationSearch();
+  const old = chat('shared-id', 'Old title', { ...message('user', text('Original wording')), id: 'original' });
+  const fresh = chat('shared-id', 'New title', { ...message('user', text('Edited wording')), id: 'edited' });
+  const kept = chat('other', 'Separate thread', { ...message('assistant', text('Other wording')), id: 'kept' });
+  const total = (index, records, query) => index.searchText(records, query, 5).then(result => result.total);
+
+  assert.equal(await total(first, [old, kept], 'original'), 1);
+  await first.sync([fresh, kept]);
+  assert.equal(await total(first, [fresh, kept], 'original'), 0);
+  const edited = await first.searchText([fresh, kept], 'edited', 5);
+  assert.deepEqual(edited.results.map(hit => [hit.messageId, hit.conversationName]), [['edited', 'New title']]);
+  assert.equal(await total(first, [kept], 'edited'), 0);
+  assert.equal(await total(first, [kept], 'wording'), 1);
+  assert.equal(await total(second, [old], 'edited'), 0);
+  assert.equal(await total(second, [old], 'original'), 1);
+});
