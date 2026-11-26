@@ -12,7 +12,7 @@ import { Select } from '@fluentui/react-select';
 import { Textarea } from '@fluentui/react-textarea';
 import { teamsDarkTheme, teamsLightTheme, webDarkTheme, webLightTheme } from '@fluentui/react-theme';
 import { Tooltip } from '@fluentui/react-tooltip';
-import { useState } from 'react';
+import { lazy, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { choices } from './contract';
 import type { ThemeAdapter, ThemeEnv } from './contract';
@@ -54,7 +54,11 @@ const FluentTooltip: ThemeAdapter['Tooltip'] = ({ scheme, preferences, children,
   </FluentProvider>;
 };
 
+const FluentPlot = lazy(() => import('./charts/FluentChart'));
+const FluentChart: ThemeAdapter['Chart'] = (props) => <Frame env={props} block><FluentPlot {...props} /></Frame>;
+
 export const fluent: ThemeAdapter = {
+  Chart: FluentChart,
   parse,
   Tooltip: FluentTooltip,
   icons: {

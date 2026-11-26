@@ -8,12 +8,12 @@ Connect compatible AI APIs, agent runtimes and MCP servers directly from the cli
 
 The chat client supports:
 
-- **Streaming chat** with rich incremental message rendering
+- **Streaming chat** with rich incremental message rendering, charts and more
 - **Provider and model switching** across Gateway and direct provider APIs
 - **Multi-protocol routing** through API Chat, Responses, Messages, Chat Completions and Direct APIs
-- **Model discovery** with cached catalogs, background refresh, favorites, filters and configurable default preferences
+- **Model discovery** with catalogs, favorites, filters and configurable default preferences
 - **Provider settings** with model-specific options and native metadata passthrough
-- **Agents and workflows** through connected agent runtimes with multi-agent orchestration
+- **Agents and workflows** on direct APIs or through connected agent runtimes with multi-agent orchestration
 - **Realtime agents** with bidirectional audio, interruptions, streaming playback and tool execution
 - **Decisions** with intelligent multi-model and agent routing based on user input and configurable decision models
 - **Agent Plugins** combining Skills, MCP servers and supporting resources
@@ -26,15 +26,15 @@ The chat client supports:
 - **Conversation history** with local persistence, configurable chat preferences, and browser-only full-text search across titles and user and assistant messages
 - **Streaming UI** with interactive apps, cards and structured response rendering
 - **Speech** with generation, streaming playback and realtime transcription
-- **Transcriptions** with configurable file splitting, overlap handling and merged results. **Real-time** streams microphone audio to supported OpenAI, Gladia, and Google Gemini 3.5 Transcribe Live models and displays text only. **Dictate** records a short clip and uploads it when you stop.
+- **Transcriptions** with configurable file splitting, overlap handling and merged results. **Real-time** streams microphone audio to supported OpenAI, Gladia, and Google Gemini Transcribe Live models and displays text only. **Dictate** records a short clip and uploads it when you stop.
 - **Images** with generation and provider-specific options
 - **Videos** with prompt-only generation and inline playback. Pending jobs and results are saved locally for the current gateway/profile. Reopen Videos with the same credentials to resume polling; gateway job references and provider-hosted video links can expire.
 - **Benchmarks** with multi-model comparisons, configurable routing and repeatable test runs
 - **Usage analytics** with interactive charts, token consumption and cost tracking
 - **Performance metrics** including time to first token (TTFT) and tokens per second (TPS)
 - **Authentication** with header-based/BYOK and Microsoft Entra support
-- **Multi-theme UI** with interchangeable Shadcn, Fluent, Bootstrap, Mantine, Material and Chakra implementations
-- **Localization** with support for 15+ languages
+- **Multi-theme UI** with interchangeable Shadcn, Fluent and HTML implementations
+- **Localization** with support for 2+ languages
 - **Model capabilities** including speech, transcription, embeddings, reranking, images, video, decision and other supported modalities
 
 Documentation: https://ai.streaik.net/scalar  

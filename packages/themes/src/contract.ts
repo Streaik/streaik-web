@@ -4,6 +4,7 @@ export type ColorMode = 'system' | 'light' | 'dark';
 export type Preferences = Readonly<Record<string, string>>;
 export type ThemeEnv = { scheme: Exclude<ColorMode, 'system'>; preferences: Preferences };
 export type JsonViewerProps = { value: object; label?: string };
+export type ChartRendererProps = { spec: ChartSpec } & ThemeEnv;
 export type ButtonProps = ComponentPropsWithRef<'button'> & { variant?: 'primary' | 'subtle' };
 export type TooltipProps = { content?: string; children: ReactElement<{ title?: string }>; visualOnly?: boolean; side?: 'top' | 'right' | 'bottom' | 'left' };
 export type SelectGroup = { id: string; label: string };
@@ -37,6 +38,7 @@ type IconGlyphProps = Pick<ComponentPropsWithoutRef<'svg'>, 'className' | 'width
 export type IconSet = Readonly<Record<IconName, ComponentType<IconGlyphProps>>>;
 export type ThemeAdapter = {
   JsonViewer?: ComponentType<JsonViewerProps & ThemeEnv>;
+  Chart: ComponentType<ChartRendererProps>;
   Button: ComponentType<ButtonProps & ThemeEnv>;
   Tooltip: ComponentType<TooltipProps & ThemeEnv>;
   Select: ComponentType<SelectProps & ThemeEnv>;
@@ -57,3 +59,4 @@ export function choices(schema: Readonly<Record<string, readonly [string, ...str
     ]));
   };
 }
+import type { ChartSpec } from './charts/spec';

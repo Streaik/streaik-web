@@ -1,6 +1,8 @@
 import { Suspense, createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import type { ButtonProps, ColorMode, IconName, JsonViewerProps, MultiSelectProps, Preferences, SelectProps, TextareaProps, ThemeAdapter, ThemeEnv, TooltipProps } from './contract';
+import { ChartFigure } from './charts/ChartFigure';
+import type { ChartProps } from './charts/ChartFigure';
 import { FallbackJsonViewer } from './FallbackJsonViewer';
 import { html } from './html';
 import { SearchableSelect } from './SearchableSelect';
@@ -13,6 +15,8 @@ const registry = {
 };
 export type ThemeId = keyof typeof registry;
 export type { ColorMode, IconName };
+export type { ChartSpec } from './charts/spec';
+export type { ChartProps } from './charts/ChartFigure';
 export type { MultiSelectProps, SelectGroup, SelectOption, SelectProps, SelectSearch } from './contract';
 const themes = Object.keys(registry) as ThemeId[];
 const fallback: ThemeEnv = { scheme: 'light', preferences: html.parse(undefined) };
@@ -75,6 +79,12 @@ export function JsonViewer(props: JsonViewerProps) {
   const env = active?.env ?? fallback;
   const generic = <FallbackJsonViewer {...props} scheme={env.scheme} />;
   return Viewer ? <Suspense fallback={generic}><Viewer {...props} {...env} /></Suspense> : generic;
+}
+
+export function Chart(props: ChartProps) {
+  const active = useContext(Appearance);
+  const Plot = active?.phase === 'loading' ? undefined : (active?.adapter ?? html).Chart;
+  return <ChartFigure key={active?.phase === 'ready' ? active.theme : active?.phase ?? 'html'} {...props} renderer={Plot} env={active?.env ?? fallback} />;
 }
 
 export function ThemeRoot({ children }: { children: ReactNode }) {

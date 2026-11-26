@@ -161,7 +161,7 @@ const Message = memo(function Message({ message, showMessageTokens, showProvider
         if (group.type === 'activity') return <ChatActivity key={group.start} parts={group.parts}
           renderMarkdown={text => <Suspense fallback={<div className="chat-user-text">{text}</div>}><AssistantMarkdown text={text} /></Suspense>} />;
         return user ? <div key={group.start} className="chat-user-text">{group.text}</div>
-          : <Suspense key={group.start} fallback={<div className="chat-user-text">{group.text}</div>}><AssistantMarkdown text={group.text} /></Suspense>;
+          : <Suspense key={group.start} fallback={<div className="chat-user-text">{group.text}</div>}><AssistantMarkdown text={group.text} charts /></Suspense>;
       })}
     </div>
     <MessageActions message={message} showMessageTokens={showMessageTokens} showMetrics={showMetrics}

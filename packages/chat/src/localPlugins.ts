@@ -1,4 +1,5 @@
 import type { CatalogModel, ChatMessage, ChatRoute } from '@streaik/gateway';
+import { chartInstructions } from '@streaik/themes/chart-spec';
 import type { McpTool } from './mcp.ts';
 import { conversationTitle, newestFirst } from './conversations.ts';
 import type { Conversation } from './conversations.ts';
@@ -149,6 +150,10 @@ const historyTools = [
 export const localPlugins = [
   { id: 'local-artificial-intelligence', label: 'Artificial Intelligence', approval: false, requiresHistory: false, tools: aiTools },
   { id: 'local-conversations', label: 'Chat History', approval: true, requiresHistory: true, tools: historyTools },
+  { id: 'local-charts', label: 'Charts', approval: false, requiresHistory: false, tools: [
+    define('local_chart_instructions', 'Get the format and an example for displaying a bar, line, or doughnut chart in your reply. Call when a chart would help.',
+      {}, [], () => chartInstructions),
+  ] },
 ] as const;
 export type LocalPluginId = (typeof localPlugins)[number]['id'];
 export type ChatTool = { source: 'local'; plugin: (typeof localPlugins)[number]; spec: LocalToolSpec; definition: ToolDefinition }

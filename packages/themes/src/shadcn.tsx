@@ -68,6 +68,7 @@ function Tooltip({ children, content, side }: TooltipProps) {
 }
 
 export const shadcn: ThemeAdapter = {
+  Chart: lazy(() => import('./charts/ShadcnChart')),
   parse,
   icons: lucideIcons,
   JsonViewer,

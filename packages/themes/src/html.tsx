@@ -10,6 +10,7 @@ const size = ['normal', 'large', 'larger'] as const;
 const parse = choices({ textSize: size });
 
 export const html: ThemeAdapter = {
+  Chart: lazy(() => import('./charts/HtmlChart')),
   parse,
   Tooltip: ({ children, content }) => cloneElement(children, { title: content }),
   icons: lucideIcons,
@@ -28,3 +29,4 @@ export const html: ThemeAdapter = {
     </select>
   </div>,
 };
+import { lazy } from 'react';

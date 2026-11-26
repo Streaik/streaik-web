@@ -1040,6 +1040,96 @@ function sse(text: string, turn: number, answerModel = model) {
   ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n';
 }
 
+test('chat charts preview with the plugin off and follow the active theme', async ({ page }) => {
+  await mockModels(page);
+  const requests: { tools?: { name: string }[]; messages: { parts: { output?: unknown }[] }[] }[] = [];
+  const htmlChartModule = /\/HtmlChart\.tsx(?:\?|$)/;
+  let htmlChartRequests = 0;
+  page.on('request', request => { if (htmlChartModule.test(request.url())) htmlChartRequests++; });
+  const toolName = 'local_chart_instructions';
+  const charts = ['bar', 'line', 'doughnut'].map(type => ({
+    type, title: `Sample ${type}`, labels: ['Jan', 'Feb', 'Mar'], series: [
+      { name: 'Requests', values: [14, 20, 9] },
+      ...(type === 'doughnut' ? [] : [{ name: 'Retries', values: [2, 1, 3] }]),
+    ],
+  }));
+  const fence = (text: string, language = 'chart') => `\`\`\`${language}\n${text}\n\`\`\``;
+  const openFence = '```chart\n' + JSON.stringify({ ...charts[0], title: 'Unclosed chart' });
+  await page.route('**/gateway/api/chat', route => {
+    requests.push(route.request().postDataJSON());
+    const turn = requests.length;
+    const body = turn === 1 ? sse([
+      ...charts.map(chart => fence(JSON.stringify(chart))), fence('{"type":"unknown"}'), fence('const value = 1;', 'js'), openFence,
+    ].join('\n\n'), turn) : turn === 2 ? [
+      { type: 'start', messageId: 'chart-tool-reply' }, { type: 'start-step' },
+      { type: 'tool-input-available', toolCallId: 'chart-tool', toolName, input: {}, dynamic: true },
+      { type: 'tool-approval-request', toolCallId: 'chart-tool', approvalId: 'chart-review', signature: 'fixture-signature' },
+      { type: 'finish-step' }, { type: 'finish', finishReason: 'tool-calls' },
+    ].map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n'
+      : sse('Chart instructions received.', turn).replace(/^data: [^\n]+\n\n/, '');
+    return route.fulfill({ contentType: 'text/event-stream', headers: { 'x-vercel-ai-ui-message-stream': 'v1' }, body });
+  });
+
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await chooseChatModel(page);
+  const settings = page.getByRole('dialog', { name: 'Chat settings', exact: true });
+  const openTools = async () => {
+    await page.getByRole('button', { name: 'Chat settings', exact: true }).click();
+    await settings.getByRole('tab', { name: 'Tools', exact: true }).click();
+  };
+  const plugin = settings.getByRole('switch', { name: 'Charts', exact: true });
+  await openTools(); await expect(plugin).not.toBeChecked();
+  await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  const send = async (text: string) => { await composer.fill(text); await composer.press('Enter'); };
+  await send('Show chart samples');
+  const figure = (type: string) => page.getByRole('figure', { name: `Sample ${type}`, exact: true });
+  for (const { type } of charts) await expect(figure(type).locator('.recharts-surface').first()).toBeVisible();
+  expect(requests[0].tools ?? []).toEqual([]);
+  await expect(page.locator('pre .language-chart')).toHaveCount(2);
+  await expect(page.locator('pre .language-chart').last()).toContainText('Unclosed chart');
+  await expect(page.locator('pre .language-js')).toHaveText('const value = 1;\n');
+
+  const block = page.locator('.chat-chart-block').first();
+  await block.getByRole('button', { name: 'Code', exact: true }).click();
+  await expect(block.locator('pre')).toContainText(JSON.stringify(charts[0]));
+  await block.getByRole('button', { name: 'Chart', exact: true }).click();
+  await block.getByText('Chart data', { exact: true }).click();
+  await expect(block.getByRole('row', { name: 'Jan 14 2', exact: true })).toBeVisible();
+
+  for (const [theme, plot] of [['fluent', '.streaik-fluent-chart svg'], ['html', 'canvas']]) {
+    const dialog = await showSettings(page, 'Theme');
+    await dialog.getByRole('combobox', { name: 'Theme', exact: true }).selectOption(theme);
+    await closeSettings(page);
+    for (const { type } of charts) await expect(figure(type).locator(plot).first()).toBeVisible();
+    if (theme === 'fluent') expect(htmlChartRequests).toBe(0);
+  }
+
+  await openTools(); await plugin.check();
+  await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  await send('Get the chart format');
+  const review = page.getByRole('dialog', { name: 'Review tool result', exact: true });
+  await review.getByRole('button', { name: 'Approve and share', exact: true }).click();
+  await expect(page.getByText('Chart instructions received.', { exact: true })).toBeVisible();
+  expect(requests[1].tools?.map(tool => tool.name)).toEqual([toolName]);
+  expect(requests[2].messages.flatMap(message => message.parts).find(part => part.output)).toMatchObject({
+    output: { structuredContent: { example: expect.stringContaining('```chart') } },
+  });
+
+  await openTools(); await plugin.uncheck();
+  await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.reload();
+  for (const { type } of charts) await expect(figure(type).locator('canvas')).toBeVisible();
+
+  // A failed lazy renderer must not hide the underlying data or the source.
+  await page.route(htmlChartModule, route => route.abort());
+  await page.reload();
+  await expect(figure('bar').getByRole('row', { name: 'Jan 14 2', exact: true })).toBeVisible();
+  await block.getByRole('button', { name: 'Code', exact: true }).click();
+  await expect(block.locator('pre')).toContainText(JSON.stringify(charts[0]));
+});
+
 test('global Chat preferences persist and control badges and context independently from conversation cost', async ({ page }) => {
   let count = 0;
   await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: model, context_window: 2000, max_tokens: 256 }] } }));

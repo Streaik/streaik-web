@@ -1,0 +1,22 @@
+.shadcn-chart {
+  --chart-1: oklch(0.58 0.21 258); --chart-2: oklch(0.55 0.13 165);
+  --chart-3: oklch(0.59 0.16 55); --chart-4: oklch(0.56 0.19 300);
+  --chart-5: oklch(0.54 0.2 12); --chart-6: oklch(0.55 0.15 125);
+  --chart-7: oklch(0.52 0.18 235); --chart-8: oklch(0.57 0.17 335);
+}
+[data-scheme=dark] .shadcn-chart {
+  --chart-1: oklch(0.72 0.16 258); --chart-2: oklch(0.75 0.15 165);
+  --chart-3: oklch(0.79 0.15 65); --chart-4: oklch(0.74 0.15 300);
+  --chart-5: oklch(0.72 0.18 12); --chart-6: oklch(0.77 0.15 125);
+  --chart-7: oklch(0.77 0.14 230); --chart-8: oklch(0.74 0.16 335);
+}
+.shadcn-chart .recharts-cartesian-axis-tick-value { fill: var(--muted); font-size: .75rem; }
+.shadcn-chart-tooltip {
+  padding: .4rem .55rem; background: var(--surface); color: var(--foreground); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: 0 .2rem .75rem rgb(0 0 0 / .14); font-size: .75rem;
+  max-width: 16rem; overflow-wrap: anywhere;
+}
+.shadcn-chart-tooltip > div, .shadcn-chart-legend > span { display: flex; gap: .35rem; align-items: baseline; min-width: 0; }
+.shadcn-chart-tooltip b { margin-inline-start: auto; font-variant-numeric: tabular-nums; }
+.shadcn-chart-tooltip i, .shadcn-chart-legend i { width: .55rem; height: .55rem; flex: none; border-radius: .125rem; }
+.shadcn-chart-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: .25rem .75rem; font-size: .75rem; }
