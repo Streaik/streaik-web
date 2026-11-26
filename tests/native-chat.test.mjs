@@ -110,7 +110,7 @@ for (const endpoint of nativeChatEndpoints) {
       requests.push(JSON.parse(init.body));
       return response(endpoint, model);
     });
-    const instructions = [JSON.stringify({ availableSkills: { instructions: 'Use the exact skill ID.' } }),
+    const instructions = [JSON.stringify({ skills: [{ name: 'notes', skill_id: 'openai/notes', description: 'Summarize notes.' }] }),
       JSON.stringify({ systemInformation: { appName: 'Streaik' } }), JSON.stringify({ preferredLanguage: 'en' })];
     const transport = gateway.chatTransport(endpoint);
     const contextFrom = body => endpoint === messagesApi ? body.system.map(block => block.text)

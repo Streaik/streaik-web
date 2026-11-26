@@ -485,12 +485,9 @@ test('local Skills tabs persist versions and chat progressively discloses approv
     const [skills, system, user] = [skillText, systemText, userText].map(text => JSON.parse(text));
     expect(body.messages[0].role).toBe('system');
     expect(instructions).toBe('Chat');
-    const catalog = skills.availableSkills;
-    const skillId = catalog.skills[0].skill_id;
+    const skillId = skills.skills[0].skill_id;
     expect(skillId).toMatch(/^local:/);
-    expect(catalog).toMatchObject({ activationTool: 'activate_skill', resourceTool: 'read_skill_resource',
-      instructions: expect.any(String), skillIdRequired: true, activationExamples: [expect.stringContaining(skillId)] });
-    expect(catalog.skills).toMatchObject([{ name: 'weekly-digest', description }]);
+    expect(skills).toEqual({ skills: [{ name: 'weekly-digest', skill_id: skillId, description }] });
     expect(system).toEqual({ systemInformation: { appName: expect.any(String), timezone: expect.any(String) } });
     expect(user).toEqual({ preferredLanguage: 'en', darkMode: expect.any(Boolean) });
     expect(body.tools.map((tool: { name: string }) => tool.name)).toEqual(['activate_skill', 'read_skill_resource']);
@@ -595,7 +592,7 @@ test('local Skills tabs persist versions and chat progressively discloses approv
   await composer.fill('Please write a digest.'); await composer.press('Enter');
   const approve = page.getByRole('button', { name: 'Approve and share' });
   await expect(approve).toBeVisible(); expect(requests).toHaveLength(1);
-  expect(JSON.parse(requests[0].messages[0].parts[0].text).availableSkills.skills[0].skill_id).toBe(displayedSkillId);
+  expect(JSON.parse(requests[0].messages[0].parts[0].text).skills[0].skill_id).toBe(displayedSkillId);
   await approve.click();
   await expect.poll(() => requests.length).toBe(2);
   await expect(approve).toBeVisible(); await approve.click();
@@ -658,8 +655,8 @@ test('chat settings list and remember remote skills without downloading until th
   await page.route('**/gateway/api/chat', async route => {
     const number = ++requests;
     const body = route.request().postDataJSON();
-    const catalog = JSON.parse(body.messages[0].parts[0].text).availableSkills;
-    expect(catalog.skills).toMatchObject([{ skill_id: id, name, description }]);
+    const catalog = JSON.parse(body.messages[0].parts[0].text);
+    expect(catalog).toEqual({ skills: [{ name, skill_id: id, description }] });
     expect(body.tools.map((tool: { name: string }) => tool.name)).toEqual(['activate_skill', 'read_skill_resource']);
     expect(body).not.toHaveProperty('clientToolResultApproval');
     const serialized = JSON.stringify(body);
@@ -3149,8 +3146,7 @@ test('switching from API Chat to a native gateway route keeps inline history and
     expect(systemText.at(-1)).toBe('Chat');
     const context = systemText.slice(0, -1).map((text: string) => JSON.parse(text));
     expect(context).toEqual([
-      { availableSkills: expect.objectContaining({ activationTool: 'activate_skill', instructions: expect.any(String),
-        skills: [expect.objectContaining(skill)] }) },
+      { skills: [{ name: skill.name, skill_id: skill.id, description: skill.description }] },
       { systemInformation: { appName: expect.any(String), timezone: expect.any(String) } },
       { preferredLanguage: 'en', darkMode: expect.any(Boolean) },
     ]);

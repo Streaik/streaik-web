@@ -37,10 +37,9 @@ test('Agent Skills round-trip frontmatter and resources and reject invalid YAML 
 test('the catalog discloses exact IDs and metadata, and the tools reveal contents on demand', async () => {
   const skills = saveSkillVersion([], bundle);
   const id = skills[0].id;
-  const context = skillSystemBlock(skills).availableSkills;
-  assert.equal(context.activationExamples[0], `- skill_id=${id}; name=daily-notes: ${bundle.metadata.description}`);
-  assert.deepEqual(context.skills[0], { id, skill_id: id, exact_skill_id_to_activate: id, name: bundle.metadata.name,
-    description: bundle.metadata.description, activation: `Call activate_skill with skill_id "${id}".` });
+  const context = skillSystemBlock(skills);
+  assert.deepEqual(context, { skills: [{ name: bundle.metadata.name, skill_id: id, description: bundle.metadata.description }] });
+  assert.equal(skillSystemBlock([{ ...skills[0], enabled: false }]), undefined);
   assert.doesNotMatch(JSON.stringify(context), /Summarize the notes|references\/guide\.md|reference payload/);
   assert.equal(skillSystemBlock([{ ...skills[0], enabled: false }]), undefined);
   assert.deepEqual(skillTools.map(({ name, inputSchema }) => [name, inputSchema.required]), [
@@ -75,8 +74,11 @@ test('remote skill content is fetched only on activation, validated, and reused 
   const controller = new AbortController();
   const { signal } = controller;
   const local = saveSkillVersion([], { ...bundle, metadata: { ...bundle.metadata, name: 'local-notes' } });
-  const { skills } = skillSystemBlock(local, [skill]).availableSkills;
-  assert.deepEqual(skills.map(item => item.id), [local[0].id, id]);
+  const { skills } = skillSystemBlock(local, [skill]);
+  assert.deepEqual(skills, [
+    { name: 'local-notes', skill_id: local[0].id, description: bundle.metadata.description },
+    { name: skill.name, skill_id: id, description: skill.description },
+  ]);
   assert.doesNotMatch(JSON.stringify(skills), /Summarize the notes|reference payload/);
   assert.equal((await resolveSkillTool('activate_skill', { skill_id: 'openai/not-enabled' }, local, remote, signal)).isError, true);
   assert.match((await resolveSkillTool('read_skill_resource', args, local, remote, signal)).content[0].text, /Call activate_skill/);
