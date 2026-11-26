@@ -55,7 +55,9 @@ export async function embedAgentSkill(bundle: SkillBundle, origin: SkillOrigin):
 export function inlineAgentSkillZip(skill: InlineAgentSkill) {
   if (skill.source.data.length > Math.ceil(maxSkillZipBytes / 3) * 4) throw new Error('The skill ZIP exceeds 16 MiB.');
   const raw = atob(skill.source.data);
-  return new Blob([Uint8Array.from(raw, ch => ch.charCodeAt(0))], { type: 'application/zip' });
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return new Blob([bytes], { type: 'application/zip' });
 }
 
 export async function embeddedSkillOrigin(skill: InlineAgentSkill): Promise<SkillOrigin | undefined> {

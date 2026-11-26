@@ -91,6 +91,7 @@ test('agent Skills keeps Local copies and Central links separate and saves only 
   await expect(reopened.local.getByRole('switch', { name: 'local-notes', exact: true })).toBeChecked();
   await expect(reopened.central.getByLabel(`Attachment for ${remote.name}`, { exact: true })).toHaveValue('inline');
   // The BYOK connection is locked after reload, so removing the attachment also removes the row.
+  await expect(reopened.central.getByText('Connect to a Gateway to browse Central skills.')).toBeVisible();
   const centralSkill = reopened.central.getByRole('switch', { name: remote.name, exact: true });
   await centralSkill.click();
   await expect(centralSkill).toHaveCount(0);
