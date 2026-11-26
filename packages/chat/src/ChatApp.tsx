@@ -1160,7 +1160,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           loading={hasGateway && connection.ready && !mediaModels} ready={hasGateway && connection.ready} status={mediaStatus} dictation={dictation} />
       </Suspense> : view === 'transcriptions' ? <Suspense fallback={<main className="catalog-main"><p role="status">{t('Loading transcriptions…')}</p></main>}>
         <TranscriptionsView gateway={gateway} scope={scope} route={transcriptions.selected} toolbar={mediaToolbar} catalog={mediaModels?.catalog}
-          menuContainer={menuContainer} loading={hasGateway && connection.ready && !mediaModels} status={mediaStatus} />
+          menuContainer={menuContainer} loading={hasGateway && connection.ready && !mediaModels} status={mediaStatus} splitting={preferences.transcriptionSplit} />
       </Suspense> : view !== 'chat' && <main className="catalog-main">
         {view === 'mcp' ? <McpServersView store={mcpServers} options={connection.mcp} locked={routesLocked} onEdit={setMcpEditor} toolbar={catalogToolbar} />
           : view === 'models' ? <ModelsView models={result?.error ? undefined : result?.catalog}

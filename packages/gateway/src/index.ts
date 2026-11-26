@@ -7,10 +7,10 @@ import { imageRequestBody, isImageEndpoint, readImageResponse } from './images.t
 import type { GatewayImageEndpoint, ImageRequest, ImageResponse } from './images.ts';
 import { readVideoOperation, readVideoStatus, videoOperationParts } from './videos.ts';
 import type { VideoRequest, VideoStatus } from './videos.ts';
-import { googleLiveTranscriptionSetup, isTranscriptionEndpoint, liveTranscriptionProvider, openAITranscriptionSession, readLiveTranscriptionCredential, readTranscript, readTranscriptStream, supportsFileTranscription, transcriptionBody } from './transcriptions.ts';
-import type { GatewayTranscriptionEndpoint, TranscriptionOptions } from './transcriptions.ts';
-export { gatewayTranscriptionEndpoints, googleLiveTranscriptionSetup, isLiveTranscriptionModel, isTranscriptionEndpoint, openAITranscriptionSocket, supportsFileTranscription, transcriptionFileAccept, transcriptionMediaType, transcriptionUploadLimit, usesTranscriptionWebSocket } from './transcriptions.ts';
-export type { GatewayTranscriptionEndpoint, Transcript, TranscriptSegment, TranscriptionOptions } from './transcriptions.ts';
+import { googleLiveTranscriptionSetup, isTranscriptionEndpoint, liveTranscriptionProvider, openAITranscriptionSession, readLiveTranscriptionCredential, readNativeTranscript, readTranscript, readTranscriptStream, supportsFileTranscription, transcriptionBody } from './transcriptions.ts';
+import type { GatewayTranscriptionEndpoint, LiveTranscriptionOptions, TranscriptionOptions } from './transcriptions.ts';
+export { deepgramTranscriptionSwitches, gatewayTranscriptionEndpoints, googleLiveTranscriptionSetup, isLiveTranscriptionModel, isTranscriptionEndpoint, openAITranscriptionFormats, openAITranscriptionSocket, supportsFileTranscription, transcriptionFileAccept, transcriptionMediaType, transcriptionUploadLimit, usesTranscriptionWebSocket } from './transcriptions.ts';
+export type { GatewayTranscriptionEndpoint, GoogleLiveTranscriptionConfig, LiveTranscriptionOptions, Transcript, TranscriptSegment, TranscriptionConfig, TranscriptionOptions } from './transcriptions.ts';
 import { readTokenPricing } from './tokenPricing.ts';
 import type { TokenRates } from './tokenPricing.ts';
 export { createDirectChat } from './directChat.ts';
@@ -367,6 +367,8 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
       const init = await transcriptionBody(endpoint, model, file, options);
       const response = await request(new URL(endpoint.slice(1), root).href, { kind: 'transcription', provider: match[1] }, { ...init, method: 'POST', signal });
       if (endpoint === '/api/transcriptions/stream') return readTranscriptStream(response, preview, signal);
+      const format = init.body instanceof FormData ? init.body.get('response_format') : undefined;
+      if (format === 'text' || format === 'srt' || format === 'vtt') return readNativeTranscript(await response.text(), format);
       let payload: unknown;
       try { payload = await response.json(); } catch {
         signal.throwIfAborted();
@@ -422,13 +424,14 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
       signal.throwIfAborted();
       return voiceSocketCredential(provider, payload, model);
     },
-    async liveTranscriptionCredential(model: string, language: string | undefined, signal: AbortSignal) {
+    async liveTranscriptionCredential(model: string, options: LiveTranscriptionOptions | string | undefined, signal: AbortSignal) {
+      const { language, google } = typeof options === 'string' ? { language: options } : options ?? {};
       const provider = liveTranscriptionProvider(model);
       if (!provider) throw new GatewayError('Choose a compatible microphone transcription model.');
       const path = provider === 'openai' ? 'v1/realtime/client_secrets' : `api/realtime/token/${model}`;
       const body = provider === 'openai' ? { session: openAITranscriptionSession(model, language) }
         : provider === 'google' ? { sessionConfig: { providerOptions: { google: {
-          uses: 1, bidiGenerateContentSetup: googleLiveTranscriptionSetup(model, language),
+          uses: 1, bidiGenerateContentSetup: googleLiveTranscriptionSetup(model, google ?? language),
         } } } }
           : provider === 'gladia' ? { sessionConfig: { providerOptions: { gladia: {
             encoding: 'wav/pcm', sample_rate: 16000, channels: 1, bit_depth: 16,

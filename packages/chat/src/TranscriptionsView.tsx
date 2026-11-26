@@ -16,6 +16,8 @@ import { maxSplittableFileBytes, mergeTranscriptionChunks, splitTranscription } 
 import { deleteTranscript, listTranscripts, saveTranscript } from './transcriptionLibrary';
 import type { SavedTranscript } from './transcriptionLibrary';
 import { useTranscriptionPreferences } from './transcriptionPreferences';
+import { TranscriptionSettingsDialog } from './TranscriptionSettingsDialog';
+import type { TranscriptionSplitPreferences } from './transcriptionSplitPreferences';
 import { useCatalogSearch } from './useCatalogSearch';
 import './images.css';
 import './transcriptions.css';
@@ -87,9 +89,9 @@ function TranscriptCard({ item, menuContainer, remove, onError }: {
   </article>;
 }
 
-export default function TranscriptionsView({ gateway, scope, route, toolbar, menuContainer, catalog, loading, status }: {
+export default function TranscriptionsView({ gateway, scope, route, toolbar, menuContainer, catalog, loading, status, splitting }: {
   gateway: Gateway; scope?: string; route: GatewayTranscriptionEndpoint; toolbar: HTMLDivElement | null;
-  menuContainer: HTMLDivElement | null; catalog?: readonly CatalogModel[]; loading: boolean; status?: string;
+  menuContainer: HTMLDivElement | null; catalog?: readonly CatalogModel[]; loading: boolean; status?: string; splitting: TranscriptionSplitPreferences;
 }) {
   const { t } = useAppTranslation();
   const agent = assignedAgent(useAgents(), 'transcription');
@@ -107,7 +109,7 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
   const [error, setError] = useState('');
   const [libraryError, setLibraryError] = useState('');
   const picker = useRef<HTMLInputElement>(null);
-  const dialog = useRef<HTMLDialogElement>(null);
+  const [showSettings, setShowSettings] = useState(false);
   const dictateWarning = useRef<HTMLDialogElement>(null);
   const skipWarning = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
@@ -152,13 +154,13 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
     if (operation.current) return;
     setError('');
     let rejected = false;
-    const limit = settings.split ? maxSplittableFileBytes : fileLimit;
+    const limit = splitting.enabled ? maxSplittableFileBytes : fileLimit;
     const next = Array.from(files).flatMap(file => {
       const type = transcriptionMediaType(file);
       if (!type || !file.size || file.size > limit) { rejected = true; return []; }
       return [{ file, id: crypto.randomUUID() }];
     });
-    if (rejected) setError('Some files were empty, unsupported, or too large. Enable file splitting for larger audio files.');
+    if (rejected) setError(splitting.enabled ? 'Some files were empty, unsupported, or over 100 MB.' : 'Some files were empty, unsupported, or too large. Enable file splitting for larger audio files.');
     setQueue(items => [...items, ...next]);
   }
 
@@ -181,14 +183,14 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
     const streaming = target.route === '/api/transcriptions/stream';
     if (streaming) setPreview({ name: file.name, text: '' });
     try {
-      const send = (part: File, before = '') => gateway.transcribe(target.route, target.model, part, settings, signal,
+      const send = (part: File, before = '') => gateway.transcribe(target.route, target.model, part, { providerOptions: settings.providerOptions }, signal,
         chunk => setPreview({ name: file.name, text: [before, chunk].filter(Boolean).join(' ') }));
       let transcript: Transcript;
-      const limit = transcriptionUploadLimit(target.route);
-      if (!item.dictation && file.size > limit && settings.split) {
-        const results: { transcript: Transcript; offset: number }[] = [];
-        for await (const { file: part, offset } of splitTranscription(file, limit, settings.overlap ?? 5, signal)) {
-          results.push({ transcript: await send(part, mergeTranscriptionChunks(results).text), offset });
+      const limit = Math.min(transcriptionUploadLimit(target.route), splitting.maxChunkSizeMb * 1024 * 1024);
+      if (!item.dictation && file.size > limit && splitting.enabled) {
+        const results: Parameters<typeof mergeTranscriptionChunks>[0][number][] = [];
+        for await (const { file: part, offset, end } of splitTranscription(file, limit, splitting.overlap, signal)) {
+          results.push({ transcript: await send(part, streaming ? mergeTranscriptionChunks(results).text : ''), offset, end });
         }
         transcript = mergeTranscriptionChunks(results);
       } else transcript = await send(file);
@@ -275,7 +277,7 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
     let final: Transcript = { text: '', segments: [] };
     setError(''); setTab('streaming'); setPreview({ name, text: '' }); setPhase('connecting');
     try {
-      await runMicrophone(gateway, liveModel.id, settings.language?.trim(), { signal: abort.signal, stop: stop.signal,
+      await runMicrophone(gateway, liveModel.id, { language: settings.liveLanguages[liveModel.provider]?.trim(), google: settings.googleLive }, { signal: abort.signal, stop: stop.signal,
         ready: () => { if (!abort.signal.aborted) setPhase('listening'); },
         update(transcript, partial) {
           if (abort.signal.aborted) return;
@@ -337,7 +339,7 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
           <Button className="chat-composer-icon" type="button" variant="subtle" aria-label={t('Add attachments')} title={t('Add attachments')}
             onClick={() => picker.current?.click()} disabled={busy}><ChatIcon name="add" /></Button>
           <Button className="chat-composer-icon" type="button" variant="subtle" aria-label={t('Transcription settings')} title={t('Transcription settings')}
-            aria-haspopup="dialog" onClick={() => dialog.current?.showModal()} disabled={busy}><ChatIcon name="settings" /></Button>
+            aria-haspopup="dialog" onClick={() => setShowSettings(true)} disabled={busy}><ChatIcon name="settings" /></Button>
           <div className="transcription-submit">
             <Button className="chat-composer-icon" type="button" aria-label={dictateLabel} title={dictateLabel}
               aria-pressed={dictating} variant={dictating ? 'primary' : 'subtle'}
@@ -390,27 +392,8 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
         </section>
       </section>
     </div>
-    <dialog className="chat-settings chat-link-dialog" ref={dialog} aria-labelledby={`${id}-settings`}>
-      <form method="dialog">
-        <header className="chat-settings-header"><h2 id={`${id}-settings`}>{t('Transcription settings')}</h2></header>
-        <div className="chat-link-fields transcription-fields">
-          <label htmlFor={`${id}-language`}>{t('Audio language (optional)')}</label>
-          <input id={`${id}-language`} maxLength={35} placeholder="en" value={settings.language ?? ''} onChange={event => change({ language: event.target.value })} />
-          {fileModel?.provider === 'openai' && !fileModel.id.includes('diarize') && <>
-            <label htmlFor={`${id}-prompt`}>{t('Transcription prompt (optional)')}</label>
-            <input id={`${id}-prompt`} maxLength={1000} value={settings.prompt ?? ''} onChange={event => change({ prompt: event.target.value })} />
-          </>}
-          {fileModel?.provider === 'gladia' && route === '/api/transcriptions' && <label>
-            <input type="checkbox" checked={!!settings.diarization} onChange={event => change({ diarization: event.target.checked })} /> {t('Identify speakers')}
-          </label>}
-          <label><input type="checkbox" checked={!!settings.split} onChange={event => change({ split: event.target.checked })} /> {t('Split audio above the upload limit')}</label>
-          {!!settings.split && <><label htmlFor={`${id}-overlap`}>{t('Chunk overlap (seconds)')}</label>
-            <input id={`${id}-overlap`} type="number" min={0} max={10} step={1} value={settings.overlap ?? 5}
-              onChange={event => change({ overlap: Math.max(0, Math.min(10, Number(event.target.value))) })} /></>}
-        </div>
-        <div className="transcription-card-actions"><Button type="submit" variant="primary">{t('Done')}</Button></div>
-      </form>
-    </dialog>
+    {showSettings && <TranscriptionSettingsDialog key={scope} initial={settings} route={route} fileModel={fileModel?.id} liveModel={liveModel?.id}
+      onSave={change} onClose={() => setShowSettings(false)} />}
     <dialog className="chat-settings chat-link-dialog" ref={dictateWarning} aria-labelledby={`${id}-dictate-warning`}>
       <form method="dialog" onSubmit={event => {
         if ((event.nativeEvent as SubmitEvent).submitter?.getAttribute('value') !== 'continue') return;

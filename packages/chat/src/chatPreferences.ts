@@ -11,6 +11,8 @@ import { normalizeToolPolicy } from './chatToolPolicy.ts';
 import type { ChatToolPolicy } from './chatToolPolicy.ts';
 import { normalizeRealtimeSettings } from './realtimeSettings.ts';
 import type { RealtimeSettings } from './realtimeSettings.ts';
+import { defaultTranscriptionSplit, legacyTranscriptionSplit, normalizeTranscriptionSplit } from './transcriptionSplitPreferences.ts';
+import type { TranscriptionSplitPreferences } from './transcriptionSplitPreferences.ts';
 
 export const pinnableViews = ['models', 'providers'] as const;
 export type PinnableView = (typeof pinnableViews)[number];
@@ -33,6 +35,7 @@ export type ChatPreferences = {
   showMetrics: boolean;
   toolOutput: ToolOutputPreferences;
   mcp: McpPreferences;
+  transcriptionSplit: TranscriptionSplitPreferences;
   providerSettings: ProviderChatSettings;
   realtimeSettings?: RealtimeSettings;
   reasoning: ReasoningLevel;
@@ -48,7 +51,7 @@ export const composerToolDefaults: Pick<ChatPreferences, 'delay' | 'plugins' | '
 };
 export const defaultChatPreferences: ChatPreferences = { ...composerToolDefaults, ...toolConfigurationDefaults, convertAttachmentsToText: false, pinnedViews: [],
   dictate: true, showContextSize: true, showMessageTokens: true, showProviderLogo: true, showMetrics: false,
-  toolOutput: toolOutputDefaults, mcp: defaultMcpPreferences, providerSettings: {}, reasoning: 'medium' };
+  toolOutput: toolOutputDefaults, mcp: defaultMcpPreferences, transcriptionSplit: defaultTranscriptionSplit, providerSettings: {}, reasoning: 'medium' };
 
 type StoredPreferences = Partial<Omit<ChatPreferences, 'toolOutput' | 'mcp' | 'providerSettings'> & {
   toolOutput: Partial<ToolOutputPreferences>; mcp: Partial<McpPreferences>; providerSettings: unknown;
@@ -77,6 +80,7 @@ export function normalizeChatPreferences(value: StoredPreferences | null | undef
     showProviderLogo: booleanPreference(value?.showProviderLogo, defaultChatPreferences.showProviderLogo),
     showMetrics: booleanPreference(value?.showMetrics, defaultChatPreferences.showMetrics),
     toolOutput,
+    transcriptionSplit: normalizeTranscriptionSplit(value?.transcriptionSplit),
     providerSettings: persistentProviderChatSettings(value?.providerSettings),
     ...(value?.realtimeSettings && { realtimeSettings: normalizeRealtimeSettings(value.realtimeSettings) }),
     reasoning: reasoningLevels.find(level => level === value?.reasoning) ?? defaultChatPreferences.reasoning,
@@ -96,7 +100,10 @@ const preferencesKey = (scope: string) => `streaik-chat-preferences:${scope}`;
 
 export function loadChatPreferences(scope?: string): ChatPreferences {
   if (scope) {
-    try { return normalizeChatPreferences(JSON.parse(localStorage.getItem(preferencesKey(scope)) ?? 'null')); }
+    try {
+      const stored = JSON.parse(localStorage.getItem(preferencesKey(scope)) ?? 'null');
+      return normalizeChatPreferences({ ...stored, transcriptionSplit: stored?.transcriptionSplit ?? legacyTranscriptionSplit(scope) });
+    }
     catch { /* Preferences still work for this session when storage is unavailable. */ }
   }
   return defaultChatPreferences;

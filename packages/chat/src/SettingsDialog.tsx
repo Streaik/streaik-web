@@ -10,6 +10,8 @@ import { mcpTimeoutRange } from './mcpPreferences';
 import type { McpPreferences } from './mcpPreferences';
 import type { ChatPreferences, ToolOutputPreferences } from './chatPreferences';
 import { languages, useAppTranslation } from './i18n';
+import { transcriptionSplitLimits } from './transcriptionSplitPreferences';
+import type { TranscriptionSplitPreferences } from './transcriptionSplitPreferences';
 
 type SettingsTab = { id: string; label: string; icon: IconName; content: ReactNode };
 const toolOutputLabels = { text: 'Text', links: 'Links', images: 'Images', audio: 'Audio', video: 'Video', documents: 'Documents' } as const;
@@ -58,6 +60,22 @@ function ModelContextSettings({ value, onChange }: { value: McpPreferences; onCh
       </div></div>
     </div>
   </div>;
+}
+
+function TranscriptionSplitSettings({ value, onChange }: { value: TranscriptionSplitPreferences; onChange: (value: TranscriptionSplitPreferences) => void }) {
+  const { t } = useAppTranslation();
+  const id = useId();
+  const slider = (key: 'overlap' | 'maxChunkSizeMb', label: string, units: string) => <div className="transcription-split-slider">
+    <div><label htmlFor={`${id}-${key}`}>{t(label)}</label><span aria-hidden="true">{value[key]} {units}</span></div>
+    <input id={`${id}-${key}`} type="range" {...transcriptionSplitLimits[key]} step={1} value={value[key]} disabled={!value.enabled}
+      aria-valuetext={`${value[key]} ${units}`} onChange={event => onChange({ ...value, [key]: event.currentTarget.valueAsNumber })} />
+  </div>;
+  return <section className="chat-tool-card">
+    <div className="chat-tool-switches"><SettingSwitch label={t('Split large audio files')} checked={value.enabled}
+      onChange={enabled => onChange({ ...value, enabled })} /></div>
+    {slider('overlap', 'Chunk overlap (seconds)', 's')}
+    {slider('maxChunkSizeMb', 'Max chunk size (MB)', 'MB')}
+  </section>;
 }
 
 export function SettingsDialog({ dialog, apiKeySettings, accountSettings, preferences, onPreferences }: {
@@ -124,6 +142,9 @@ export function SettingsDialog({ dialog, apiKeySettings, accountSettings, prefer
   if (agents?.config.roles?.length) tabs.push({ id: 'agents', label: t('Agents'), icon: 'agents', content: <AgentSettings /> });
   tabs.push({ id: 'attachments', label: t('Attachments'), icon: 'attachment', content:
     <div className="chat-tool-switches">{preference('convertAttachmentsToText', 'Convert files to text')}</div>,
+  });
+  tabs.push({ id: 'transcriptions', label: t('Transcriptions'), icon: 'mic', content:
+    <TranscriptionSplitSettings value={preferences.transcriptionSplit} onChange={transcriptionSplit => onPreferences({ ...preferences, transcriptionSplit })} />,
   });
   const active = tabs.some((tab) => tab.id === selected) ? selected : 'general';
 

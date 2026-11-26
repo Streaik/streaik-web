@@ -7,7 +7,11 @@ export const isTranscriptionEndpoint = (value: unknown): value is GatewayTranscr
 
 export type TranscriptSegment = { text: string; startSecond: number; endSecond: number; speaker?: string };
 export type Transcript = { text: string; segments: TranscriptSegment[]; durationInSeconds?: number; language?: string };
-export type TranscriptionOptions = { language?: string; prompt?: string; diarization?: boolean };
+type TranscriptionValue = string | number | boolean | TranscriptionConfig | readonly string[];
+export type TranscriptionConfig = { [key: string]: TranscriptionValue | undefined };
+export type TranscriptionOptions = { providerOptions?: Readonly<Record<string, TranscriptionConfig>>; language?: string; prompt?: string; diarization?: boolean };
+export type GoogleLiveTranscriptionConfig = { languageCodes?: string[]; customVocabulary?: string[]; mode?: 'VERBATIM' | 'SMART' };
+export type LiveTranscriptionOptions = { language?: string; google?: GoogleLiveTranscriptionConfig };
 export type LiveTranscriptionCredential = { provider: 'openai'; secret: string }
   | { provider: 'gladia' | 'google' | 'assemblyai'; url: string }
   | { provider: 'deepgram'; url: string; secret: string };
@@ -72,16 +76,68 @@ export function openAITranscriptionSession(model: string, language?: string) {
   } } };
 }
 
-export function googleLiveTranscriptionSetup(model: string, language?: string) {
-  // Default to verbatim and automatic language detection. Accept the shared language hint when provided.
+export function googleLiveTranscriptionSetup(model: string, config?: GoogleLiveTranscriptionConfig | string) {
+  const { languageCodes = [], mode = 'VERBATIM', customVocabulary } = typeof config === 'string' ? { languageCodes: [config] } : config ?? {};
   return { model: `models/${model.slice('google/'.length)}`, generationConfig: { responseModalities: ['TEXT'] },
-    inputAudioTranscription: { languageCodes: language ? [language] : [], mode: 'VERBATIM' } };
+    inputAudioTranscription: { languageCodes, mode, ...(customVocabulary?.length ? { customVocabulary } : {}) } };
 }
 
 export function supportsFileTranscription(route: GatewayTranscriptionEndpoint, model: string) {
   if (googleLiveTranscription(model) || !/^(openai|openrouter|google|gladia|deepgram)\//.test(model) ||
       (model.startsWith('openai/') && (isLiveTranscriptionModel(model) || /^openai\/gpt-(?:4o-)?realtime/.test(model)))) return false;
   return route !== '/api/transcriptions/stream' || /^openai\/gpt-(?:4o(?:-mini)?-)?transcribe(?:$|-(?!diarize))/.test(model) || model.startsWith('deepgram/');
+}
+
+export function openAITranscriptionFormats(model: string): readonly string[] {
+  if (model === 'openai/whisper-1') return ['verbose_json', 'json', 'text', 'srt', 'vtt'];
+  if (model.includes('transcribe-diarize')) return ['diarized_json', 'json', 'text'];
+  return ['json', 'text'];
+}
+
+export const deepgramTranscriptionSwitches = ['detect_language', 'smart_format', 'punctuate', 'diarize', 'utterances', 'numerals', 'profanity_filter', 'mip_opt_out'] as const;
+
+function fileOptions(route: GatewayTranscriptionEndpoint, model: string, settings: TranscriptionOptions) {
+  const provider = model.split('/')[0];
+  const config = settings.providerOptions?.[provider] ?? {};
+  const native = route === '/v1/audio/transcriptions';
+  const batch = route === '/api/transcriptions';
+  const options: TranscriptionConfig = {};
+  const language = config.language ?? settings.language;
+  if (typeof language === 'string' && language.trim()) options.language = language.trim();
+  function copy(...keys: string[]) {
+    for (const key of keys) {
+      const value = config[key];
+      if (typeof value === 'string' ? value.trim() : value !== undefined) options[key] = typeof value === 'string' ? value.trim() : value;
+    }
+  }
+  if (provider === 'openai') {
+    const diarized = model.includes('transcribe-diarize');
+    if (!diarized) {
+      copy('prompt', 'temperature');
+      if (options.prompt === undefined && settings.prompt?.trim()) options.prompt = settings.prompt.trim();
+    } else if (native || batch) {
+      options.chunking_strategy = 'auto';
+    }
+    const formats = openAITranscriptionFormats(model);
+    if (native) options.response_format = typeof config.response_format === 'string' && formats.includes(config.response_format) ? config.response_format : formats[0];
+    const timestamps = config['timestamp_granularities[]'];
+    if (model === 'openai/whisper-1' && (batch || options.response_format === 'verbose_json') && Array.isArray(timestamps)) {
+      const allowed = timestamps.filter(value => value === 'word' || value === 'segment');
+      // The SDK adapter accepts one multipart value per key; native multipart supports repetition.
+      if (allowed.length) options['timestamp_granularities[]'] = native ? allowed : allowed[0];
+    }
+  } else if (provider === 'deepgram') {
+    copy(...deepgramTranscriptionSwitches);
+    copy(model.startsWith('deepgram/nova-3') ? 'keyterm' : 'keywords');
+    if (options.detect_language === true) delete options.language;
+  } else if (provider === 'gladia') {
+    if (batch) {
+      copy('language_config', 'diarization', 'diarization_config', 'custom_vocabulary', 'custom_vocabulary_config', 'detect_entities', 'sentiment_analysis', 'summarization');
+      if (options.diarization === undefined && settings.diarization) options.diarization = true;
+    }
+  } else if (provider === 'google' && batch) copy('generation_config', 'service_tier');
+  if (native && provider !== 'openai') options.response_format = 'verbose_json';
+  return options;
 }
 
 async function base64(file: File) {
@@ -97,20 +153,16 @@ export async function transcriptionBody(route: GatewayTranscriptionEndpoint, mod
   const mediaType = transcriptionMediaType(file);
   if (!mediaType || !file.size) throw new GatewayError('Choose a supported, nonempty audio file.');
   if (file.size > transcriptionUploadLimit(route)) throw new GatewayError('This audio file exceeds the upload limit.');
-  const options: Record<string, string | boolean> = {};
-  if (settings.language?.trim()) options.language = settings.language.trim();
-  if (provider === 'openai' && !model.includes('diarize') && settings.prompt?.trim()) options.prompt = settings.prompt.trim();
-  if (provider === 'gladia' && route === '/api/transcriptions' && settings.diarization) options.diarization = true;
+  const options = fileOptions(route, model, settings);
   if (route === '/v1/audio/transcriptions') {
     const body = new FormData();
     body.set('model', model);
     body.set('file', file.slice(0, file.size, mediaType), file.name);
-    for (const [key, value] of Object.entries(options)) body.set(key, String(value));
-    if (provider === 'openai' && model.includes('diarize')) {
-      body.set('response_format', 'diarized_json');
-      body.set('chunking_strategy', 'auto');
-    } else if (model === 'openai/whisper-1' || provider !== 'openai') body.set('response_format', 'verbose_json');
-    return { body, headers: { accept: 'application/json' } };
+    for (const [key, value] of Object.entries(options)) {
+      if (Array.isArray(value)) for (const item of value) body.append(key, item);
+      else if (value !== undefined) body.set(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
+    }
+    return { body, headers: { accept: options.response_format === 'vtt' ? 'text/vtt' : options.response_format === 'srt' || options.response_format === 'text' ? 'text/plain' : 'application/json' } };
   }
   const stream = route === '/api/transcriptions/stream';
   return {
@@ -141,6 +193,19 @@ export function readTranscript(payload: unknown, native = false): Transcript {
   const providerSegments = native ? [] : segments(object(metadata.gladia).utterances ?? object(metadata.openai).segments, true);
   return { text, segments: providerSegments.length ? providerSegments : segments(raw, native),
     durationInSeconds: typeof duration === 'number' ? duration : undefined, language: typeof language === 'string' ? language : undefined };
+}
+
+export function readNativeTranscript(text: string, format: string): Transcript {
+  if (format === 'text') return { text, segments: [] };
+  const seconds = (value: string) => value.replace(',', '.').split(':').reduce((n, part) => n * 60 + Number(part), 0);
+  const segments = text.trim().split(/\r?\n[\t ]*\r?\n/).flatMap(block => {
+    const lines = block.split(/\r?\n/);
+    const cue = lines.findIndex(line => /^\d[\d:.,]+\s+-->\s+\d/.test(line));
+    if (cue < 0) return [];
+    const [start, , end] = lines[cue].split(/\s+/);
+    return [{ text: lines.slice(cue + 1).join(' '), startSecond: seconds(start), endSecond: seconds(end) }];
+  });
+  return { text: segments.map(segment => segment.text).join(' '), segments };
 }
 
 export async function readTranscriptStream(response: Response, preview: (text: string) => void, signal?: AbortSignal): Promise<Transcript> {

@@ -36,19 +36,19 @@ function pcmBase64(bytes: ArrayBuffer) {
   return btoa(String.fromCharCode(...new Uint8Array(bytes)));
 }
 
-export async function runMicrophone(gateway: Gateway, model: string, language: string | undefined, events: Stop) {
+export async function runMicrophone(gateway: Gateway, model: string, options: Parameters<Gateway['liveTranscriptionCredential']>[1], events: Stop) {
   const stream = await getMicrophone(events.signal);
   const release = () => stopTracks(stream);
   events.signal.addEventListener('abort', release, { once: true });
   try {
     events.signal.throwIfAborted();
-    const credential = await gateway.liveTranscriptionCredential(model, language, AbortSignal.any([events.signal, AbortSignal.timeout(20_000)]));
+    const credential = await gateway.liveTranscriptionCredential(model, options, AbortSignal.any([events.signal, AbortSignal.timeout(20_000)]));
     events.signal.throwIfAborted();
     if (credential.provider === 'openai') {
       if (openAITranscriptionSocket(model)) await openAISocket(stream, credential.secret, events);
       else await openAI(stream, credential.secret, events);
     } else if (credential.provider === 'google') {
-      await google(stream, credential.url, googleLiveTranscriptionSetup(model, language), events);
+      await google(stream, credential.url, googleLiveTranscriptionSetup(model, typeof options === 'string' ? options : options?.google ?? options?.language), events);
     } else if (credential.provider === 'deepgram') {
       await binarySocket(stream, credential.url, events, {
         name: 'Deepgram', subprotocols: ['bearer', credential.secret], stop: 'CloseStream', terminal: 'Metadata', message: deepgramTranscript(events.update),

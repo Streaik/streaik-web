@@ -24,6 +24,10 @@ async function connectFixture(page: Page, provider: string, models: FixtureModel
   await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: models } }));
   await page.route('**/gateway/v1/skills?*', route => route.fulfill({ json: { data: [], has_more: false } }));
   await page.goto('/');
+  await saveFixtureKey(page, provider);
+}
+
+async function saveFixtureKey(page: Page, provider: string) {
   const dialog = await appSettings(page, 'API keys');
   await dialog.getByRole('button', { name: 'Add API key' }).click();
   await dialog.getByLabel('Provider', { exact: true }).selectOption({ label: provider });
@@ -62,6 +66,96 @@ async function chooseModel(page: Page, model: string) {
   await modelPicker(page).click();
   await page.getByRole('option', { name: model.split('/').at(-1), exact: true }).click();
 }
+
+const transcriptionComposer = (page: Page) => page.getByRole('form', { name: 'Transcription composer' });
+async function transcriptionSettings(page: Page) {
+  await transcriptionComposer(page).getByRole('button', { name: 'Transcription settings', exact: true }).click();
+  return page.getByRole('dialog', { name: 'Transcription settings', exact: true });
+}
+
+test('only the native OpenAI route uses General; Vercel routes keep provider settings separate', async ({ page }) => {
+  await openTranscriptions(page);
+  let dialog = await transcriptionSettings(page);
+  await expect(dialog.getByRole('tab', { name: 'OpenAI', selected: true })).toBeVisible();
+  await expect(dialog.getByRole('tab', { name: 'General' })).toHaveCount(0);
+  await expect(dialog.getByLabel('Response format')).toHaveCount(0);
+  await expect(dialog.getByRole('switch', { name: 'Split large audio files' })).toHaveCount(0);
+  await dialog.getByLabel('Transcription prompt').fill('Spell Streaik exactly.');
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+
+  await chooseRoute(page, '/api/transcriptions/stream');
+  dialog = await transcriptionSettings(page);
+  await expect(dialog.getByRole('tab', { name: 'OpenAI', selected: true })).toBeVisible();
+  await expect(dialog.getByLabel('Transcription prompt')).toHaveValue('Spell Streaik exactly.');
+  await expect(dialog.getByLabel('Response format')).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+
+  await chooseRoute(page, '/v1/audio/transcriptions');
+  dialog = await transcriptionSettings(page);
+  await expect(dialog.getByRole('tab', { name: 'General', selected: true })).toBeVisible();
+  await expect(dialog.getByRole('tab', { name: 'OpenAI' })).toHaveCount(0);
+  await dialog.getByLabel('Response format').selectOption('text');
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.route('**/gateway/v1/audio/transcriptions', async route => {
+    expect(route.request().postData()).toMatch(/name="response_format"\r\n\r\ntext/);
+    expect(route.request().postData()).toContain('Spell Streaik exactly.');
+    await route.fulfill({ contentType: 'text/plain', body: 'Plain text transcript' });
+  });
+  const composer = transcriptionComposer(page);
+  await composer.locator('input[type=file]').setInputFiles(file);
+  await composer.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page.getByText('Plain text transcript', { exact: true })).toBeVisible();
+});
+
+test('settings split a 100 MB WAV in the browser and save one merged transcript', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.addInitScript(() => {
+    const fetchOriginal = window.fetch.bind(window);
+    let count = 0;
+    window.fetch = async (input, init) => {
+      if (new URL(input instanceof Request ? input.url : String(input), location.href).pathname !== '/gateway/api/transcriptions') return fetchOriginal(input, init);
+      const body = JSON.parse(String(init?.body));
+      if (body.mediaType !== 'audio/wav' || atob(body.audio).length > 10 * 1024 * 1024) throw new Error('Unexpected chunk size or encoding');
+      document.documentElement.dataset.chunks = String(++count);
+      return Response.json({ text: count === 1 ? 'First shared phrase' : `shared phrase part ${count} shared phrase`, segments: [] });
+    };
+  });
+  await openTranscriptions(page);
+  const settings = await appSettings(page, 'Transcriptions');
+  await expect(settings.getByRole('switch', { name: 'Split large audio files' })).toBeChecked();
+  await expect(settings.getByRole('slider', { name: /Chunk overlap/ })).toHaveValue('5');
+  await expect(settings.getByRole('slider', { name: /Max chunk size/ })).toHaveValue('15');
+  await settings.getByRole('switch', { name: 'Split large audio files' }).uncheck();
+  await expect(settings.getByRole('slider', { name: /Max chunk size/ })).toBeDisabled();
+  await settings.getByRole('switch', { name: 'Split large audio files' }).check();
+  await settings.getByRole('slider', { name: /Max chunk size/ }).fill('10');
+  await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Transcriptions', exact: true })).toBeVisible();
+  const persisted = await appSettings(page, 'Transcriptions');
+  await expect(persisted.getByRole('slider', { name: /Max chunk size/ })).toHaveValue('10');
+  await persisted.getByRole('button', { name: 'Close', exact: true }).click();
+  await saveFixtureKey(page, 'OpenAI');
+  await expect(modelPicker(page)).toContainText('gpt-4o-transcribe');
+  const composer = transcriptionComposer(page);
+  await composer.locator('input[type=file]').evaluate(input => {
+    const size = 100 * 1024 * 1024;
+    const wav = new DataView(new ArrayBuffer(44));
+    wav.setUint32(0, 0x52494646); wav.setUint32(4, size - 8, true);
+    wav.setUint32(8, 0x57415645); wav.setUint32(12, 0x666d7420); wav.setUint32(16, 16, true);
+    wav.setUint16(20, 1, true); wav.setUint16(22, 1, true); wav.setUint32(24, 48000, true);
+    wav.setUint32(28, 96000, true); wav.setUint16(32, 2, true); wav.setUint16(34, 16, true);
+    wav.setUint32(36, 0x64617461); wav.setUint32(40, size - 44, true);
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([wav.buffer, new Uint8Array(size - 44)], 'long-meeting.wav', { type: 'audio/wav' }));
+    (input as HTMLInputElement).files = transfer.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await composer.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page.getByText('First shared phrase part 2 shared phrase part 3 shared phrase part 4 shared phrase', { exact: true })).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator('html')).toHaveAttribute('data-chunks', '4');
+  await expect(page.getByRole('heading', { name: 'long-meeting.wav' })).toHaveCount(1);
+});
 
 const composerModel = 'openai/gpt-transcribe';
 const composerCatalog = [
@@ -752,10 +846,10 @@ for (const [model, languageOptions] of [
     await expect(start(page)).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Dictate', exact: true })).toBeDisabled();
   await expect(page.getByText('Dictate needs a file transcription model.')).toBeVisible();
-  await page.getByRole('button', { name: 'Transcription settings' }).click();
-  await expect(page.getByLabel('Real-time model')).toHaveCount(0);
-  await page.getByLabel('Audio language (optional)').fill('nl');
-  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  const dialog = await transcriptionSettings(page);
+  await expect(dialog.getByLabel('Real-time model')).toHaveCount(0);
+  await dialog.getByLabel('Language', { exact: true }).fill('nl');
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   // Wrap Playwright's routed WebSocket after its init script has installed it.
   await page.evaluate(() => {
     const RoutedWebSocket = window.WebSocket;
@@ -781,7 +875,7 @@ for (const [model, languageOptions] of [
 test('Google Live Transcribe waits for setup, streams PCM, and saves only finalized microphone input', async ({ page }) => {
   await mockAudio(page);
   const setup = { model: 'models/gemini-3.5-transcribe-live', generationConfig: { responseModalities: ['TEXT'] },
-    inputAudioTranscription: { languageCodes: ['nl-NL'], mode: 'VERBATIM' } };
+    inputAudioTranscription: { languageCodes: ['nl-NL'], customVocabulary: ['Streaik', 'Gemini'], mode: 'SMART' } };
   const token = 'auth_tokens/temporary-google-token';
   await page.route(`**/gateway/api/realtime/token/${googleModel}`, async route => {
     expect(await route.request().headerValue('x-google-key')).toBe('fixture-provider-key');
@@ -820,8 +914,10 @@ test('Google Live Transcribe waits for setup, streams PCM, and saves only finali
   await expect(start(page)).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Dictate', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: 'Transcription settings' }).click();
-  await page.getByLabel('Audio language (optional)').fill('nl-NL');
-  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await page.getByLabel('Language codes').fill('nl-NL');
+  await page.getByLabel('Custom vocabulary').fill('Streaik, Gemini');
+  await page.getByLabel('Transcription mode').selectOption('SMART');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await start(page).click();
   await expect.poll(() => !!acknowledge).toBe(true);
   await expect(page.getByText('Connecting microphone…', { exact: true })).toBeVisible();
