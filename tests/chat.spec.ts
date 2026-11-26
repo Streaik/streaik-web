@@ -1818,6 +1818,67 @@ test('OpenAI chat settings pair fields when wide and persist the encrypted reaso
   expect(requests[0].providerMetadata).toEqual({ openai: { include: [] } });
 });
 
+test('Activity pager follows streamed items until the user navigates', async ({ page }) => {
+  await mockModels(page);
+  const encode = (events: object[]) => events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('');
+  const reasoning = (id: string, delta: string) => [
+    { type: 'reasoning-start', id }, { type: 'reasoning-delta', id, delta }, { type: 'reasoning-end', id },
+  ];
+  await page.addInitScript(firstChunk => {
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      const path = new URL(input instanceof Request ? input.url : String(input), location.href).pathname;
+      if (path !== '/gateway/api/chat') return nativeFetch(input, init);
+      const body = new ReadableStream<Uint8Array>({ start(controller) {
+        const encoder = new TextEncoder();
+        const append = (event: Event) => {
+          if (!(event instanceof CustomEvent)) return;
+          const { chunk, done } = event.detail;
+          controller.enqueue(encoder.encode(chunk));
+          if (done) {
+            window.removeEventListener('fixture-activity-chunk', append);
+            controller.close();
+          }
+        };
+        window.addEventListener('fixture-activity-chunk', append);
+        controller.enqueue(encoder.encode(firstChunk));
+      } });
+      return new Response(body, { headers: { 'Content-Type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' } });
+    };
+  }, encode([
+    { type: 'start', messageId: 'activity-reply' }, { type: 'start-step' }, ...reasoning('first', 'First reasoning item.'),
+  ]));
+  const append = (events: object[], done = false) => page.evaluate(detail => {
+    window.dispatchEvent(new CustomEvent('fixture-activity-chunk', { detail }));
+  }, { chunk: encode(events) + (done ? 'data: [DONE]\n\n' : ''), done });
+
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await chooseChatModel(page);
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('Show progress.'); await composer.press('Enter');
+  const activity = page.getByRole('region', { name: 'Assistant activity' });
+  await expect(activity).toContainText('First reasoning item.');
+
+  await append([
+    { type: 'tool-input-available', toolCallId: 'lookup', toolName: 'fixture_lookup', input: {}, dynamic: true, providerExecuted: true },
+    { type: 'tool-output-available', toolCallId: 'lookup', output: 'Found', dynamic: true, providerExecuted: true },
+  ]);
+  await expect(activity).toHaveCount(1);
+  await expect(activity).toContainText('2 of 2');
+  await expect(activity).toContainText('fixture_lookup');
+  const next = activity.getByRole('button', { name: 'Next activity' });
+  await expect(next).toBeDisabled();
+  await activity.getByRole('button', { name: 'Previous activity' }).click();
+
+  await append([...reasoning('last', 'Last reasoning item.'), { type: 'finish-step' }, { type: 'finish', finishReason: 'stop' }], true);
+  await expect(activity).toContainText('1 of 3');
+  await expect(activity).toContainText('First reasoning item.');
+  await next.click();
+  await next.click();
+  await expect(activity).toContainText('Last reasoning item.');
+});
+
 test('Gateway chat shares context, keeps composer reasoning through approval, and replays approved results once', async ({ page }) => {
   await mockModels(page);
   const requests: { messages: { role: string; parts: { text?: string; toolCallId?: string; output?: unknown }[] }[];
@@ -1982,15 +2043,15 @@ test('Gateway chat shares context, keeps composer reasoning through approval, an
   expect(requests[2].messages.filter(message => message.role === 'system')).toHaveLength(1);
   const activity = page.getByRole('region', { name: 'Assistant activity' });
   await expect(activity).toHaveCount(1);
-  await expect(activity).toContainText(catalogTool);
-  await expect(activity).toContainText('1 of 3');
+  await expect(activity).toContainText(historyTool);
+  await expect(activity).toContainText('3 of 3');
   await expect(activity.getByRole('tab', { name: 'Input' })).toHaveAttribute('aria-selected', 'true');
   await activity.getByRole('tab', { name: 'Structured' }).click();
-  await activity.getByRole('button', { name: 'Next activity' }).click();
+  await activity.getByRole('button', { name: 'Previous activity' }).click();
   await expect(activity).toContainText('Check past conversations next.');
   await expect(activity.getByRole('tablist')).toHaveCount(0);
-  await activity.getByRole('button', { name: 'Next activity' }).click();
-  await expect(activity).toContainText(historyTool);
+  await activity.getByRole('button', { name: 'Previous activity' }).click();
+  await expect(activity).toContainText(catalogTool);
   await expect(activity.getByRole('tab', { name: 'Input' })).toHaveAttribute('aria-selected', 'true');
 
   await settingsButton.click();

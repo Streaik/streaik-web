@@ -275,7 +275,10 @@ body { margin: 0; }
 }
 .chat-tool-images { display: flex; flex-wrap: wrap; align-items: start; gap: .5rem; }
 .chat-tool-error { margin: 0; color: var(--danger); }
-.chat-activity { margin-block: .7rem; padding: .65rem .8rem; border: 1px solid var(--border); border-radius: .65rem; background: var(--surface); }
+.chat-activity {
+  margin-block: .7rem; padding: .65rem .8rem; border: 1px solid var(--border);
+  border-inline-start: 3px solid var(--focus); border-radius: .65rem; background: var(--surface);
+}
 .chat-activity-header { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; font-size: .9rem; overflow-wrap: anywhere; }
 .chat-activity-pages { display: flex; align-items: center; gap: .35rem; margin-inline-start: auto; color: var(--muted); }
 .chat-activity-pages .ui-button { min-width: 2rem; padding: .15rem .4rem; }

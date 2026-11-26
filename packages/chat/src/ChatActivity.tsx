@@ -50,8 +50,9 @@ const toolStates = {
 
 export function ChatActivity({ parts, renderMarkdown }: { parts: ActivityPart[]; renderMarkdown: (text: string) => ReactNode }) {
   const { t } = useAppTranslation();
-  const [selected, setSelected] = useState(0);
-  const page = Math.min(selected, parts.length - 1);
+  const [manualPage, setManualPage] = useState<number>();
+  const lastPage = parts.length - 1;
+  const page = Math.min(manualPage ?? lastPage, lastPage);
   const part = parts[page];
   const reasoning = part.type === 'reasoning';
   const output = reasoning ? undefined : part.output;
@@ -69,10 +70,10 @@ export function ChatActivity({ parts, renderMarkdown }: { parts: ActivityPart[];
       {state && <span className="chat-tool-badge">{t(state)}</span>}
       {parts.length > 1 && <div className="chat-activity-pages">
         <Button type="button" variant="subtle" aria-label={t('Previous activity')} disabled={page === 0}
-          onClick={() => setSelected(page - 1)}><span aria-hidden="true">‹</span></Button>
+          onClick={() => setManualPage(page - 1)}><span aria-hidden="true">‹</span></Button>
         <span aria-live="polite">{t('{{page, number}} of {{count, number}}', { page: page + 1, count: parts.length })}</span>
-        <Button type="button" variant="subtle" aria-label={t('Next activity')} disabled={page === parts.length - 1}
-          onClick={() => setSelected(page + 1)}><span aria-hidden="true">›</span></Button>
+        <Button type="button" variant="subtle" aria-label={t('Next activity')} disabled={page === lastPage}
+          onClick={() => setManualPage(page + 1)}><span aria-hidden="true">›</span></Button>
       </div>}
     </header>
     {reasoning ? <div className="chat-activity-body">{renderMarkdown(part.text)}</div> : <div className="chat-activity-body" key={part.toolCallId}>
