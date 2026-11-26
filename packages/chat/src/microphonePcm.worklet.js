@@ -1,4 +1,4 @@
-// Both streaming transports use little-endian mono PCM16.
+// Microphone WebSockets use little-endian mono PCM16.
 class MicrophonePcm extends AudioWorkletProcessor {
   buffer = new DataView(new ArrayBuffer(2048));
   count = 0;

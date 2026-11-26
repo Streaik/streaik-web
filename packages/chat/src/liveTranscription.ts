@@ -1,5 +1,6 @@
 import { GatewayError, googleLiveTranscriptionSetup, openAITranscriptionSocket } from '@streaik/gateway';
 import type { Gateway, Transcript, TranscriptSegment } from '@streaik/gateway';
+import { assemblyAITranscript, deepgramTranscript } from './binaryTranscription';
 import { getMicrophone, stopTracks } from './microphone';
 
 type Update = (transcript: Transcript, partial: string) => void;
@@ -48,6 +49,14 @@ export async function runMicrophone(gateway: Gateway, model: string, language: s
       else await openAI(stream, credential.secret, events);
     } else if (credential.provider === 'google') {
       await google(stream, credential.url, googleLiveTranscriptionSetup(model, language), events);
+    } else if (credential.provider === 'deepgram') {
+      await binarySocket(stream, credential.url, events, {
+        name: 'Deepgram', subprotocols: ['bearer', credential.secret], stop: 'CloseStream', terminal: 'Metadata', message: deepgramTranscript(events.update),
+      });
+    } else if (credential.provider === 'assemblyai') {
+      await binarySocket(stream, credential.url, events, {
+        name: 'AssemblyAI', begin: 'Begin', stop: 'Terminate', terminal: 'Termination', minBytes: 640, message: assemblyAITranscript(events.update),
+      });
     } else await gladia(stream, credential.url, events);
   } finally { events.signal.removeEventListener('abort', release); release(); }
 }
@@ -97,6 +106,82 @@ async function capturePcm(stream: MediaStream, rate: number, signal: AbortSignal
     close();
     throw error;
   } finally { setup.removeEventListener('abort', close); }
+}
+
+async function binarySocket(stream: MediaStream, url: string, events: Stop, protocol: {
+  name: string; subprotocols?: string[]; begin?: string; stop: string; terminal: string; minBytes?: number;
+  message: (event: EventData) => void;
+}) {
+  const failure = new AbortController();
+  const signal = AbortSignal.any([events.signal, failure.signal]);
+  const startup = AbortSignal.any([signal, AbortSignal.timeout(25_000)]);
+  const problem = () => new GatewayError(`${protocol.name} microphone transcription disconnected or failed.`);
+  const fail = () => failure.abort(problem());
+  let socket: WebSocket;
+  try { socket = new WebSocket(url, protocol.subprotocols); } catch { throw problem(); }
+  const changes = new EventTarget();
+  let begun = !protocol.begin, stopping = false, finished = false;
+  let capture: Awaited<ReturnType<typeof capturePcm>> | undefined;
+  function send(payload: string | ArrayBuffer) {
+    if (signal.aborted) return;
+    if (socket.readyState !== WebSocket.OPEN || socket.bufferedAmount > 128_000) { fail(); return; }
+    try { socket.send(payload); } catch { fail(); }
+  }
+  const stopMessage = JSON.stringify({ type: protocol.stop });
+  const cancel = () => {
+    if (!stopping && socket.readyState === WebSocket.OPEN) {
+      try { socket.send(stopMessage); } catch { /* Best effort; do not wait for a response on cancellation. */ }
+    }
+    socket.close();
+  };
+  const closed = () => { if (!finished) fail(); };
+  const message = (event: MessageEvent) => {
+    if (signal.aborted || finished) return;
+    const part = readEvent(event.data);
+    if (part.type === 'Error' || part.type === 'error' || part.error || part.err_code) { fail(); return; }
+    if (!begun && part.type === protocol.begin) { begun = true; changes.dispatchEvent(new Event('begin')); }
+    if (!begun || (part.type === protocol.terminal && !stopping)) return;
+    protocol.message(part);
+    if (part.type === protocol.terminal) { finished = true; changes.dispatchEvent(new Event('finished')); }
+  };
+  events.signal.addEventListener('abort', cancel, { once: true });
+  socket.addEventListener('message', message);
+  socket.addEventListener('close', closed);
+  socket.addEventListener('error', fail);
+  try {
+    await wait(socket, 'open', startup, () => socket.readyState === WebSocket.OPEN);
+    if (protocol.begin) await wait(changes, 'begin', startup, () => begun);
+    capture = await capturePcm(stream, 16000, signal, startup, bytes => {
+      if (protocol.minBytes && bytes.byteLength < protocol.minBytes) {
+        // A flushed tail can be shorter than AssemblyAI's 20 ms minimum.
+        const padded = new Uint8Array(protocol.minBytes);
+        padded.set(new Uint8Array(bytes));
+        send(padded.buffer);
+      } else send(bytes);
+    });
+    startup.throwIfAborted();
+    events.ready();
+    await untilStop(events.stop, signal);
+    await capture.flush();
+    capture.close();
+    capture = undefined;
+    stopTracks(stream);
+    signal.throwIfAborted();
+    stopping = true;
+    send(stopMessage);
+    const drain = AbortSignal.timeout(7000);
+    await wait(changes, 'finished', AbortSignal.any([signal, drain]), () => finished).catch(error => {
+      if (!drain.aborted || signal.aborted) throw error;
+      throw new GatewayError(`${protocol.name} did not confirm the end of the microphone session.`);
+    });
+  } finally {
+    capture?.close();
+    events.signal.removeEventListener('abort', cancel);
+    socket.removeEventListener('message', message);
+    socket.removeEventListener('close', closed);
+    socket.removeEventListener('error', fail);
+    socket.close();
+  }
 }
 
 async function openAISocket(stream: MediaStream, secret: string, events: Stop) {

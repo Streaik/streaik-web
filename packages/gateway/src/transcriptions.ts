@@ -8,7 +8,9 @@ export const isTranscriptionEndpoint = (value: unknown): value is GatewayTranscr
 export type TranscriptSegment = { text: string; startSecond: number; endSecond: number; speaker?: string };
 export type Transcript = { text: string; segments: TranscriptSegment[]; durationInSeconds?: number; language?: string };
 export type TranscriptionOptions = { language?: string; prompt?: string; diarization?: boolean };
-export type LiveTranscriptionCredential = { provider: 'openai'; secret: string } | { provider: 'gladia' | 'google'; url: string };
+export type LiveTranscriptionCredential = { provider: 'openai'; secret: string }
+  | { provider: 'gladia' | 'google' | 'assemblyai'; url: string }
+  | { provider: 'deepgram'; url: string; secret: string };
 
 const mediaTypes: Record<string, string> = {
   mp3: 'audio/mpeg', mpga: 'audio/mpeg', mpeg: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', mp4: 'audio/mp4',
@@ -32,6 +34,9 @@ const openAILive = /^openai\/gpt-live-transcribe(?:-\d{4}-\d{2}-\d{2})?$/;
 const openAIWhisper = /^openai\/gpt-realtime-whisper(?:-\d{4}-\d{2}-\d{2})?$/;
 const openAILegacyLive = /^openai\/gpt-realtime(?:-[\w-]+)?-transcribe(?:-|$)/;
 const googleLiveSocket = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained';
+const deepgramLiveSocket = 'wss://api.deepgram.com/v1/listen';
+const assemblyAILiveSocket = 'wss://streaming.assemblyai.com/v3/ws';
+const assemblyAIRealtime = 'assemblyai/assemblyai-stt-3-7-realtime';
 
 function googleLiveTranscription(model: string) {
   return model === 'google/gemini-3.5-transcribe-live';
@@ -45,11 +50,13 @@ export function liveTranscriptionProvider(model: string) {
   if (openAILive.test(model) || openAIWhisper.test(model) || openAILegacyLive.test(model)) return 'openai';
   if (model === 'gladia/solaria-1') return 'gladia';
   if (googleLiveTranscription(model)) return 'google';
+  if (model === 'deepgram/nova-3' || model === 'deepgram/nova-2') return 'deepgram';
+  if (model === assemblyAIRealtime || /^assemblyai\/universal-streaming-(english|multilingual)$/.test(model)) return 'assemblyai';
 }
 
 export function usesTranscriptionWebSocket(model: string) {
   const provider = liveTranscriptionProvider(model);
-  return provider === 'gladia' || provider === 'google' || openAITranscriptionSocket(model);
+  return provider === 'openai' ? openAITranscriptionSocket(model) : provider !== undefined;
 }
 
 export function openAITranscriptionSocket(model: string) {
@@ -173,7 +180,8 @@ export async function readTranscriptStream(response: Response, preview: (text: s
   } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
 }
 
-export function readLiveTranscriptionCredential(provider: LiveTranscriptionCredential['provider'], payload: unknown): LiveTranscriptionCredential {
+export function readLiveTranscriptionCredential(model: string, payload: unknown, language?: string): LiveTranscriptionCredential {
+  const provider = liveTranscriptionProvider(model);
   const { value, url, token, expires_at, expiresAt = expires_at } = object(payload);
   if (typeof expiresAt === 'number' && expiresAt * 1000 <= Date.now()) throw new GatewayError('The microphone session credential expired. Start again.');
   if (provider === 'openai' && typeof value === 'string' && value.trim()) return { provider, secret: value };
@@ -182,6 +190,36 @@ export function readLiveTranscriptionCredential(provider: LiveTranscriptionCrede
     const target = new URL(googleLiveSocket);
     target.searchParams.set('access_token', token);
     return { provider, url: target.href };
+  }
+  if ((provider === 'deepgram' || provider === 'assemblyai') && typeof token === 'string' &&
+      typeof expiresAt === 'number' && Number.isSafeInteger(expiresAt)) {
+    const native = model.slice(provider.length + 1);
+    if (provider === 'deepgram' && /^[\w.-]{1,4096}$/.test(token)) {
+      const target = new URL(deepgramLiveSocket);
+      target.searchParams.set('model', native);
+      if (url === target.href) {
+        target.searchParams.set('encoding', 'linear16');
+        target.searchParams.set('sample_rate', '16000');
+        target.searchParams.set('channels', '1');
+        target.searchParams.set('interim_results', 'true');
+        target.searchParams.set('punctuate', 'true');
+        if (language) target.searchParams.set('language', language);
+        return { provider, url: target.href, secret: token };
+      }
+    }
+    if (provider === 'assemblyai' && /^\S{1,4096}$/.test(token)) {
+      const target = new URL(assemblyAILiveSocket);
+      target.searchParams.set('sample_rate', '16000');
+      target.searchParams.set('speech_model', native);
+      if (url === target.href) {
+        target.searchParams.set('encoding', 'pcm_s16le');
+        if (model !== assemblyAIRealtime) target.searchParams.set('format_turns', 'true');
+        if (model !== 'assemblyai/universal-streaming-english') target.searchParams.set('language_detection', 'true');
+        if (language && model === assemblyAIRealtime) target.searchParams.set('language_codes', JSON.stringify([language]));
+        target.searchParams.set('token', token);
+        return { provider, url: target.href };
+      }
+    }
   }
   if (provider === 'gladia' && typeof url === 'string') {
     let target: URL | undefined;

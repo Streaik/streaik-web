@@ -26,7 +26,7 @@ The chat client supports:
 - **Conversation history** with local persistence, configurable chat preferences, and browser-only full-text search across titles and user and assistant messages
 - **Streaming UI** with interactive apps, cards and structured response rendering
 - **Speech** with generation, streaming playback and realtime transcription
-- **Transcriptions** with configurable file splitting, overlap handling and merged results. **Real-time** streams microphone audio to supported OpenAI, Gladia, and Google Gemini Transcribe Live models and displays text only. **Dictate** records a short clip and uploads it when you stop.
+- **Transcriptions** with configurable file splitting, overlap handling and merged results. **Real-time** streams microphone audio to supported OpenAI, Gladia, Google Gemini Transcribe Live, Deepgram Nova-2/Nova-3, and AssemblyAI streaming models and displays text only. A compatible live model assigned to the Transcription agent can also stream composer dictation. **Dictate** on the Transcriptions page records a short clip and uploads it when you stop.
 - **Images** with generation and provider-specific options
 - **Videos** with prompt-only generation and inline playback. Pending jobs and results are saved locally for the current gateway/profile. Reopen Videos with the same credentials to resume polling; gateway job references and provider-hosted video links can expire.
 - **Benchmarks** with multi-model comparisons, configurable routing and repeatable test runs
@@ -36,6 +36,8 @@ The chat client supports:
 - **Multi-theme UI** with interchangeable Shadcn, Fluent and HTML implementations
 - **Localization** with support for 2+ languages
 - **Model capabilities** including speech, transcription, embeddings, reranking, images, video, decision and other supported modalities
+
+Deepgram and AssemblyAI microphone sessions use temporary credentials from the gateway; audio goes directly from the browser to the selected provider. AssemblyAI connects to its default US host (`streaming.assemblyai.com`). Use `assemblyai/assemblyai-stt-3-7-realtime` for new deployments; the Universal Streaming English and Multilingual IDs are retained for compatibility where the provider still accepts them. Live transcription does not play a spoken response.
 
 Documentation: https://ai.streaik.net/scalar  
 App: https://chat.streaik.com

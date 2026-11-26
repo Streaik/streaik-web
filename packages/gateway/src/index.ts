@@ -341,10 +341,10 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
         : provider === 'google' ? { sessionConfig: { providerOptions: { google: {
           uses: 1, bidiGenerateContentSetup: googleLiveTranscriptionSetup(model, language),
         } } } }
-          : { sessionConfig: { providerOptions: { gladia: {
+          : provider === 'gladia' ? { sessionConfig: { providerOptions: { gladia: {
             encoding: 'wav/pcm', sample_rate: 16000, channels: 1, bit_depth: 16,
             ...(language ? { language_config: { languages: [language] } } : {}),
-          } } } };
+          } } } } : {};
       const response = await request(root && new URL(path, root).href, { kind: 'realtime', provider }, {
         method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json' }, body: JSON.stringify(body), signal,
       });
@@ -353,7 +353,7 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
         signal.throwIfAborted();
         throw new GatewayError('The gateway returned an unreadable microphone session credential.');
       }
-      return readLiveTranscriptionCredential(provider, payload);
+      return readLiveTranscriptionCredential(model, payload, language);
     },
     async decideChoice(endpoint: GatewayDecisionEndpoint, choice: DecisionChoice, signal?: AbortSignal): Promise<string> {
       if (!gatewayDecisionEndpoints.includes(endpoint)) throw new GatewayError('The selected Decisions route is unavailable.');
