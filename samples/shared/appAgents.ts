@@ -52,6 +52,11 @@ const definitions = [
     name: 'VideoAgent', description: 'Creates videos.',
     model: { id: 'google/gemini-omni-1.2-flash' },
     instructions: 'Create videos',
+  }],
+  ['speech', 'Create speech', {
+    name: 'SpeechAgent', description: 'Creates speech.',
+    model: { id: 'google/gemini-3.8-flash-tts' },
+    instructions: 'Create speech',
   }]
 ] satisfies ReadonlyArray<readonly [string, string, AgentDefinition]>;
 
