@@ -14,7 +14,7 @@ The chat client supports:
 - **Model discovery** with catalogs, favorites, filters and configurable default preferences
 - **Provider settings** with model-specific options and native metadata passthrough
 - **Agents and workflows** on direct APIs or through connected agent runtimes with multi-agent orchestration
-- **Realtime agents** with bidirectional audio, interruptions, streaming playback and tool execution
+- **Native realtime voice chat** with bidirectional audio, provider-specific controls and streaming playback
 - **Decisions** with intelligent multi-model and agent routing based on user input and configurable decision models
 - **Agent Plugins** combining Skills, MCP servers and supporting resources
 - **MCP** tools, resources, prompts, elicitation and tasks. Prompt and resource template arguments stay free-form and offer suggestions when the server advertises completions.
@@ -36,8 +36,6 @@ The chat client supports:
 - **Multi-theme UI** with interchangeable Shadcn, Fluent and HTML implementations
 - **Localization** with support for 2+ languages
 - **Model capabilities** including speech, transcription, embeddings, reranking, images, video, decision and other supported modalities
-
-Deepgram and AssemblyAI microphone sessions use temporary credentials from the gateway; audio goes directly from the browser to the selected provider. AssemblyAI connects to its default US host (`streaming.assemblyai.com`). Use `assemblyai/assemblyai-stt-3-7-realtime` for new deployments; the Universal Streaming English and Multilingual IDs are retained for compatibility where the provider still accepts them. Live transcription does not play a spoken response.
 
 Documentation: https://ai.streaik.net/scalar  
 App: https://chat.streaik.com

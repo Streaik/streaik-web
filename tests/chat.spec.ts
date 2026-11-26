@@ -258,6 +258,12 @@ test('Gemini Live and Grok Voice switch in the same composer and save portable t
     expect(route.request().postDataJSON()).toEqual({ sessionConfig: { providerOptions: { xai: { expires_after: { anchor: 'created_at', seconds: 60 } } } } });
     return route.fulfill({ json: { url: xaiUrl, token: 'temporary-xai' } });
   });
+  await page.route('**/gateway/api/chat', route => {
+    const body = JSON.stringify(route.request().postDataJSON());
+    expect(body).toContain('Gemini answer');
+    expect(body).toContain('Grok answer');
+    return route.fulfill({ contentType: 'text/event-stream', headers: { 'x-vercel-ai-ui-message-stream': 'v1' }, body: sse('Text continuation', 1) });
+  });
   await page.routeWebSocket(`${googleUrl}*`, socket => {
     const send = (data: object) => socket.send(JSON.stringify(data));
     socket.onMessage(data => {
@@ -265,7 +271,8 @@ test('Gemini Live and Grok Voice switch in the same composer and save portable t
       if (message.setup) send({ setupComplete: {} });
       if (message.realtimeInput?.audio && !received.googleAudio) {
         received.googleAudio = typeof message.realtimeInput.audio.data === 'string' && message.realtimeInput.audio.mimeType === 'audio/pcm;rate=16000';
-        send({ serverContent: { inputTranscription: { text: 'Gemini question' }, outputTranscription: { text: 'Gemini answer' }, turnComplete: true } });
+        send({ serverContent: { inputTranscription: { text: 'Gemini question' }, outputTranscription: { text: 'Gemini answer' },
+          modelTurn: { parts: [{ inlineData: { mimeType: 'audio/pcm;rate=24000', data: 'AAABAA==' } }] }, turnComplete: true } });
       }
       if (message.realtimeInput?.audioStreamEnd) send({ serverContent: { turnComplete: true } });
     });
@@ -285,6 +292,7 @@ test('Gemini Live and Grok Voice switch in the same composer and save portable t
         send({ type: 'input_audio_buffer.committed', item_id: 'grok-input' });
         send({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'grok-input', transcript: 'Grok question' });
         send({ type: 'response.created', response: { id: 'grok-output' } });
+        send({ type: 'response.output_audio.delta', delta: 'AAABAA==' });
         send({ type: 'response.output_audio_transcript.done', transcript: 'Grok answer' });
         send({ type: 'response.done', response: { id: 'grok-output', status: 'completed' } });
       }
@@ -322,14 +330,18 @@ test('Gemini Live and Grok Voice switch in the same composer and save portable t
   await expect(page.getByText('Grok answer', { exact: true })).toBeVisible();
   await stop.click(); await expect(start).toBeVisible();
   expect(received).toEqual({ googleAudio: true, xaiAudio: true, geminiHistoryInGrok: true });
-  await page.reload();
-  await expect(page.getByText('Gemini question', { exact: true })).toBeVisible();
-  await expect(page.getByText('Grok answer', { exact: true })).toBeVisible();
   await chooseChatModel(page);
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeVisible();
   await settings();
   await expect(dialog.getByRole('tab', { name: 'Google', exact: true })).toHaveCount(0);
   await expect(dialog.getByRole('tab', { name: 'xAI', exact: true })).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Close chat settings', exact: true }).click();
+  const message = page.getByRole('textbox', { name: 'Message', exact: true });
+  await message.fill('Continue in text'); await message.press('Enter');
+  await expect(page.getByText('Text continuation', { exact: true }).first()).toBeVisible();
+  await page.reload();
+  await expect(page.getByText('Gemini question', { exact: true })).toBeVisible();
+  await expect(page.getByText('Grok answer', { exact: true })).toBeVisible();
 });
 
 for (const action of ['accept', 'decline', 'cancel'] as const) {
