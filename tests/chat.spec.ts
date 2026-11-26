@@ -126,7 +126,10 @@ test('OpenAI voice uses the existing model picker, composer slot, and conversati
   });
   await page.route('**/gateway/v1/live/sessions', route => {
     expect(route.request().postDataJSON()).toMatchObject({ session: { model: live, store: false, delegation: {
-      type: 'responses', responses: { model: 'gpt-4.1-mini' },
+      type: 'responses', responses: { model: 'gpt-4.1-mini', parallel_tool_calls: false, tools: expect.arrayContaining([
+        { type: 'web_search' }, { type: 'code_interpreter', container: { type: 'auto' } },
+        { type: 'file_search', vector_store_ids: ['vs_fixture'] },
+      ]) },
     } }, transport: { type: 'webrtc', sdp: 'fixture-offer' } });
     expect(JSON.stringify(route.request().postDataJSON().session.input)).toContain('Earlier text reply');
     return route.fulfill({ json: { session: { id: 'fixture' }, transport: { type: 'webrtc', sdp: 'fixture-answer' } } });
@@ -143,20 +146,40 @@ test('OpenAI voice uses the existing model picker, composer slot, and conversati
   await page.goto('/');
   await showSettings(page); await addKey(page); await closeSettings(page);
   await chooseChatModel(page);
+  const chatDialog = page.getByRole('dialog', { name: 'Chat settings', exact: true });
+  const openChatSettings = () => page.getByRole('button', { name: 'Chat settings', exact: true }).click();
+  const openAiTab = chatDialog.getByRole('tab', { name: 'OpenAI', exact: true });
+  const openAiPanel = chatDialog.getByRole('tabpanel', { name: 'OpenAI', exact: true });
+  async function checkTextSettings() {
+    await openChatSettings();
+    await expect(openAiTab).toHaveCount(1);
+    await expect(chatDialog.getByRole('tab', { name: 'OpenAI Realtime', exact: true })).toHaveCount(0);
+    await openAiTab.click();
+    await expect(chatDialog.getByRole('button', { name: 'Reset provider settings', exact: true })).toBeVisible();
+    await expect(openAiPanel.getByRole('heading', { name: /^GPT (Live|Realtime)$/ })).toHaveCount(0);
+    await chatDialog.getByRole('button', { name: 'Close chat settings', exact: true }).click();
+  }
+  await checkTextSettings();
+  const send = page.getByRole('button', { name: 'Send', exact: true });
+  await expect(send.locator('svg')).toHaveCSS('width', '18px');
+  await expect(send.locator('svg')).toHaveCSS('height', '18px');
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   await composer.fill('Earlier user message'); await composer.press('Enter');
   await expect(page.getByText('Earlier text reply', { exact: true }).first()).toBeVisible();
-  const chatDialog = page.getByRole('dialog', { name: 'Chat settings', exact: true });
   const voiceStart = page.getByRole('button', { name: 'Start voice session', exact: true });
   const voiceStop = page.getByRole('button', { name: 'Stop voice session', exact: true });
   await modelPicker(page).click();
   await expect(page.getByRole('option', { name: 'gpt-live-transcribe', exact: true })).toHaveCount(0);
   await page.getByRole('option', { name: 'gpt-realtime', exact: true }).click();
   await expect(voiceStart).toBeVisible();
+  await expect(voiceStart.locator('svg')).toHaveCSS('width', '18px');
+  await expect(voiceStart.locator('svg')).toHaveCSS('height', '18px');
   expect((await checkProbe()).captures).toBe(0);
-  await page.getByRole('button', { name: 'Chat settings', exact: true }).click();
-  await chatDialog.getByRole('tab', { name: 'OpenAI Realtime', exact: true }).click();
-  await chatDialog.getByRole('combobox', { name: 'Voice', exact: true }).selectOption('cedar');
+  await openChatSettings();
+  await openAiTab.click();
+  await expect(openAiPanel.getByRole('heading', { name: 'GPT Realtime', exact: true })).toBeVisible();
+  await expect(openAiPanel.getByRole('heading', { name: 'GPT Live', exact: true })).toHaveCount(0);
+  await openAiPanel.getByRole('combobox', { name: 'Voice', exact: true }).selectOption('cedar');
   await chatDialog.getByRole('button', { name: 'Save', exact: true }).click();
   await voiceStart.click(); await expect(voiceStop).toBeVisible();
   expect(JSON.stringify((await checkProbe()).sent)).toContain('Earlier user message');
@@ -166,16 +189,30 @@ test('OpenAI voice uses the existing model picker, composer slot, and conversati
   await expect(page.getByText('Realtime voice reply', { exact: true })).toBeVisible();
   await voiceStop.click(); await expect(voiceStart).toBeVisible();
   await chooseModel(page, 'gpt-live-1');
-  await page.getByRole('button', { name: 'Chat settings', exact: true }).click();
-  await chatDialog.getByRole('tab', { name: 'OpenAI Realtime', exact: true }).click();
-  await chatDialog.getByLabel('Responses model', { exact: true }).fill(model);
+  await openChatSettings();
+  await openAiTab.click();
+  await expect(openAiPanel.getByRole('heading', { name: 'GPT Live', exact: true })).toBeVisible();
+  await expect(openAiPanel.getByRole('heading', { name: 'GPT Realtime', exact: true })).toHaveCount(0);
+  await openAiPanel.getByLabel('Responses model', { exact: true }).fill(model);
+  const parallel = openAiPanel.getByRole('switch', { name: 'Parallel backend tool calls', exact: true });
+  await expect(parallel).toBeChecked();
+  await expect(parallel).toHaveCSS('appearance', 'none');
+  await expect(parallel.locator('..')).toHaveCSS('display', 'flex');
+  await parallel.uncheck();
+  for (const name of ['Web search', 'Code interpreter', 'File search']) {
+    const tool = openAiPanel.getByRole('switch', { name, exact: true });
+    await expect(tool).toHaveCSS('appearance', 'none');
+    await tool.check();
+  }
+  await openAiPanel.getByLabel('Vector store IDs (comma-separated)', { exact: true }).fill('vs_fixture');
   await chatDialog.getByRole('button', { name: 'Save', exact: true }).click();
   await voiceStart.click(); await expect(voiceStop).toBeVisible();
   await deliver({ type: 'session.output_transcript.delta', delta: 'Live voice reply' });
   await expect(page.getByText('Live voice reply', { exact: true })).toBeVisible();
   await voiceStop.click(); await expect(voiceStart).toBeVisible();
   await chooseChatModel(page);
-  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeVisible();
+  await expect(send).toBeVisible();
+  await checkTextSettings();
   await expect(page.getByText('Voice question', { exact: true })).toBeVisible();
   await expect(page.getByText('Live voice reply', { exact: true })).toBeVisible();
   expect((await checkProbe()).stops).toBeGreaterThanOrEqual(2);

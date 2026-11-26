@@ -34,7 +34,7 @@ test('GPT Live passes user-selected Responses configuration, history, and suppor
     model: 'gpt-fixture', parallel_tool_calls: false, tools: [{ type: 'function', name: 'chart' },
       { type: 'code_interpreter', container: { type: 'auto' } }, { type: 'file_search', vector_store_ids: ['vs_a', 'vs_b'] }],
   } });
-  assert.throws(() => liveSession(undefined, [], undefined, []), /Choose an OpenAI Responses model/);
+  assert.throws(() => liveSession(undefined, [], undefined, []), /Choose a Responses model in OpenAI settings/);
   assert.deepEqual(wire(liveSession({ mode: 'client', clientModel: 'other/model' }, [], undefined, [])).delegation, { type: 'client' });
 });
 

@@ -22,13 +22,12 @@ import type { ChatProviderId, ProviderChatSettings } from './providerChat/settin
 import { ProviderChatForm } from './providerChat/forms';
 import { ToolConfigurationEditor } from './ToolConfigurationEditor';
 import type { ToolConfigurationRow } from './ToolConfigurationEditor';
-
-type DialogRef = RefObject<HTMLDialogElement | null>;
 import { OpenAIRealtimeConfigForm } from './OpenAIRealtimeConfigForm';
 import type { LiveClientAgent } from './OpenAIRealtimeConfigForm';
 import { normalizeRealtimeSettings } from './realtimeSettings';
 import type { RealtimeSettings } from './realtimeSettings';
 
+type DialogRef = RefObject<HTMLDialogElement | null>;
 type ChatSettingsTab = 'general' | 'tools' | 'tool-configuration' | 'skills' | 'realtime' | ChatProviderId;
 
 function ToolPolicyFields({ value, onChange, rows, disabled }: {
@@ -73,7 +72,7 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, browserTo
   dialog: DialogRef; value: ChatPreferences; onChange: (preferences: ChatPreferences) => void;
   gateway: boolean; browserToolsSupported: boolean; hasHistory: boolean; locked: boolean; localSkills: LocalSkills; remoteSkills: RemoteSkills;
   providerModels: readonly ChatModel[];
-  voice?: { protocol?: 'live' | 'realtime'; models: readonly ChatModel[]; agents: readonly LiveClientAgent[] };
+  voice?: { protocol: 'live' | 'realtime'; models: readonly ChatModel[]; agents: readonly LiveClientAgent[] };
   toolRows: readonly ToolConfigurationRow[]; namespaceSupported: boolean; toolOptionsSupported: boolean;
 }) {
   const { t } = useAppTranslation();
@@ -83,8 +82,9 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, browserTo
   const [voiceDraft, setVoiceDraft] = useState<RealtimeSettings>();
   const [resetKey, setResetKey] = useState(0);
   const providers = activeChatProviders(providerModels);
+  if (voice) providers.delete('openai');
   const tabs: [ChatSettingsTab, string][] = [['general', t('General')], ['tools', t('Tools')],
-    ['tool-configuration', t('Tool configuration')], ['skills', t('Skills')], ...(voice ? [['realtime', t('OpenAI Realtime')] as [ChatSettingsTab, string]] : []),
+    ['tool-configuration', t('Tool configuration')], ['skills', t('Skills')], ...(voice ? [['realtime', chatProviders.openai.label] as [ChatSettingsTab, string]] : []),
     ...[...providers.keys()].map((provider): [ChatProviderId, string] => [provider, chatProviders[provider].label])];
   const tab = tabs.some(([key]) => key === requestedTab) ? requestedTab : 'general';
   const providerTab = tab !== 'general' && tab !== 'tools' && tab !== 'skills' && tab !== 'tool-configuration' && tab !== 'realtime' ? tab : undefined;
@@ -178,7 +178,7 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, browserTo
       </section>
     </div>
     {voice && <div id={`${id}-realtime-panel`} role="tabpanel" aria-labelledby={`${id}-realtime-tab`} hidden={tab !== 'realtime'}>
-      {tab === 'realtime' && <fieldset className="chat-provider-fields" disabled={locked} aria-label={t('OpenAI Realtime')}>
+      {tab === 'realtime' && <fieldset className="chat-provider-fields" disabled={locked} aria-label={chatProviders.openai.label}>
         <OpenAIRealtimeConfigForm value={voiceDraft ?? value.realtimeSettings ?? {}} onChange={setVoiceDraft}
           models={voice.models} agents={voice.agents} protocol={voice.protocol} />
       </fieldset>}
@@ -192,8 +192,8 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, browserTo
     </div>)}
     <footer className="chat-tool-footer">
       <Button variant="subtle" disabled={locked} onClick={() => {
-        if (tab === 'realtime') {
-          setVoiceDraft(current => voice?.protocol ? { ...(current ?? value.realtimeSettings), [voice.protocol]: undefined } : {});
+        if (tab === 'realtime' && voice) {
+          setVoiceDraft(current => ({ ...(current ?? value.realtimeSettings), [voice.protocol]: undefined }));
         } else if (providerTab) {
           setDraft(current => ({ ...(current ?? value.providerSettings), [providerTab]: undefined }));
           setResetKey(key => key + 1);

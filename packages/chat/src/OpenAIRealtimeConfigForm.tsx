@@ -5,6 +5,7 @@ import { defaultRealtimeTranscription, defaultRealtimeVad } from './realtimeSett
 import type { RealtimeSettings } from './realtimeSettings';
 
 const voices = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer', 'verse', 'marin', 'cedar'];
+const liveTools = [['web_search', 'Web search'], ['code_interpreter', 'Code interpreter'], ['file_search', 'File search']] as const;
 type Realtime = NonNullable<RealtimeSettings['realtime']>;
 type Live = NonNullable<RealtimeSettings['live']>;
 type Vad = NonNullable<Realtime['vad']>;
@@ -12,7 +13,7 @@ export type LiveClientAgent = { id: string; name: string };
 
 export function OpenAIRealtimeConfigForm({ value, onChange, models, agents, protocol }: {
   value: RealtimeSettings; onChange: (settings: RealtimeSettings) => void; models: readonly ChatModel[];
-  agents: readonly LiveClientAgent[]; protocol?: 'live' | 'realtime';
+  agents: readonly LiveClientAgent[]; protocol: 'live' | 'realtime';
 }) {
   const { t } = useAppTranslation();
   const id = useId();
@@ -33,15 +34,16 @@ export function OpenAIRealtimeConfigForm({ value, onChange, models, agents, prot
   const number = (label: string, value: number | undefined, change: (v: number | undefined) => void, min: number, max?: number, step = 1) =>
     <label>{t(label)}<input type="number" value={value ?? ''} min={min} max={max} step={step}
       onChange={e => change(Number.isFinite(e.currentTarget.valueAsNumber) ? e.currentTarget.valueAsNumber : undefined)} /></label>;
-  const toggle = (label: string, value: boolean, change: (v: boolean) => void) => <label>
-    <input type="checkbox" role="switch" checked={value} onChange={e => change(e.currentTarget.checked)} /> {t(label)}</label>;
+  const toggle = (label: string, value: boolean, change: (v: boolean) => void) => <label className="chat-tool-switch" key={label}>
+    <input type="checkbox" role="switch" checked={value} onChange={e => change(e.currentTarget.checked)} /><span>{t(label)}</span>
+  </label>;
   const text = (label: string, value: string | undefined, change: (v: string) => void, multi = false) => <label>{t(label)}
     {multi ? <textarea rows={3} value={value ?? ''} onChange={e => change(e.currentTarget.value)} />
       : <input value={value ?? ''} onChange={e => change(e.currentTarget.value)} />}</label>;
   const formats = ['audio/pcm', 'audio/pcma', 'audio/pcmu'] as const;
   const openAi = models.filter(({ provider }) => provider === 'openai');
   return <div className="chat-preference-cards">
-    {protocol !== 'realtime' && <section className="chat-tool-card" aria-labelledby={`${id}-live`}>
+    {protocol === 'live' && <section className="chat-tool-card" aria-labelledby={`${id}-live`}>
       <h3 id={`${id}-live`}>GPT Live</h3>
       {text('Instructions', live.instructions, instructions => l({ instructions }), true)}
       {select('Voice', live.voice, voices, voice => l({ voice }))}
@@ -61,13 +63,15 @@ export function OpenAIRealtimeConfigForm({ value, onChange, models, agents, prot
         {select('Backend tool choice', live.toolChoice, ['auto', 'none', 'required'], toolChoice => l({ toolChoice }))}
         {select('Backend reasoning effort', live.effort, ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'], effort => l({ effort }))}
         {select('Backend verbosity', live.verbosity, ['low', 'medium', 'high'], verbosity => l({ verbosity }))}
-        {(['web_search', 'code_interpreter', 'file_search'] as const).map(tool => <div key={tool}>
-          {toggle(tool, !!live.tools?.includes(tool), enabled => l({ tools: enabled ? [...(live.tools ?? []), tool] : live.tools?.filter(item => item !== tool) }))}
-        </div>)}
+        <div className="chat-tool-switches">
+          {liveTools.map(([tool, label]) => toggle(label, !!live.tools?.includes(tool), enabled => l({
+            tools: enabled ? [...(live.tools ?? []), tool] : live.tools?.filter(item => item !== tool),
+          })))}
+        </div>
         {live.tools?.includes('file_search') && text('Vector store IDs (comma-separated)', live.vectorStores, vectorStores => l({ vectorStores }))}
       </>}
     </section>}
-    {protocol !== 'live' && <>
+    {protocol === 'realtime' && <>
       <section className="chat-tool-card" aria-labelledby={`${id}-realtime`}>
         <h3 id={`${id}-realtime`}>GPT Realtime</h3>
         {text('Instructions', realtime.instructions, instructions => r({ instructions }), true)}

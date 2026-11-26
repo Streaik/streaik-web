@@ -87,7 +87,7 @@ export function liveSession(settings: RealtimeSettings['live'], history: VoiceHi
   const l = settings ?? {};
   const mode = l.mode ?? 'responses';
   const model = l.model && nativeOpenAiModel(l.model);
-  if (mode === 'responses' && (!model || !/^[\w.-]+$/.test(model))) throw new Error('Choose an OpenAI Responses model in Realtime settings.');
+  if (mode === 'responses' && (!model || !/^[\w.-]+$/.test(model))) throw new Error('Choose a Responses model in OpenAI settings.');
   const vectorIds = l.vectorStores?.split(/[\s,]+/).filter(Boolean) ?? [];
   const toolChoice = choice === 'none' ? 'none' : l.toolChoice ?? choice;
   if (mode === 'responses' && toolChoice !== 'none' && l.tools?.includes('file_search') && !vectorIds.length)

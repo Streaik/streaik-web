@@ -942,7 +942,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     const liveClient = voiceProtocol === 'live' && preferencesVoice?.live?.mode === 'client';
     const agent = voiceAgents.find(entry => entry.key === preferencesVoice?.live?.clientAgent)?.definition;
     const target = agent ? browserAgentModel(agent, textCatalog) : textCatalog.find(model => model.id === preferencesVoice?.live?.clientModel);
-    if (liveClient && !target) { setVoiceNotice('Choose a Client model or agent in OpenAI Realtime settings.'); return; }
+    if (liveClient && !target) { setVoiceNotice('Choose a Client model or agent in OpenAI settings.'); return; }
     const nativeTurn = createTurn(modelId);
     const functions = nativeTurn.toolChoice === 'none' ? [] : nativeTurn.requestTools.map(tool => ({
       type: 'function', name: tool.name, description: tool.description, parameters: tool.inputSchema,
@@ -1116,7 +1116,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         </div>
       </main>
       <ChatSettingsDialog dialog={chatSettings} value={preferences} onChange={onPreferences} gateway={gatewayRoute}
-        voice={gatewayRoute ? { protocol: voiceProtocol, models: textCatalog, agents: voiceAgents.map(({ key, definition }) => ({ id: key, name: definition.name })) } : undefined}
+        voice={voiceProtocol ? { protocol: voiceProtocol, models: textCatalog, agents: voiceAgents.map(({ key, definition }) => ({ id: key, name: definition.name })) } : undefined}
         browserToolsSupported={!hostedRoute} hasHistory={hasHistory} locked={routesLocked} localSkills={localSkills} remoteSkills={remoteSkills}
         providerModels={!agentMode && isApiChat(route) ? selected.filter(model => !isVoiceCatalogModel(model)) : []} namespaceSupported={toolCapabilities.namespaces} toolOptionsSupported={toolCapabilities.options}
         toolRows={configuredTools.map(({ tool, source, options, namespace }) => ({ key: tool.definition.name, label: tool.definition.name, source,
