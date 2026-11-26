@@ -166,6 +166,16 @@ export function pickChatModels(models: readonly CatalogModel[]): ChatModel[] {
   return pickChatCatalogModels(models).map(({ id, name, provider }) => ({ id, name, provider }));
 }
 
+export function openAiVoiceProtocol(id: string): 'live' | 'realtime' | undefined {
+  if (!/^openai\/[a-z0-9.-]+$/i.test(id) || /(?:^|[-./])(transcribe|transcription|whisper|stt|asr|tts)(?:[-.]|$)/i.test(id)) return;
+  if (/^openai\/gpt-live(?:-|$)/i.test(id)) return 'live';
+  if (/^openai\/gpt-(?:4o-)?realtime(?:-|$)/i.test(id)) return 'realtime';
+}
+
+export function isVoiceCatalogModel(model: CatalogModel) {
+  return model.type === 'audio' && model.tags.includes('realtime') && !!openAiVoiceProtocol(model.id);
+}
+
 export function readChatModels(payload: unknown): ChatModel[] {
   return pickChatModels(readModelCatalog(payload));
 }
@@ -332,6 +342,38 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
         throw new GatewayError('The gateway returned an unreadable transcript.');
       }
       return readTranscript(payload, endpoint === '/v1/audio/transcriptions');
+    },
+    async negotiateVoice(model: string, session: object, sdp: string, ttl: number | undefined, signal: AbortSignal): Promise<string> {
+      const protocol = openAiVoiceProtocol(model);
+      if (!protocol || !sdp) throw new GatewayError('Choose a supported OpenAI voice model.');
+      async function post(path: string, body: object) {
+        const response = await request(root && new URL(path, root).href, { kind: 'realtime', provider: 'openai' }, {
+          method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json' }, body: JSON.stringify(body), signal,
+        });
+        try { return await response.json(); } catch {
+          signal.throwIfAborted();
+          throw new GatewayError('The gateway returned an unreadable voice session.');
+        }
+      }
+      if (protocol === 'live') {
+        const result = await post('v1/live/sessions', { session: { ...session, model, store: false }, transport: { type: 'webrtc', sdp } });
+        if (result?.transport?.type === 'webrtc' && typeof result.transport.sdp === 'string' && result.transport.sdp.trim()) return result.transport.sdp;
+      } else if (ttl === undefined) {
+        const result = await post(`api/realtime/session/openai/${encodeURIComponent(model.slice(7))}`, { sdp, sessionConfig: { providerOptions: { openai: session } } });
+        if (typeof result?.sdp === 'string' && result.sdp.trim()) return result.sdp;
+      } else {
+        if (!Number.isInteger(ttl) || ttl < 1 || ttl > 7200) throw new GatewayError('Invalid OpenAI client-secret lifetime.');
+        const result = await post('v1/realtime/client_secrets', { session: { ...session, model }, expires_after: { anchor: 'created_at', seconds: ttl } });
+        const secret = result?.value;
+        if (typeof secret !== 'string' || !secret || typeof result.expires_at !== 'number' || result.expires_at <= Date.now() / 1000)
+          throw new GatewayError('The gateway returned an invalid or expired OpenAI client secret.');
+        // Only the short-lived secret goes to this fixed provider URL, never Gateway credentials.
+        const response = await requestHttp('https://api.openai.com/v1/realtime/calls', new Headers({ Authorization: `Bearer ${secret}` }),
+          { method: 'POST', body: sdp, headers: { 'content-type': 'application/sdp' }, cache: 'no-store', signal }, fetcher);
+        const answer = await response.text();
+        if (answer.trim()) return answer;
+      }
+      throw new GatewayError('The gateway did not return a voice session SDP answer.');
     },
     async liveTranscriptionCredential(model: string, language: string | undefined, signal: AbortSignal) {
       const provider = liveTranscriptionProvider(model);

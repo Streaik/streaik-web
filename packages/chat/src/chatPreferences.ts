@@ -9,6 +9,8 @@ import { normalizeToolConfiguration } from './toolConfiguration.ts';
 import type { ToolConfiguration } from './toolConfiguration.ts';
 import { normalizeToolPolicy } from './chatToolPolicy.ts';
 import type { ChatToolPolicy } from './chatToolPolicy.ts';
+import { normalizeRealtimeSettings } from './realtimeSettings.ts';
+import type { RealtimeSettings } from './realtimeSettings.ts';
 
 export const pinnableViews = ['models', 'providers'] as const;
 export type PinnableView = (typeof pinnableViews)[number];
@@ -32,6 +34,7 @@ export type ChatPreferences = {
   toolOutput: ToolOutputPreferences;
   mcp: McpPreferences;
   providerSettings: ProviderChatSettings;
+  realtimeSettings?: RealtimeSettings;
   reasoning: ReasoningLevel;
   toolRequestConfig: ToolConfiguration;
   useToolNamespaces: boolean;
@@ -75,6 +78,7 @@ export function normalizeChatPreferences(value: StoredPreferences | null | undef
     showMetrics: booleanPreference(value?.showMetrics, defaultChatPreferences.showMetrics),
     toolOutput,
     providerSettings: persistentProviderChatSettings(value?.providerSettings),
+    ...(value?.realtimeSettings && { realtimeSettings: normalizeRealtimeSettings(value.realtimeSettings) }),
     reasoning: reasoningLevels.find(level => level === value?.reasoning) ?? defaultChatPreferences.reasoning,
     toolRequestConfig: normalizeToolConfiguration(value?.toolRequestConfig),
     useToolNamespaces: value?.useToolNamespaces === true,
