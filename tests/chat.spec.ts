@@ -218,6 +218,120 @@ test('OpenAI voice uses the existing model picker, composer slot, and conversati
   expect((await checkProbe()).stops).toBeGreaterThanOrEqual(2);
 });
 
+test('Gemini Live and Grok Voice switch in the same composer and save portable turns', async ({ page }) => {
+  const google = 'google/gemini-2.5-flash-native-audio-preview';
+  const xai = 'xai/grok-voice-latest';
+  const googleUrl = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained';
+  const xaiUrl = 'wss://api.x.ai/v1/realtime?model=grok-voice-latest';
+  const received = { googleAudio: false, xaiAudio: false, geminiHistoryInGrok: false };
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { value: async () => {
+      const context = new AudioContext();
+      const destination = context.createMediaStreamDestination();
+      const oscillator = context.createOscillator();
+      oscillator.connect(destination);
+      oscillator.start();
+      await context.resume();
+      const track = destination.stream.getAudioTracks()[0];
+      const stop = track.stop.bind(track);
+      track.stop = () => { stop(); oscillator.stop(); void context.close(); };
+      return destination.stream;
+    } });
+  });
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: model },
+    { id: google, type: 'audio', tags: ['realtime'] }, { id: xai, type: 'audio', tags: ['realtime'] },
+    { id: 'google/gemini-3.5-transcribe-live', type: 'transcription', tags: ['realtime'] },
+  ] } }));
+  await page.route(`**/gateway/api/realtime/token/${google}`, route => {
+    expect(route.request().headers()['x-google-key']).toBe('test-google-key');
+    expect(route.request().headers()['x-openai-key']).toBeUndefined();
+    expect(route.request().postDataJSON().sessionConfig.providerOptions).toMatchObject({ google: { bidiGenerateContentSetup: {
+      model: 'models/gemini-2.5-flash-native-audio-preview', generationConfig: { responseModalities: ['AUDIO'],
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Puck' } } } },
+      inputAudioTranscription: {}, outputAudioTranscription: {},
+    } } });
+    return route.fulfill({ json: { url: googleUrl, token: 'auth_tokens/temporary' } });
+  });
+  await page.route(`**/gateway/api/realtime/token/${xai}`, route => {
+    expect(route.request().headers()['x-xai-key']).toBe('test-xai-key');
+    expect(route.request().headers()['x-google-key']).toBeUndefined();
+    expect(route.request().postDataJSON()).toEqual({ sessionConfig: { providerOptions: { xai: { expires_after: { anchor: 'created_at', seconds: 60 } } } } });
+    return route.fulfill({ json: { url: xaiUrl, token: 'temporary-xai' } });
+  });
+  await page.routeWebSocket(`${googleUrl}*`, socket => {
+    const send = (data: object) => socket.send(JSON.stringify(data));
+    socket.onMessage(data => {
+      const message = JSON.parse(String(data));
+      if (message.setup) send({ setupComplete: {} });
+      if (message.realtimeInput?.audio && !received.googleAudio) {
+        received.googleAudio = typeof message.realtimeInput.audio.data === 'string' && message.realtimeInput.audio.mimeType === 'audio/pcm;rate=16000';
+        send({ serverContent: { inputTranscription: { text: 'Gemini question' }, outputTranscription: { text: 'Gemini answer' }, turnComplete: true } });
+      }
+      if (message.realtimeInput?.audioStreamEnd) send({ serverContent: { turnComplete: true } });
+    });
+  });
+  await page.routeWebSocket(url => url.origin === 'wss://api.x.ai' && url.pathname === '/v1/realtime', socket => {
+    const send = (data: object) => socket.send(JSON.stringify(data));
+    socket.onMessage(data => {
+      const message = JSON.parse(String(data));
+      if (message.type === 'session.update') {
+        expect(message.session.voice).toBe('rex');
+        send({ type: 'session.updated' });
+      }
+      if (message.type === 'conversation.item.create' && message.item.role === 'assistant' && message.item.content[0]?.text === 'Gemini answer')
+        received.geminiHistoryInGrok = true;
+      if (message.type === 'input_audio_buffer.append' && !received.xaiAudio) {
+        received.xaiAudio = typeof message.audio === 'string' && message.audio.length > 0;
+        send({ type: 'input_audio_buffer.committed', item_id: 'grok-input' });
+        send({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'grok-input', transcript: 'Grok question' });
+        send({ type: 'response.created', response: { id: 'grok-output' } });
+        send({ type: 'response.output_audio_transcript.done', transcript: 'Grok answer' });
+        send({ type: 'response.done', response: { id: 'grok-output', status: 'completed' } });
+      }
+    });
+  });
+  await page.goto('/');
+  await showSettings(page);
+  await addKey(page);
+  await addKey(page, 'Google Gemini', 'test-google-key');
+  await addKey(page, 'xAI', 'test-xai-key');
+  await closeSettings(page);
+  await modelPicker(page).click();
+  await expect(page.getByRole('option', { name: 'gemini-3.5-transcribe-live', exact: true })).toHaveCount(0);
+  await page.getByRole('option', { name: 'gemini-2.5-flash-native-audio-preview', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Chat settings', exact: true });
+  const settings = () => page.getByRole('button', { name: 'Chat settings', exact: true }).click();
+  const start = page.getByRole('button', { name: 'Start voice session', exact: true });
+  const stop = page.getByRole('button', { name: 'Stop voice session', exact: true });
+  await settings();
+  await expect(dialog.getByRole('tab', { name: 'xAI', exact: true })).toHaveCount(0);
+  await dialog.getByRole('tab', { name: 'Google', exact: true }).click();
+  await dialog.getByRole('combobox', { name: 'Voice', exact: true }).selectOption('Puck');
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await start.click(); await expect(stop).toBeVisible();
+  await expect(page.getByText('Gemini answer', { exact: true })).toBeVisible();
+  await stop.click(); await expect(start).toBeVisible();
+  await chooseModel(page, 'grok-voice-latest');
+  await settings();
+  await expect(dialog.getByRole('tab', { name: 'Google', exact: true })).toHaveCount(0);
+  await dialog.getByRole('tab', { name: 'xAI', exact: true }).click();
+  await dialog.getByRole('combobox', { name: 'Voice', exact: true }).selectOption('rex');
+  await dialog.getByRole('spinbutton', { name: 'Token TTL seconds', exact: true }).fill('60');
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await start.click(); await expect(stop).toBeVisible();
+  await expect(page.getByText('Grok answer', { exact: true })).toBeVisible();
+  await stop.click(); await expect(start).toBeVisible();
+  expect(received).toEqual({ googleAudio: true, xaiAudio: true, geminiHistoryInGrok: true });
+  await page.reload();
+  await expect(page.getByText('Gemini question', { exact: true })).toBeVisible();
+  await expect(page.getByText('Grok answer', { exact: true })).toBeVisible();
+  await chooseChatModel(page);
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeVisible();
+  await settings();
+  await expect(dialog.getByRole('tab', { name: 'Google', exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole('tab', { name: 'xAI', exact: true })).toHaveCount(0);
+});
+
 for (const action of ['accept', 'decline', 'cancel'] as const) {
   test(`Echo asks for provider input and continues with ${action}`, async ({ page }) => {
     const echo = 'echo/echo-input-required';

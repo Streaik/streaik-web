@@ -1,5 +1,5 @@
 import { useChat } from '@ai-sdk/react';
-import { GatewayError, gatewayChatEndpoints, isVoiceCatalogModel, nativeChatEndpoints, openAiVoiceProtocol, pickChatCatalogModels } from '@streaik/gateway';
+import { GatewayError, gatewayChatEndpoints, isVoiceCatalogModel, nativeChatEndpoints, voiceProtocolForModel, pickChatCatalogModels } from '@streaik/gateway';
 import type { AgentBackend, ChatRoute, DirectChat, GatewayChatEndpoint, HostedAgentSelection } from '@streaik/gateway';
 import type { CatalogModel, ChatMessage, ChatReasoning, ChatToolChoice, Gateway } from '@streaik/gateway';
 import { Button, ThemeRoot, useColorScheme } from '@streaik/themes';
@@ -29,7 +29,9 @@ import type { ComposerDictation } from './composerDictation';
 import { dictationFormat } from './microphone';
 import { liveSession, realtimeSession } from './realtimeSettings';
 import { startVoiceConversation, voiceHistory } from './voiceConversation';
-import type { VoiceSession } from './voiceConversation';
+import type { VoiceCallbacks, VoiceSession } from './voiceConversation';
+import { startSocketVoiceConversation } from './socketVoiceConversation';
+import { socketVoiceSetup } from './socketVoiceSettings';
 import { pageRouteMenu } from './routeMenu';
 import { AgentsProvider, useAgents } from './AgentsProvider';
 import { AgentsView } from './AgentsView';
@@ -680,7 +682,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     if (toolParts.every(({ part }) => toolComplete(part))) {
       turn.toolChoice = continueToolPolicy(turn.toolPolicy, parts, turn.toolProgress);
       if (turn.voiceMessage) {
-        voiceRun.current?.session?.continueTools(turn.toolChoice, turn.toolChoice === 'none' && voiceProtocol === 'live');
+        voiceRun.current?.session?.continueTools(turn.toolChoice, turn.toolChoice === 'none' && (voiceProtocol === 'live' || voiceProtocol === 'xai'));
         setTurn(undefined);
       } else {
         void sendMessage(undefined, { body: requestBody(turn) });
@@ -879,8 +881,11 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     : undefined;
   const modelId = agentMode ? hostedSelection?.id ?? browserModel?.id : selected[0]?.id;
   const voiceProtocol = !agentMode && route.mode === 'gateway' && selected[0] && isVoiceCatalogModel(selected[0])
-    ? openAiVoiceProtocol(selected[0].id) : undefined;
-  const canUseVoice = typeof globalThis.navigator?.mediaDevices?.getUserMedia === 'function' && typeof RTCPeerConnection !== 'undefined';
+    ? voiceProtocolForModel(selected[0].id) : undefined;
+  const socketVoice = voiceProtocol === 'google' || voiceProtocol === 'xai';
+  const canUseVoice = typeof globalThis.navigator?.mediaDevices?.getUserMedia === 'function' && (socketVoice
+    ? typeof WebSocket !== 'undefined' && typeof AudioContext !== 'undefined' && typeof AudioWorkletNode !== 'undefined'
+    : typeof RTCPeerConnection !== 'undefined');
   const voiceAgents = (agents?.entries ?? []).filter(({ definition }) => !!browserAgentModel(definition, textCatalog));
   const conversationCost = useMemo(() => conversationGatewayCost(messages), [messages]);
   const contextUsage = preferences.showContextSize ? latestContextUsage(messages, agentMode ? browserModel ? [browserModel] : [] : selected) : undefined;
@@ -949,40 +954,44 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     })).filter(tool => /^[\w-]{1,64}$/.test(tool.name));
     const history = voiceHistory(messages);
     const instructions = context ? requestContextText(context).join('\n\n') : undefined;
-    let session: object;
-    try { session = voiceProtocol === 'live' ? liveSession(preferencesVoice?.live, history, instructions, functions, nativeTurn.toolChoice)
-      : realtimeSession(preferencesVoice?.realtime, instructions, functions, nativeTurn.toolChoice); }
-    catch (error) { setVoiceNotice(error instanceof Error ? error.message : 'Could not configure the voice session.'); return; }
     if (!messages.some(message => message.parts.length)) prepareName();
     setPendingModel(modelId);
     const run: VoiceRun = { controller: new AbortController() };
     voiceRun.current = run;
     setVoicePhase('connecting');
     const current = () => voiceRun.current === run;
+    let pendingVoiceTools: string | undefined;
+    const cancelTools = (messageId: string) => {
+      if (!current() || messageId !== pendingVoiceTools) return;
+      operation.current?.abort(); operation.current = null;
+      setToolBusy(false); setStaged(undefined); setTurn(undefined);
+      setMessages(current => current.map(message => message.id === messageId ? { ...message,
+        parts: message.parts.map(part => part.type === 'dynamic-tool' && part.state === 'input-available'
+          ? { ...part, state: 'output-error', errorText: 'The voice session ended or interrupted this tool call.' } : part) } : message));
+      pendingVoiceTools = undefined;
+    };
     const closed = () => {
       if (!current()) return;
+      if (pendingVoiceTools) cancelTools(pendingVoiceTools);
       voiceRun.current = undefined;
       operation.current?.abort(); operation.current = null;
       setVoicePhase(undefined); setTurn(undefined); setToolBusy(false); setStaged(undefined);
       void stop();
       setMessages(messages => messages.filter(message => message.parts.length));
     };
-    const vad = preferencesVoice?.realtime?.vad;
     try {
-      const voice = await startVoiceConversation({ gateway, model: modelId, protocol: voiceProtocol, session, history, liveClient,
-        ttl: preferencesVoice?.realtime?.tokenTtl, signal: run.controller.signal,
-        manual: voiceProtocol === 'realtime' ? vad === null ? 'commit' : vad?.create_response === false ? 'respond' : undefined : undefined,
-        transcription: preferencesVoice?.realtime?.transcription !== null, exposeInput: true,
-        toolNames: new Set(functions.map(tool => tool.name)), events: {
+      const events: VoiceCallbacks = {
           publish: message => { if (current()) publishVoice(message); },
           tools: (message, calls) => {
             if (!current()) return;
+            pendingVoiceTools = message.id;
             setTurn({ ...nativeTurn, route: { mode: 'gateway', endpoint: '/v1/responses' }, voiceMessage: message.id,
               resolved: new Set(), toolProgress: { seen: new Set(), completed: 0 } });
             publishVoice({ ...message, parts: [...message.parts, ...calls.map(({ id, name, input }): Invocation => ({
               type: 'dynamic-tool', toolName: name, toolCallId: id, state: 'input-available', input,
             }))] });
           },
+          cancelTools,
           delegate: id => {
             if (!current() || !target) return;
             const next = createTurn(target.id);
@@ -1004,7 +1013,21 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
                 ? error.message : 'The voice session ended.');
             closed();
           },
-        } });
+      };
+      let voice: VoiceSession;
+      if (voiceProtocol === 'google' || voiceProtocol === 'xai') {
+        const setup = socketVoiceSetup(voiceProtocol, modelId, preferencesVoice, history, instructions, functions, nativeTurn.toolChoice !== 'none');
+        voice = await startSocketVoiceConversation(gateway, modelId, setup, run.controller.signal, events);
+      } else {
+        const session = voiceProtocol === 'live' ? liveSession(preferencesVoice?.live, history, instructions, functions, nativeTurn.toolChoice)
+          : realtimeSession(preferencesVoice?.realtime, instructions, functions, nativeTurn.toolChoice);
+        const vad = preferencesVoice?.realtime?.vad;
+        voice = await startVoiceConversation({ gateway, model: modelId, protocol: voiceProtocol, session, history, liveClient,
+          ttl: preferencesVoice?.realtime?.tokenTtl, signal: run.controller.signal,
+          manual: voiceProtocol === 'realtime' ? vad === null ? 'commit' : vad?.create_response === false ? 'respond' : undefined : undefined,
+          transcription: preferencesVoice?.realtime?.transcription !== null, exposeInput: true,
+          toolNames: new Set(functions.map(tool => tool.name)), events });
+      }
       if (current()) { run.session = voice; setVoicePhase('active'); }
     } catch (error) {
       if (current()) { setVoiceNotice(errorMessage(error, 'Could not start the voice session.')); closed(); }
@@ -1092,7 +1115,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           </div>}
           {toolNotice && <p className="chat-notice" role="status">{t(toolNotice)}</p>}
           {voiceProtocol && voiceNotice && <p className="chat-notice chat-error" role="alert">{t(voiceNotice)}</p>}
-          {voiceProtocol && !canUseVoice && <p className="chat-notice" role="status">{t('Voice requires microphone access and WebRTC.')}</p>}
+          {voiceProtocol && !canUseVoice && <p className="chat-notice" role="status">{t(socketVoice
+            ? 'Voice requires microphone access, WebSocket, and Web Audio.' : 'Voice requires microphone access and WebRTC.')}</p>}
           {!connectingMcp && missingMcp.length > 0 && <p className="chat-notice" role="status">
             {t('Install, authorize, or reconnect the agent’s MCP servers in Model Context: {{servers}}', { servers: missingMcp.map(({ key }) => key).join(', ') })}
           </p>}

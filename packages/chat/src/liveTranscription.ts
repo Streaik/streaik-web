@@ -61,7 +61,7 @@ export async function runMicrophone(gateway: Gateway, model: string, language: s
   } finally { events.signal.removeEventListener('abort', release); release(); }
 }
 
-async function capturePcm(stream: MediaStream, rate: number, signal: AbortSignal, setup: AbortSignal, write: (bytes: ArrayBuffer) => void) {
+export async function capturePcm(stream: MediaStream, rate: number, signal: AbortSignal, setup: AbortSignal, write: (bytes: ArrayBuffer) => void) {
   const audio = new AudioContext({ sampleRate: rate });
   const ready = new EventTarget();
   let source: MediaStreamAudioSourceNode | undefined;

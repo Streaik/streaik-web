@@ -172,8 +172,39 @@ export function openAiVoiceProtocol(id: string): 'live' | 'realtime' | undefined
   if (/^openai\/gpt-(?:4o-)?realtime(?:-|$)/i.test(id)) return 'realtime';
 }
 
+export type SocketVoiceProvider = 'google' | 'xai';
+
+export function socketVoiceProvider(id: string): SocketVoiceProvider | undefined {
+  if (id === 'xai/grok-voice-latest') return 'xai';
+  if (/^google\/gemini-[a-z0-9.-]+$/.test(id) && /-(?:live|native-audio)(?:-|$)/.test(id) &&
+    !/-(?:transcribe|transcription|tts|stt|asr)(?:-|$)/.test(id)) return 'google';
+}
+
+export type VoiceProtocol = NonNullable<ReturnType<typeof openAiVoiceProtocol>> | SocketVoiceProvider;
+export const voiceProtocolForModel = (id: string): VoiceProtocol | undefined => openAiVoiceProtocol(id) ?? socketVoiceProvider(id);
+
 export function isVoiceCatalogModel(model: CatalogModel) {
-  return model.type === 'audio' && model.tags.includes('realtime') && !!openAiVoiceProtocol(model.id);
+  return model.type === 'audio' && model.tags.includes('realtime') && !!voiceProtocolForModel(model.id);
+}
+
+function voiceSocketCredential(provider: SocketVoiceProvider, payload: unknown, model: string) {
+  const { url, token, expiresAt } = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
+  const invalid = () => new GatewayError('The gateway returned an invalid or expired voice credential.');
+  if (typeof url !== 'string' || typeof token !== 'string' || !token || token.length > 4096 ||
+    (expiresAt != null && (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt) || expiresAt <= Date.now() / 1000))) throw invalid();
+  let destination: URL;
+  try { destination = new URL(url); } catch { throw invalid(); }
+  if (destination.protocol !== 'wss:' || destination.port || destination.username || destination.password || destination.hash) throw invalid();
+  if (provider === 'google') {
+    if (destination.hostname !== 'generativelanguage.googleapis.com' || destination.search ||
+      !/^\/ws\/google\.ai\.generativelanguage\.v1(?:alpha|beta)\.GenerativeService\.BidiGenerateContentConstrained$/.test(destination.pathname) ||
+      !/^auth_tokens\/[A-Za-z0-9._~-]+$/.test(token)) throw invalid();
+    destination.searchParams.set('access_token', token);
+    return { url: destination.href };
+  }
+  if (destination.hostname !== 'api.x.ai' || destination.pathname !== '/v1/realtime' ||
+    destination.search !== `?model=${model.slice(4)}` || !/^[A-Za-z0-9._~-]+$/.test(token)) throw invalid();
+  return { url: destination.href, protocols: [token.startsWith('xai-client-secret.') ? token : `xai-client-secret.${token}`] };
 }
 
 export function readChatModels(payload: unknown): ChatModel[] {
@@ -374,6 +405,22 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
         if (answer.trim()) return answer;
       }
       throw new GatewayError('The gateway did not return a voice session SDP answer.');
+    },
+    async realtimeVoiceCredential(model: string, tokenOptions: object, signal: AbortSignal) {
+      const provider = socketVoiceProvider(model);
+      if (!provider) throw new GatewayError('Choose a compatible realtime voice model.');
+      const path = `api/realtime/token/${provider}/${encodeURIComponent(model.slice(provider.length + 1))}`;
+      const response = await request(root && new URL(path, root).href, { kind: 'realtime', provider }, {
+        method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json' }, signal,
+        body: JSON.stringify({ sessionConfig: { providerOptions: { [provider]: tokenOptions } } }),
+      });
+      let payload: unknown;
+      try { payload = await response.json(); } catch {
+        signal.throwIfAborted();
+        throw new GatewayError('The gateway returned an unreadable voice credential.');
+      }
+      signal.throwIfAborted();
+      return voiceSocketCredential(provider, payload, model);
     },
     async liveTranscriptionCredential(model: string, language: string | undefined, signal: AbortSignal) {
       const provider = liveTranscriptionProvider(model);

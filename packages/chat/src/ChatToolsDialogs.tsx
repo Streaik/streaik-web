@@ -24,6 +24,8 @@ import { ToolConfigurationEditor } from './ToolConfigurationEditor';
 import type { ToolConfigurationRow } from './ToolConfigurationEditor';
 import { OpenAIRealtimeConfigForm } from './OpenAIRealtimeConfigForm';
 import type { LiveClientAgent } from './OpenAIRealtimeConfigForm';
+import type { VoiceProtocol } from '@streaik/gateway';
+import { GoogleRealtimeConfigForm, XaiRealtimeConfigForm } from './SocketRealtimeConfigForms';
 import { normalizeRealtimeSettings } from './realtimeSettings';
 import type { RealtimeSettings } from './realtimeSettings';
 
@@ -72,7 +74,7 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, browserTo
   dialog: DialogRef; value: ChatPreferences; onChange: (preferences: ChatPreferences) => void;
   gateway: boolean; browserToolsSupported: boolean; hasHistory: boolean; locked: boolean; localSkills: LocalSkills; remoteSkills: RemoteSkills;
   providerModels: readonly ChatModel[];
-  voice?: { protocol: 'live' | 'realtime'; models: readonly ChatModel[]; agents: readonly LiveClientAgent[] };
+  voice?: { protocol: VoiceProtocol; models: readonly ChatModel[]; agents: readonly LiveClientAgent[] };
   toolRows: readonly ToolConfigurationRow[]; namespaceSupported: boolean; toolOptionsSupported: boolean;
 }) {
   const { t } = useAppTranslation();
@@ -83,8 +85,10 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, browserTo
   const [resetKey, setResetKey] = useState(0);
   const providers = activeChatProviders(providerModels);
   if (voice) providers.delete('openai');
+  const voiceLabel = voice?.protocol === 'google' ? 'Google' : voice?.protocol === 'xai' ? 'xAI' : chatProviders.openai.label;
+  const voiceSettings = voiceDraft ?? value.realtimeSettings ?? {};
   const tabs: [ChatSettingsTab, string][] = [['general', t('General')], ['tools', t('Tools')],
-    ['tool-configuration', t('Tool configuration')], ['skills', t('Skills')], ...(voice ? [['realtime', chatProviders.openai.label] as [ChatSettingsTab, string]] : []),
+    ['tool-configuration', t('Tool configuration')], ['skills', t('Skills')], ...(voice ? [['realtime', voiceLabel] as [ChatSettingsTab, string]] : []),
     ...[...providers.keys()].map((provider): [ChatProviderId, string] => [provider, chatProviders[provider].label])];
   const tab = tabs.some(([key]) => key === requestedTab) ? requestedTab : 'general';
   const providerTab = tab !== 'general' && tab !== 'tools' && tab !== 'skills' && tab !== 'tool-configuration' && tab !== 'realtime' ? tab : undefined;
@@ -178,9 +182,13 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, browserTo
       </section>
     </div>
     {voice && <div id={`${id}-realtime-panel`} role="tabpanel" aria-labelledby={`${id}-realtime-tab`} hidden={tab !== 'realtime'}>
-      {tab === 'realtime' && <fieldset className="chat-provider-fields" disabled={locked} aria-label={chatProviders.openai.label}>
-        <OpenAIRealtimeConfigForm value={voiceDraft ?? value.realtimeSettings ?? {}} onChange={setVoiceDraft}
-          models={voice.models} agents={voice.agents} protocol={voice.protocol} />
+      {tab === 'realtime' && <fieldset className="chat-provider-fields" disabled={locked} aria-label={voiceLabel}>
+        {voice.protocol === 'google' ? <GoogleRealtimeConfigForm value={voiceSettings.google ?? {}}
+          onChange={google => setVoiceDraft({ ...voiceSettings, google })} />
+          : voice.protocol === 'xai' ? <XaiRealtimeConfigForm value={voiceSettings.xai ?? {}}
+            onChange={xai => setVoiceDraft({ ...voiceSettings, xai })} />
+            : <OpenAIRealtimeConfigForm value={voiceSettings} onChange={setVoiceDraft}
+              models={voice.models} agents={voice.agents} protocol={voice.protocol} />}
       </fieldset>}
     </div>}
     {[...providers].map(([provider, models]) => <div key={provider} id={`${id}-${provider}-panel`}

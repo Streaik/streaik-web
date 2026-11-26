@@ -22,9 +22,10 @@ export function voiceHistory(messages: readonly ChatMessage[]): VoiceHistoryItem
 }
 
 export type VoiceCall = { id: string; name: string; input: unknown };
-type VoiceCallbacks = {
+export type VoiceCallbacks = {
   publish: (message: ChatMessage) => void;
   tools: (message: ChatMessage, calls: VoiceCall[]) => void;
+  cancelTools?: (messageId: string) => void;
   delegate: (id: string) => void;
   failure: (error: Error) => void;
   closed: () => void;

@@ -1,7 +1,12 @@
+import { normalizeGoogleVoice, normalizeXaiVoice } from './socketVoiceSettings.ts';
+import type { GoogleVoiceSettings, XaiVoiceSettings } from './socketVoiceSettings';
+
 const formats = ['audio/pcm', 'audio/pcma', 'audio/pcmu'] as const;
 const efforts = ['minimal', 'low', 'medium', 'high'] as const;
 const hostedTools = ['web_search', 'code_interpreter', 'file_search'] as const;
 export type RealtimeSettings = {
+  google?: GoogleVoiceSettings;
+  xai?: XaiVoiceSettings;
   realtime?: {
     instructions?: string; voice?: string; speed?: number; reasoning?: typeof efforts[number] | null;
     truncation?: 'auto' | 'disabled'; tokenTtl?: number; output?: 'audio' | 'text'; maxTokens?: number | 'inf'; tracing?: 'auto' | null;
@@ -30,10 +35,12 @@ const num = (v: unknown, min: number, max: number, integer = true) => typeof v =
 const maybeNull = <T>(v: unknown, value: T) => v === null ? null : value;
 
 export function normalizeRealtimeSettings(value: unknown): RealtimeSettings {
-  const { realtime, live } = object(value);
+  const { realtime, live, google, xai } = object(value);
   const r = object(realtime), l = object(live), tr = object(r.transcription), vad = object(r.vad);
   const type = choice(vad.type, ['server_vad', 'semantic_vad']);
   return {
+    ...(google != null && { google: normalizeGoogleVoice(google) }),
+    ...(xai != null && { xai: normalizeXaiVoice(xai) }),
     ...(realtime != null && { realtime: {
       instructions: text(r.instructions), voice: text(r.voice), speed: num(r.speed, 0.25, 4, false),
       reasoning: maybeNull(r.reasoning, choice(r.reasoning, efforts)), truncation: choice(r.truncation, ['auto', 'disabled']),
