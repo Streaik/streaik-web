@@ -1,6 +1,6 @@
 import * as Menu from '@radix-ui/react-dropdown-menu';
 import { Button, Tooltip, useColorScheme } from '@streaik/themes';
-import type { CatalogModel } from '@streaik/gateway';
+import type { CatalogModel, Gateway } from '@streaik/gateway';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AgentEditor, ConfirmAgentChange } from './AgentEditor';
@@ -62,10 +62,12 @@ function AgentCardActions({ entry, container, onAction }: {
 }
 
 import type { McpServers } from './useMcpServers';
+import type { LocalSkills } from './useLocalSkills';
+import type { RemoteSkills } from './useRemoteSkills';
 
-export function AgentsView({ catalog, catalogStatus, toolbar, menuContainer, mcpServers }: {
+export function AgentsView({ catalog, catalogStatus, toolbar, menuContainer, mcpServers, localSkills, remoteSkills, gateway }: {
   catalog: readonly CatalogModel[]; catalogStatus?: string; toolbar: HTMLDivElement | null; menuContainer: HTMLDivElement | null;
-  mcpServers: McpServers;
+  mcpServers: McpServers; localSkills: LocalSkills; remoteSkills: RemoteSkills; gateway: Gateway;
 }) {
   const { t } = useAppTranslation();
   const store = useAgents();
@@ -121,6 +123,6 @@ export function AgentsView({ catalog, catalogStatus, toolbar, menuContainer, mcp
       })}</div>}
     {action?.kind === 'remove' ? <ConfirmAgentChange entry={action.entry} onConfirm={() => store.removeChange(action.entry)} onClose={end} />
       : action && <AgentEditor entry={action.kind === 'edit' ? action.entry : undefined} seed={action.kind === 'create' ? action.seed : undefined}
-        catalog={catalog} catalogStatus={catalogStatus} tags={tagOptions} mcpServers={mcpServers} onSave={store.save} onClose={end} />}
+        {...{ catalog, catalogStatus, mcpServers, localSkills, remoteSkills, gateway }} tags={tagOptions} onSave={store.save} onClose={end} />}
   </section>;
 }

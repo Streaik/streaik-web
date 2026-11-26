@@ -151,7 +151,9 @@ registeredNames.add(readResourceTool.name);
 export function activeChatTools(route: ChatRoute, enabled: readonly LocalPluginId[], historyAvailable: boolean, mcpTools: readonly McpTool[], hasSkills = false,
   resourceTool?: ToolDefinition): ChatTool[] {
   const tools: ChatTool[] = [];
-  if (route.mode === 'gateway' && hasSkills) for (const definition of skillTools) tools.push({ source: 'skill', definition });
+  if (hasSkills && (route.mode === 'gateway' || route.mode === 'direct')) {
+    for (const definition of skillTools) tools.push({ source: 'skill', definition });
+  }
   for (const plugin of localPlugins) {
     if (enabled.includes(plugin.id) && (!plugin.requiresHistory || historyAvailable)) {
       for (const spec of plugin.tools) tools.push({ source: 'local', plugin, spec, definition: spec.definition });

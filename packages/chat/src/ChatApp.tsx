@@ -50,7 +50,7 @@ import type { ChatRequestTool } from './chatToolRequest';
 import { continueToolPolicy, toolComplete, toolPolicyForTurn } from './chatToolPolicy';
 import type { ChatToolPolicy, ToolProgress } from './chatToolPolicy';
 import { resolveSkillTool } from './skillTools';
-import type { TurnRemoteSkills } from './skillTools';
+import type { TurnSkillArchives } from './skillTools';
 import type { LocalSkill } from './skillBundles';
 import { defaultSkillVersion } from './skillBundles';
 import { SkillsView } from './SkillsView';
@@ -60,6 +60,7 @@ import { useRemoteSkills } from './useRemoteSkills';
 import type { RemoteSkills } from './useRemoteSkills';
 import { assignedAgent } from './agentCatalog';
 import type { AgentsConfig } from './agentCatalog';
+import { browserChatSkills } from './agentChatSkills';
 import { agentModels as configuredAgentModels } from './agentDefinition';
 import { agentProviderOptions, agentProviderRequest } from './agentProviderSettings';
 import { conversationOpeningText, deleteConversation, listConversations, newConversation, newestFirst, saveConversation } from './conversations';
@@ -400,7 +401,7 @@ function HistoryChat({ appName, gateway, connection, scope, models, route, onRou
 type HostedTurn = { endpoint: GatewayChatEndpoint; selection: HostedAgentSelection };
 type Turn = { model: string; route: ChatRoute; tools: ChatTool[]; context?: RequestContext; hosted?: HostedTurn;
   requestTools: ChatRequestTool[];
-  catalog: readonly CatalogModel[]; skills: readonly LocalSkill[]; remoteSkills?: TurnRemoteSkills;
+  catalog: readonly CatalogModel[]; skills: readonly LocalSkill[]; skillArchives?: TurnSkillArchives;
   providerSettings?: ProviderChatSettings; reasoning?: ChatReasoning;
   toolPolicy: ChatToolPolicy; toolChoice?: ChatToolChoice; toolProgress: ToolProgress; resolved: Set<string> };
 const isApiChat = (route: ChatRoute | undefined) => !route || (route.mode === 'gateway' && route.endpoint === '/api/chat');
@@ -572,15 +573,18 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     : gateway.chatTransport(route.endpoint), [gateway, direct, route]);
   const { online: skillsOnline, skills: providerSkills, busy: skillsBusy, needsLoad: needsSkills, cursor: skillCursor,
     error: skillCatalogError, load: loadSkills } = remoteSkills;
-  const enabledRemoteSkills = useMemo(() => gatewayRoute && skillsOnline ? providerSkills.filter(skill => preferences.remoteSkillIds.includes(skill.id)) : [],
-    [gatewayRoute, skillsOnline, providerSkills, preferences.remoteSkillIds]);
+  const skillMode = hostedRoute ? 'agents' : runRoute.mode;
+  const attachedSkills = view === 'chat' ? chatAgent?.skills : undefined;
+  const chatSkills = useMemo(() => browserChatSkills({ mode: skillMode, skills: attachedSkills, local: localSkills.skills,
+    catalog: providerSkills, selectedIds: preferences.remoteSkillIds, gateway: skillsOnline ? gateway : undefined }),
+    [skillMode, attachedSkills, localSkills.skills, providerSkills, preferences.remoteSkillIds, skillsOnline, gateway]);
   // Restore saved selections even if the user never opens the Skills tab in this session.
-  const restoringSkills = gatewayRoute && skillsOnline && enabledRemoteSkills.length < preferences.remoteSkillIds.length
+  const restoringSkills = view === 'chat' && chatSkills.missingCatalog
     && skillCatalogError === undefined && (skillsBusy || needsSkills || !!skillCursor);
   useEffect(() => {
     if (restoringSkills && !skillsBusy) loadSkills(skillCursor);
   }, [restoringSkills, skillsBusy, loadSkills, skillCursor]);
-  const hasSkills = enabledRemoteSkills.length > 0 || localSkills.skills.some(({ enabled }) => enabled);
+  const hasSkills = chatSkills.archives.length > 0 || chatSkills.local.some(({ enabled }) => enabled);
   const mcpCatalog = mcpResourceCatalog(connectedMcp);
   const mcpTools = connectedMcp.flatMap(({ record, discovery }) => {
     const declaration = declaredMcp.find(entry => entry.endpoint === record.endpoint);
@@ -588,8 +592,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   }).filter((tool, index, all) => all.findIndex(other => other.name === tool.name) === index);
   const enabledTools = hostedRoute ? [] : activeChatTools(runRoute, preferences.plugins, hasHistory, mcpTools, hasSkills, mcpCatalog ? readResourceTool : undefined);
   const configuredTools = configureChatTools(enabledTools, preferences.toolRequestConfig, preferences.useToolNamespaces, chatAgent);
-  const baseContext = useMemo(() => gatewayRoute ? buildRequestContext(appName, language, darkMode, localSkills.skills, enabledRemoteSkills) : undefined,
-    [gatewayRoute, appName, language, darkMode, localSkills.skills, enabledRemoteSkills]);
+  const baseContext = useMemo(() => gatewayRoute || hasSkills ? buildRequestContext(appName, language, darkMode, chatSkills.local, chatSkills.archives) : undefined,
+    [gatewayRoute, hasSkills, appName, language, darkMode, chatSkills]);
   const chatInstructions = hostedRoute ? undefined : chatAgent?.instructions;
   const context = mcpCatalog || chatInstructions ? { ...baseContext, ...(mcpCatalog && { mcp: mcpCatalog }),
     ...(chatInstructions && { chatInstructions }) } : baseContext;
@@ -605,7 +609,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       label: defaultSkillVersion(skill).metadata.name, icon: 'docs' as const,
       remove: () => localSkills.update(items => items.map(item => item.id === skill.id ? { ...item, enabled: false } : item)),
     })) : []),
-    ...enabledRemoteSkills.map(skill => ({ key: `remote-skill:${skill.id}`, label: skill.name, icon: 'docs' as const,
+    ...chatSkills.preferenceSkills.map(skill => ({ key: `remote-skill:${skill.id}`, label: skill.name, icon: 'docs' as const,
       remove: () => onPreferences({ ...preferences, remoteSkillIds: preferences.remoteSkillIds.filter(id => id !== skill.id) }),
     })),
   ];
@@ -695,7 +699,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           : await runLocalTool(tool, part.input, { catalog: turn.catalog, history: tool.plugin.requiresHistory ? readHistory?.() ?? [] : [],
             searchConversationText: tool.plugin.requiresHistory ? searchConversationText : undefined });
       } else if (tool.source === 'skill') {
-        output = await resolveSkillTool(tool.definition.name, part.input, turn.skills, turn.remoteSkills, controller.signal);
+        output = await resolveSkillTool(tool.definition.name, part.input, turn.skills, turn.skillArchives, controller.signal);
       } else if (tool.source === 'mcp-resource') {
         const target = resolveResourceRead(connectedMcp, part.input);
         const enabled = target && turn.context?.mcp?.mcpResourceCatalog.servers.some(server => server.serverId === target.record.id);
@@ -758,13 +762,13 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     setPendingModel(decision ? undefined : model);
     const seen = new Set(messages.flatMap(message => message.parts.flatMap(part => 'toolCallId' in part ? [part.toolCallId] : [])));
     const toolPolicy = toolPolicyForTurn(preferences.toolPolicy, new Set(enabledTools.map(tool => tool.definition.name)));
-    const next: Turn = { model, route: runRoute, tools: enabledTools, context, catalog: runCatalog, skills: localSkills.skills,
+    const next: Turn = { model, route: runRoute, tools: enabledTools, context, catalog: runCatalog, skills: chatSkills.local,
       toolPolicy, toolChoice: hostedRoute ? undefined : toolPolicy.toolChoice, toolProgress: { seen, completed: 0 }, resolved: new Set(),
       requestTools: chatRequestTools(configuredTools),
       hosted: hostedRoute && hostedSelection ? { endpoint: hostedRoute.endpoint, selection: hostedSelection } : undefined,
       providerSettings: !hostedRoute && isApiChat(runRoute) ? turnProviderSettings : undefined,
       reasoning: !hostedRoute && isApiChat(runRoute) && preferences.reasoning !== 'none' ? preferences.reasoning : undefined,
-      remoteSkills: enabledRemoteSkills.length ? { skills: enabledRemoteSkills, download: gateway.downloadSkill, bundles: new Map() } : undefined };
+      skillArchives: chatSkills.archives.length ? { skills: chatSkills.archives, bundles: new Map() } : undefined };
     setTurn(next);
     return { ...requestBody(next), ...(decision && { decision }) };
   }
@@ -971,7 +975,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           : view === 'models' ? <ModelsView models={result?.error ? undefined : result?.catalog}
           status={!connection.ready ? connection.emptyMessage : !result ? t('Loading models…') : result.error}
            refresh={connection.ready && result ? reload : undefined} /> : view === 'agents'
-          ? <AgentsView catalog={agentModels?.catalog ?? []} catalogStatus={agentModelStatus} mcpServers={mcpServers}
+          ? <AgentsView catalog={agentModels?.catalog ?? []} catalogStatus={agentModelStatus} {...{ mcpServers, localSkills, remoteSkills, gateway }}
             toolbar={catalogToolbar} menuContainer={menuContainer} /> : view === 'skills'
           ? <SkillsView store={localSkills} gateway={gateway} remote={remoteSkills} toolbar={catalogToolbar} menuContainer={menuContainer} />
           : <ProvidersView appName={appName} />}

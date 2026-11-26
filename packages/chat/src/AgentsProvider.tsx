@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { buildAgentCatalog, emptyAgentData, readAgentData, removeAgentChange, saveAgentDefinition, serializeAgentData, setRoleAssignment } from './agentCatalog';
 import type { AgentData, AgentEntry, AgentKey, AgentRole, AgentsConfig } from './agentCatalog';
 import type { AgentDefinition } from './agentDefinition';
+import { AgentDraftError } from './agentDraft';
 
 type AgentStore = {
   config: AgentsConfig;
@@ -36,12 +37,13 @@ export function AgentsProvider({ config, scope, children }: { config?: AgentsCon
     setStored(snapshot);
   }
 
-  function commit(data: AgentData) {
+  function commit(data: AgentData, skillsChanged = false) {
     if (!key || snapshot.readFailed) { setStored({ ...snapshot, data }); return; }
     try {
       localStorage.setItem(key, serializeAgentData(data));
       setStored({ key, data });
     } catch {
+      if (skillsChanged) throw new AgentDraftError('skills', 'Could not save skills to this browser. For a large embedded copy, try using a link instead.');
       setStored({ key, data, notice: 'Could not save agents to this browser. Changes are kept only for this session.' });
     }
   }
@@ -51,7 +53,8 @@ export function AgentsProvider({ config, scope, children }: { config?: AgentsCon
     const { data, notice } = snapshot;
     const entries = buildAgentCatalog(config, data);
     value = { config, data, entries, notice,
-      save: (definition, entry) => commit(saveAgentDefinition(data, entries, definition, entry, entry ? undefined : crypto.randomUUID())),
+      save: (definition, entry) => commit(saveAgentDefinition(data, entries, definition, entry, entry ? undefined : crypto.randomUUID()),
+        definition.skills !== entry?.definition.skills),
       removeChange: (entry) => commit(removeAgentChange(data, entry)),
       assign: (role, selection) => commit(setRoleAssignment(data, role, selection)),
     };

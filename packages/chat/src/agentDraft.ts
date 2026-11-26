@@ -2,7 +2,7 @@ import { agentModels, isAgentDefinition, isModel, isObject } from './agentDefini
 import type { AgentDefinition, AgentModel, JsonObject, JsonValue } from './agentDefinition.ts';
 import { agentMcpServers } from './agentTools.ts';
 
-export type AgentTab = 'general' | 'details' | 'realtime' | 'tools' | 'tool-configuration';
+export type AgentTab = 'general' | 'details' | 'realtime' | 'skills' | 'tools' | 'tool-configuration';
 type IconScheme = 'light' | 'dark';
 export type IconDraft = { key: number; original?: JsonValue; src: string; theme: string };
 const speechTextFields = ['voice', 'instructions', 'language'] as const;
@@ -11,7 +11,7 @@ export type AgentDraft = {
   name: string; description: string; instructions: string; argumentHint: string; models: readonly AgentModel[];
   owner: string; tags: readonly string[]; icons: readonly IconDraft[];
   transcription?: AgentModel; speech: SpeechDraft;
-  tools?: JsonValue; mcpServers?: JsonValue;
+  tools?: JsonValue; mcpServers?: JsonValue; skills?: JsonValue;
 };
 
 export class AgentDraftError extends Error {
@@ -57,7 +57,7 @@ export function createAgentDraft(agent?: AgentDefinition): AgentDraft {
     name: agent?.name ?? '', description: agent?.description ?? '', instructions: agent?.instructions ?? '',
     argumentHint: text(agent?.argumentHint), models: agentModels(agent), owner: text(agent?.owned_by),
     tags: agent?.tags ?? [], icons: readIconDrafts(agent?.icons), transcription: readModel(agent?.transcription),
-    tools: agent?.tools, mcpServers: agent?.mcpServers,
+    tools: agent?.tools, mcpServers: agent?.mcpServers, skills: agent?.skills,
     speech: { model: readModel(speech?.model), voice: text(speech?.voice), instructions: text(speech?.instructions),
       language: text(speech?.language), speed: numberText(speech?.speed), mime: text(format?.type), rate: numberText(format?.rate) },
   };
@@ -111,6 +111,7 @@ export function saveAgentDraft(draft: AgentDraft, agent?: AgentDefinition) {
     throw new AgentDraftError('general', 'Name, description, and instructions are required.');
   }
   if (draft.argumentHint !== initial.argumentHint) assign(definition, 'argumentHint', draft.argumentHint.trim() || undefined);
+  if (draft.skills !== initial.skills) assign(definition, 'skills', draft.skills);
   if (draft.tools !== initial.tools) assign(definition, 'tools', draft.tools);
   if (draft.mcpServers !== initial.mcpServers) {
     const original = object(initial.mcpServers);

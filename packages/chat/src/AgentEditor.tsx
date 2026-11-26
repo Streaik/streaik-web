@@ -1,5 +1,5 @@
 import { Button } from '@streaik/themes';
-import type { CatalogModel } from '@streaik/gateway';
+import type { CatalogModel, Gateway } from '@streaik/gateway';
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import type { AgentEntry } from './agentCatalog';
@@ -8,6 +8,7 @@ import type { AgentDraft, AgentTab } from './agentDraft';
 import type { AgentDefinition } from './agentDefinition';
 import { AgentDetailsFields, AgentGeneralFields, AgentRealtimeFields } from './AgentEditorFields';
 import { AgentProviderFields, agentProviderGroups } from './AgentProviderFields';
+import { AgentSkillFields } from './AgentSkillFields';
 import { withAgentProviderOptions } from './agentProviderSettings';
 import { ChatIcon } from './ChatIcon';
 import { useAppTranslation } from './i18n';
@@ -17,8 +18,10 @@ import type { ChatProviderId, NativeOptions } from './providerChat/settings';
 import { AgentToolConfigurationFields, AgentToolsFields } from './AgentToolFields';
 import { useMcpSelection } from './useMcpServers';
 import type { McpServers } from './useMcpServers';
+import type { LocalSkills } from './useLocalSkills';
+import type { RemoteSkills } from './useRemoteSkills';
 
-const baseTabs = [['general', 'General'], ['details', 'Details'], ['realtime', 'Realtime'], ['tools', 'Tools'],
+const baseTabs = [['general', 'General'], ['details', 'Details'], ['realtime', 'Realtime'], ['skills', 'Skills'], ['tools', 'Tools'],
   ['tool-configuration', 'Tool configuration']] as const;
 type EditorTab = AgentTab | `provider-${ChatProviderId}`;
 
@@ -38,15 +41,16 @@ function AgentDialog({ title, children, onClose }: { title: string; children: (c
   </dialog>;
 }
 
-export function AgentEditor({ entry, seed, catalog, catalogStatus, tags, mcpServers, onSave, onClose }: {
+export function AgentEditor({ entry, seed, catalog, catalogStatus, tags, mcpServers, localSkills, remoteSkills, gateway, onSave, onClose }: {
   entry?: AgentEntry; seed?: AgentDefinition; catalog: readonly CatalogModel[]; catalogStatus?: string; tags: readonly string[];
-  mcpServers: McpServers;
+  mcpServers: McpServers; localSkills: LocalSkills; remoteSkills: RemoteSkills; gateway: Gateway;
   onSave: (definition: AgentDefinition, entry?: AgentEntry) => void; onClose: () => void;
 }) {
   const { t } = useAppTranslation();
   const source = entry?.definition ?? seed;
   const [initial] = useState(() => createAgentDraft(source));
   const [draft, setDraft] = useState(initial);
+  const [skillBusy, setSkillBusy] = useState(false);
   const discovery = useMcpSelection(mcpServers);
   const [requestedTab, setTab] = useState<EditorTab>('general');
   const [error, setError] = useState<Error>();
@@ -72,6 +76,7 @@ export function AgentEditor({ entry, seed, catalog, catalogStatus, tags, mcpServ
 
   function save(event: FormEvent<HTMLFormElement>, close: () => void) {
     event.preventDefault();
+    if (skillBusy) return;
     try {
       onSave(saveAgentDraft(draft, source), entry);
       close();
@@ -102,8 +107,10 @@ export function AgentEditor({ entry, seed, catalog, catalogStatus, tags, mcpServ
           {key === 'general' ? <AgentGeneralFields {...{ draft, initial, patch, catalog, catalogStatus }} sample={entry?.source === 'sample'} />
             : key === 'details' ? <AgentDetailsFields {...{ draft, patch, tags }} />
               : key === 'realtime' ? <AgentRealtimeFields {...{ draft, initial, patch, catalog, catalogStatus }} />
-                : key === 'tools' ? <AgentToolsFields {...{ draft, patch, discovery }} store={mcpServers} />
-                  : <AgentToolConfigurationFields {...{ draft, patch, discovery }} store={mcpServers} />}
+                : key === 'skills' ? <AgentSkillFields active={tab === 'skills'} skills={draft.skills} onChange={skills => patch({ skills })}
+                  onBusyChange={setSkillBusy} local={localSkills} remote={remoteSkills} gateway={gateway} />
+                  : key === 'tools' ? <AgentToolsFields {...{ draft, patch, discovery }} store={mcpServers} />
+                    : <AgentToolConfigurationFields {...{ draft, patch, discovery }} store={mcpServers} />}
         </section>)}
         {providerTabs.map(({ key, provider, entries }) => <section key={key} className="agent-panel" id={`${id}-${key}-panel`}
           role="tabpanel" aria-labelledby={`${id}-${key}-tab`} hidden={key !== tab}>
@@ -112,7 +119,7 @@ export function AgentEditor({ entry, seed, catalog, catalogStatus, tags, mcpServ
       </div>
       {error && <p ref={alert} className="chat-error agent-save-error" role="alert" tabIndex={-1}>{t(error.message)}</p>}
       <div className="agent-actions">
-        <Button onClick={close}>{t('Cancel')}</Button><Button type="submit" variant="primary">{t('Save agent')}</Button>
+        <Button onClick={close}>{t('Cancel')}</Button><Button type="submit" variant="primary" disabled={skillBusy}>{t('Save agent')}</Button>
       </div>
     </form>}
   </AgentDialog>;

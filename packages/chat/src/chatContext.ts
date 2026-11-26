@@ -1,5 +1,6 @@
-import type { ChatMessage, RemoteSkill } from '@streaik/gateway';
+import type { ChatMessage } from '@streaik/gateway';
 import { skillSystemBlock } from './skillTools.ts';
+import type { SkillSummary } from './skillTools.ts';
 import type { LocalSkill } from './skillBundles';
 import type { mcpResourceCatalog } from './mcpChatContext';
 
@@ -12,8 +13,8 @@ export type RequestContext = {
 };
 
 export function buildRequestContext(appName: string, preferredLanguage: string, darkMode: boolean,
-  skills: readonly LocalSkill[] = [], remoteSkills: readonly RemoteSkill[] = []): RequestContext {
-  const catalog = skillSystemBlock(skills, remoteSkills);
+  skills: readonly LocalSkill[] = [], archives: readonly SkillSummary[] = []): RequestContext {
+  const catalog = skillSystemBlock(skills, archives);
   return { system: { systemInformation: { appName, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone } },
     user: { preferredLanguage, darkMode }, ...(catalog && { skills: catalog }) };
 }

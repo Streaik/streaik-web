@@ -57,7 +57,7 @@ test('the catalog discloses exact IDs and metadata, and the tools reveal content
   assert.equal((await resolveSkillTool('activate_skill', { skill_id: id }, [])).isError, true);
   const route = { mode: 'gateway', endpoint: '/api/chat' };
   assert.deepEqual(activeChatTools(route, [], false, [], true).map(({ definition }) => definition.name), ['activate_skill', 'read_skill_resource']);
-  assert.deepEqual(activeChatTools({ mode: 'direct', endpoint: '/v1/responses' }, [], false, [], true), []);
+  assert.deepEqual(activeChatTools({ mode: 'direct', endpoint: '/v1/responses' }, [], false, [], true).map(({ definition }) => definition.name), ['activate_skill', 'read_skill_resource']);
   const completion = [{ id: 'm', role: 'assistant', parts: [{ type: 'dynamic-tool', toolName: 'activate_skill', toolCallId: 'a',
     state: 'output-available', input: { skill_id: id }, output: active, approval: { id: 'review', approved: true } }] }];
   assert.deepEqual(filterLocalToolReplay(completion, skillTools, true, new Set([id])), completion);
@@ -70,7 +70,7 @@ test('remote skill content is fetched only on activation, validated, and reused 
   const zip = await exportSkillZip(bundle);
   const args = { skill_id: id, path: 'references/guide.md' };
   const calls = [];
-  const remote = { skills: [skill], bundles: new Map(), download: async (...args) => { calls.push(args); return zip; } };
+  const remote = { skills: [{ ...skill, load: async signal => { calls.push([id, signal]); return zip; } }], bundles: new Map() };
   const controller = new AbortController();
   const { signal } = controller;
   const local = saveSkillVersion([], { ...bundle, metadata: { ...bundle.metadata, name: 'local-notes' } });
@@ -90,12 +90,12 @@ test('remote skill content is fetched only on activation, validated, and reused 
   const resource = await resolveSkillTool('read_skill_resource', args, local, remote, signal);
   assert.equal(resource.structuredContent.skillResource.text, 'reference payload');
   await resolveSkillTool('activate_skill', args, local, remote, signal);
-  assert.deepEqual(calls, [[id, undefined, signal]]);
+  assert.deepEqual(calls, [[id, signal]]);
 
-  const invalid = { ...remote, bundles: new Map(), download: async () => new Blob(['not a ZIP']) };
+  const invalid = { skills: [{ ...skill, load: () => new Blob(['not a ZIP']) }], bundles: new Map() };
   assert.equal((await resolveSkillTool('activate_skill', args, [], invalid)).isError, true);
   assert.equal(invalid.bundles.size, 0);
-  const interrupted = { ...remote, bundles: new Map(), download: async () => { controller.abort(); return zip; } };
+  const interrupted = { skills: [{ ...skill, load: () => { controller.abort(); return zip; } }], bundles: new Map() };
   await assert.rejects(resolveSkillTool('activate_skill', args, [], interrupted, signal), { name: 'AbortError' });
   assert.equal(interrupted.bundles.size, 0);
 });

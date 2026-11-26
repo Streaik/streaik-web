@@ -1,4 +1,3 @@
-import type { Gateway, RemoteSkill } from '@streaik/gateway';
 import type { ToolDefinition } from './localPlugins';
 import { defaultSkillVersion, importSkillZip, skillRelativePath } from './skillBundles.ts';
 import type { LocalSkill, SkillBundle } from './skillBundles.ts';
@@ -21,13 +20,16 @@ export const skillTools: readonly ToolDefinition[] = [{
   }, required: ['skill_id', 'path'] },
 }];
 
-export function skillSystemBlock(skills: readonly LocalSkill[], remote: readonly RemoteSkill[] = []) {
+export type SkillSummary = { id: string; name: string; description: string };
+export type SkillArchive = SkillSummary & { load: (signal?: AbortSignal) => Promise<Blob> | Blob };
+
+export function skillSystemBlock(skills: readonly LocalSkill[], archives: readonly SkillSummary[] = []) {
   const items = [
     ...skills.filter(skill => skill.enabled).map(skill => {
       const { name, description } = defaultSkillVersion(skill).metadata;
       return { name, skill_id: skill.id, description };
     }),
-    ...remote.map(({ id, name, description }) => ({ name, skill_id: id, description })),
+    ...archives.map(({ id, name, description }) => ({ name, skill_id: id, description })),
   ];
   return items.length ? { skills: items } : undefined;
 }
@@ -41,38 +43,38 @@ const textMime: Record<string, string> = { md: 'text/markdown', txt: 'text/plain
   html: 'text/html', css: 'text/css', js: 'text/javascript', ts: 'text/typescript', py: 'text/x-python', sh: 'text/x-shellscript' };
 const binaryMime: Record<string, string> = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' };
 
-export type TurnRemoteSkills = {
-  skills: readonly RemoteSkill[];
-  download: Gateway['downloadSkill'];
+export type TurnSkillArchives = {
+  skills: readonly SkillArchive[];
   bundles: Map<string, SkillBundle>;
 };
 
-async function loadRemoteSkill(remote: TurnRemoteSkills | undefined, id: string, name: string, signal?: AbortSignal) {
-  if (!remote || !remote.skills.some(skill => skill.id === id)) return undefined;
-  const bundle = remote.bundles.get(id);
+async function loadArchivedSkill(archives: TurnSkillArchives | undefined, id: string, name: string, signal?: AbortSignal) {
+  const entry = archives?.skills.find(skill => skill.id === id);
+  if (!archives || !entry) return undefined;
+  const bundle = archives.bundles.get(id);
   if (bundle) return bundle;
   if (name !== activateSkill) throw new Error(`Call activate_skill with skill_id "${id}" in this turn before reading its resources.`);
   try {
-    const zip = await remote.download(id, undefined, signal);
+    const zip = await entry.load(signal);
     signal?.throwIfAborted();
     const imported = await importSkillZip(zip);
     signal?.throwIfAborted();
-    remote.bundles.set(id, imported);
+    archives.bundles.set(id, imported);
     return imported;
   } catch {
     signal?.throwIfAborted();
-    throw new Error(`Could not download or open remote skill "${id}".`);
+    throw new Error(`Could not open the archive for skill "${id}".`);
   }
 }
 
-export async function resolveSkillTool(name: string, input: unknown, skills: readonly LocalSkill[], remote?: TurnRemoteSkills, signal?: AbortSignal) {
+export async function resolveSkillTool(name: string, input: unknown, skills: readonly LocalSkill[], archives?: TurnSkillArchives, signal?: AbortSignal) {
   try {
     signal?.throwIfAborted();
     const args = input && typeof input === 'object' ? input as { skill_id?: unknown; path?: unknown } : {};
     if (typeof args.skill_id !== 'string' || !args.skill_id.trim()) throw new Error('Missing skill_id. Pass the exact enabled skill ID.');
     const id = args.skill_id;
     const record = skills.find(skill => skill.enabled && skill.id === id);
-    const skill = record ? defaultSkillVersion(record) : await loadRemoteSkill(remote, id, name, signal);
+    const skill = record ? defaultSkillVersion(record) : await loadArchivedSkill(archives, id, name, signal);
     if (!skill) throw new Error(`Skill "${id.slice(0, 256)}" is not enabled.`);
     const { name: skillName, description } = skill.metadata;
     if (name === activateSkill) {
