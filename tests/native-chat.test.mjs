@@ -12,7 +12,7 @@ const messages = [
   { id: 'user2', role: 'user', parts: [{ type: 'text', text: 'Follow-up' }] },
 ];
 const chat = '/v1/chat/completions', responses = '/v1/responses', messagesApi = '/v1/messages';
-const metrics = { gateway: { ttft: 0.2, tps: 9, cost: 0, estimated: false } };
+const metrics = { gateway: { ttft: 0.2, tps: 9, cost: 0 } };
 
 function sse(frames) {
   const data = frames.map(value => `${value.type ? `event: ${value.type}\n` : ''}data: ${typeof value === 'string' ? value : JSON.stringify(value)}\n\n`).join('');
@@ -95,8 +95,7 @@ for (const endpoint of nativeChatEndpoints) {
       const saved = finish.messageMetadata.providerMetadata?.gateway;
       if (direct) {
         assert.equal(saved.source, 'direct');
-        assert.equal(saved.currency, 'USD');
-        assert.equal(saved.estimated, true);
+        assert.ok(!('currency' in saved) && !('estimated' in saved));
         assert.ok(saved.ttft >= 0);
         assert.ok(Math.abs(saved.cost - (provider === 'anthropic' ? 0.000045 : 0.0000104)) < 1e-14);
         if (endpoint !== messagesApi) assert.equal(saved.tps, undefined, 'a single output chunk has no throughput interval');
@@ -268,7 +267,7 @@ for (const [reported, expected] of [['0.000125', 0.000125], [0, 0], ['invalid', 
     const metadata = parts.find(part => part.type === 'finish').messageMetadata;
     assert.deepEqual(metadata.usage, { promptTokens: 5, completionTokens: 2, totalTokens: 7 });
     assert.equal(metadata.providerMetadata.gateway.cost, expected);
-    assert.equal(metadata.providerMetadata.gateway.estimated, expected === undefined ? undefined : false);
+    assert.ok(!('currency' in metadata.providerMetadata.gateway) && !('estimated' in metadata.providerMetadata.gateway));
     assert.equal(calls, 1);
   });
 }

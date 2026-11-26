@@ -8,7 +8,7 @@ import { messageTokens, nonnegativeNumber } from './messageMetadata';
 
 const integer = browserNumberFormat({ maximumFractionDigits: 0 });
 const seconds = browserNumberFormat({ maximumFractionDigits: 2 });
-const dollars = browserNumberFormat({ minimumFractionDigits: 2, maximumFractionDigits: 8 });
+const costFormat = browserNumberFormat({ minimumFractionDigits: 2, maximumFractionDigits: 8 });
 
 function Badge({ icon, label, value, format, unit = '', details }: {
   icon: IconName; label: string; value: unknown; format: Intl.NumberFormat; unit?: string; details?: string;
@@ -31,9 +31,7 @@ export function MessageActions({ message, userText, showMessageTokens, showMetri
   const metadata = user ? undefined : message.metadata;
   const { providerMetadata, gateway } = metadata ?? {};
   const metrics = providerMetadata?.gateway ?? gateway;
-  const costLabel = metrics?.source === 'direct'
-    ? metrics.estimated ? 'Estimated direct cost (USD)' : 'Provider-reported cost (USD)'
-    : metrics?.estimated ? 'Estimated gateway cost (USD)' : 'Gateway cost (USD)';
+  const costLabel = metrics?.source === 'direct' ? 'Direct cost' : 'Gateway cost';
   const { input, output, total: tokens } = messageTokens(metadata);
   const breakdown = [input !== undefined ? t('{{count, number}} input', { count: input }) : '', output !== undefined ? t('{{count, number}} output', { count: output }) : '']
     .filter(Boolean).join(' · ');
@@ -44,7 +42,7 @@ export function MessageActions({ message, userText, showMessageTokens, showMetri
     }}><ChatIcon name={copyStatus === 'Copied' ? 'check' : 'copy'} /></Button>}
     {showMessageTokens && <Badge icon="tokens" label={t(tokens !== undefined ? 'Total tokens' : input !== undefined ? 'Input tokens' : 'Output tokens')}
       value={tokens ?? input ?? output} format={integer} details={tokens !== undefined ? breakdown : undefined} />}
-    <Badge icon="cost" label={t(costLabel)} value={metrics?.cost} format={dollars} />
+    <Badge icon="cost" label={t(costLabel)} value={metrics?.cost} format={costFormat} />
     {showMetrics && <>
       <Badge icon="timer" label={t('Time to first token')} value={metrics?.ttft} format={seconds} unit=" s" />
       <Badge icon="speed" label={t('Tokens per second')} value={metrics?.tps} format={integer} unit=" tok/s" />

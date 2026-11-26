@@ -428,7 +428,6 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const [pendingModel, setPendingModel] = useState<string>();
   const [deciding, setDeciding] = useState(false);
   const [turn, setTurn] = useState<Turn>();
-  const [reasoning, setReasoning] = useState<ChatReasoning>();
   const chatSettings = useRef<HTMLDialogElement>(null);
   const [contextOpen, setContextOpen] = useState(false);
   const [menuContainer, setMenuContainer] = useState<HTMLDivElement | null>(null);
@@ -727,7 +726,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       requestTools: chatRequestTools(configuredTools),
       hosted: hostedRoute && hostedSelection ? { endpoint: hostedRoute.endpoint, selection: hostedSelection } : undefined,
       providerSettings: !hostedRoute && isApiChat(runRoute) ? turnProviderSettings : undefined,
-      reasoning: !hostedRoute && isApiChat(runRoute) ? reasoning : undefined,
+      reasoning: !hostedRoute && isApiChat(runRoute) && preferences.reasoning !== 'none' ? preferences.reasoning : undefined,
       remoteSkills: enabledRemoteSkills.length ? { skills: enabledRemoteSkills, download: gateway.downloadSkill, bundles: new Map() } : undefined };
     setTurn(next);
     return { ...requestBody(next), ...(decision && { decision }) };
@@ -900,7 +899,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
             mcp={view === 'chat' && !hostedRoute && mcpServers.available ? { count: new Set([...mcpSelection.entries, ...agentMcp.entries].map(entry => entry.record.id)).size,
               disabled: routesLocked, open: () => setModelContextOpen(true), servers: connectedMcp, connect: mcpServers.connection } : undefined}
             onChatSettings={() => chatSettings.current?.showModal()} onViewContext={() => setContextOpen(true)}
-            reasoning={!hostedRoute && isApiChat(runRoute) ? { value: reasoning, onChange: setReasoning } : undefined}
+            reasoning={!hostedRoute && isApiChat(runRoute) ? { value: preferences.reasoning,
+              onChange: reasoning => onPreferences({ ...preferences, reasoning }) } : undefined}
             onSend={(parts) => {
               if (!modelId || !canSend) return;
               if (!messages.length && !agentMode) prepareName();

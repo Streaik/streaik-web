@@ -39,8 +39,8 @@ export type ChatMessageMetadata = {
   [key: string]: unknown;
 };
 type GatewayMetrics = {
-  ttft?: number | string; tps?: number | string; cost?: number | string; estimated?: boolean;
-  source?: 'direct'; currency?: 'USD';
+  ttft?: number | string; tps?: number | string; cost?: number | string;
+  source?: 'direct';
 };
 export type ChatMessage = UIMessage<ChatMessageMetadata>;
 export type ChatReasoning = 'low' | 'medium' | 'high';

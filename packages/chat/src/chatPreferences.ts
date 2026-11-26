@@ -1,3 +1,4 @@
+import type { ChatReasoning } from '@streaik/gateway';
 import { localPlugins } from './localPlugins.ts';
 import type { LocalPluginId } from './localPlugins.ts';
 import { defaultMcpPreferences, mcpTimeoutRange } from './mcpPreferences.ts';
@@ -9,6 +10,8 @@ import type { ToolConfiguration } from './toolConfiguration.ts';
 
 export const pinnableViews = ['models', 'providers'] as const;
 export type PinnableView = (typeof pinnableViews)[number];
+export const reasoningLevels = ['none', 'low', 'medium', 'high'] as const satisfies readonly ('none' | ChatReasoning)[];
+export type ReasoningLevel = (typeof reasoningLevels)[number];
 
 const toolOutputDefaults = { text: true, links: true, images: false, audio: false, video: false, documents: false };
 export type ToolOutputPreferences = typeof toolOutputDefaults;
@@ -27,6 +30,7 @@ export type ChatPreferences = {
   toolOutput: ToolOutputPreferences;
   mcp: McpPreferences;
   providerSettings: ProviderChatSettings;
+  reasoning: ReasoningLevel;
   toolRequestConfig: ToolConfiguration;
   useToolNamespaces: boolean;
 };
@@ -36,7 +40,7 @@ export const toolConfigurationDefaults: Pick<ChatPreferences, 'toolRequestConfig
 export const composerToolDefaults: Pick<ChatPreferences, 'delay' | 'plugins' | 'remoteSkillIds'> = { delay: 40, plugins: [], remoteSkillIds: [] };
 export const defaultChatPreferences: ChatPreferences = { ...composerToolDefaults, ...toolConfigurationDefaults, convertAttachmentsToText: false, pinnedViews: [],
   dictate: true, showContextSize: true, showMessageTokens: true, showProviderLogo: true, showMetrics: false,
-  toolOutput: toolOutputDefaults, mcp: defaultMcpPreferences, providerSettings: {} };
+  toolOutput: toolOutputDefaults, mcp: defaultMcpPreferences, providerSettings: {}, reasoning: 'medium' };
 
 type StoredPreferences = Partial<Omit<ChatPreferences, 'toolOutput' | 'mcp' | 'providerSettings'> & {
   toolOutput: Partial<ToolOutputPreferences>; mcp: Partial<McpPreferences>; providerSettings: unknown;
@@ -66,6 +70,7 @@ export function normalizeChatPreferences(value: StoredPreferences | null | undef
     showMetrics: booleanPreference(value?.showMetrics, defaultChatPreferences.showMetrics),
     toolOutput,
     providerSettings: persistentProviderChatSettings(value?.providerSettings),
+    reasoning: reasoningLevels.find(level => level === value?.reasoning) ?? defaultChatPreferences.reasoning,
     toolRequestConfig: normalizeToolConfiguration(value?.toolRequestConfig),
     useToolNamespaces: value?.useToolNamespaces === true,
     mcp: {

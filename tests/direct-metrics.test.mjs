@@ -24,7 +24,7 @@ test('Direct timing only observes nonempty output between the provider POST and 
 test('Anthropic estimate uses ordinary input plus both cache buckets without billing cache tokens twice', () => {
   const direct = createDirectMetrics('/v1/messages', { provider: 'anthropic', rates: () => rates });
   const { metrics } = direct.finish(usage);
-  assert.equal(metrics.estimated, true);
+  assert.ok(!('currency' in metrics) && !('estimated' in metrics));
   assert.ok(Math.abs(metrics.cost - (60 * rates.input + 20 * rates.output + 25 * rates.cacheRead + 15 * rates.cacheWrite)) < 1e-14);
 });
 
@@ -68,5 +68,5 @@ test('OpenRouter timing counts reasoning-only frames but does not count the matc
   time = 2000; direct.observe({ type: 'raw', rawValue: { choices: [{ delta: { content: 'answer' } }] } });
   time = 2100; direct.observe({ type: 'text-delta', text: 'answer' });
   time = 4000; direct.observe({ type: 'raw', rawValue: { usage: { prompt_tokens: 100, completion_tokens: 20, cost: 0 } } });
-  assert.deepEqual(direct.finish(usage).metrics, { source: 'direct', ttft: 0.5, tps: 40, cost: 0, estimated: false, currency: 'USD' });
+  assert.deepEqual(direct.finish(usage).metrics, { source: 'direct', ttft: 0.5, tps: 40, cost: 0 });
 });

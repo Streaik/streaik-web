@@ -109,7 +109,7 @@ export function createDirectMetrics(endpoint: NativeChatEndpoint, options: Direc
         ? outputTokens / ((last - first) / 1000) : undefined;
       const metrics: ChatMessageMetadata['gateway'] = cost === undefined && ttft === undefined ? undefined : {
         source: 'direct', ...(ttft !== undefined && { ttft }), ...(tps !== undefined && { tps }),
-        ...(cost !== undefined && { cost, currency: 'USD', estimated: !router }),
+        ...(cost !== undefined && { cost }),
       };
       return { summary, metrics };
     },

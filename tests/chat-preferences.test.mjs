@@ -18,6 +18,23 @@ test('old profiles get Chat defaults; only explicit, valid booleans override eac
   { ...defaultChatPreferences, dictate: false, showMetrics: true, toolOutput: { ...defaults, text: false, images: true } });
 });
 
+test('the reasoning level defaults to Medium and all four choices persist per profile', (t) => {
+  const storage = new Map();
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  t.after(() => { if (original) Object.defineProperty(globalThis, 'localStorage', original); else delete globalThis.localStorage; });
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value),
+  } });
+  assert.equal(normalizeChatPreferences({ delay: 50 }).reasoning, 'medium');
+  assert.equal(normalizeChatPreferences({ reasoning: 'invalid' }).reasoning, 'medium');
+  assert.equal(loadChatPreferences('alpha').reasoning, 'medium');
+  for (const reasoning of ['low', 'medium', 'high', 'none']) {
+    saveChatPreferences('alpha', { ...defaultChatPreferences, reasoning });
+    assert.equal(loadChatPreferences('alpha').reasoning, reasoning);
+    assert.equal(loadChatPreferences('beta').reasoning, 'medium');
+  }
+});
+
 test('MCP defaults are backward compatible and saved settings remain scoped and bounded', (t) => {
   const storage = new Map();
   const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');

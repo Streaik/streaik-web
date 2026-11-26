@@ -1,11 +1,11 @@
-import { chatReasoning } from '@streaik/gateway';
-import type { ChatReasoning } from '@streaik/gateway';
 import { Button, Select, Textarea, Tooltip } from '@streaik/themes';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent, ReactNode } from 'react';
 import { ChatIcon } from './ChatIcon';
 import { attachmentByteLimit, attachmentCountLimit, composeAttachmentParts, fileMediaType, httpLink, isTextAttachment, linkMediaType } from './chatAttachments';
 import type { AttachmentPart, DraftAttachment } from './chatAttachments';
+import { reasoningLevels } from './chatPreferences';
+import type { ReasoningLevel } from './chatPreferences';
 import { appendDictation } from './composerDictation';
 import type { ComposerDictation } from './composerDictation';
 import { useAppTranslation } from './i18n';
@@ -31,7 +31,7 @@ type ComposerMcp = { count: number; disabled: boolean; open: () => void; servers
 type ComposerProps = { busy: boolean; canSend: boolean; dictation?: ComposerDictation } & (
   { image?: undefined; video?: undefined; convert: boolean; onSend: (parts: AttachmentPart[]) => void; onChatSettings: () => void; onViewContext: () => void;
     mcp?: ComposerMcp; badges?: readonly ComposerBadge[]; onStop: () => void;
-    reasoning?: { value?: ChatReasoning; onChange: (value: ChatReasoning | undefined) => void } } |
+    reasoning?: { value: ReasoningLevel; onChange: (value: ReasoningLevel) => void } } |
   { image: { draft: ImageDraft; onChange: (value: ImageDraft) => void; onSend: () => void; onSettings: () => void }; video?: undefined; onStop: () => void } |
   { image?: undefined; video: { prompt: string; onChange: (prompt: string) => void; onSend: () => void }; onStop?: undefined }
 );
@@ -41,6 +41,7 @@ export function ChatComposer(props: ComposerProps) {
   const media = !!(image || video);
   const convert = !image && !video && props.convert;
   const { t } = useAppTranslation();
+  const reasoning = !image && !video ? props.reasoning : undefined;
   const mcp = !image && !video ? props.mcp : undefined;
   const badges = !image && !video ? props.badges : undefined;
   const plusLabel = t(mcp ? 'Add to message' : 'Add attachments');
@@ -265,11 +266,15 @@ export function ChatComposer(props: ComposerProps) {
           title={t('Image settings')} aria-haspopup="dialog" disabled={busy} onClick={image.onSettings}><ChatIcon name="settings" /></Button> : !video && <>
           <span className="chat-composer-settings"><Button className="chat-composer-icon" type="button" variant="subtle" aria-label={t('Chat settings')}
             title={t('Chat settings')} aria-haspopup="dialog" onClick={props.onChatSettings}><ChatIcon name="settings" /></Button></span>
-          {props.reasoning && <Select label={t('Reasoning')} className="chat-composer-reasoning" value={props.reasoning.value ?? 'none'}
-            disabled={busy || preparing}
-            options={[{ value: 'none', label: t('None') }, { value: 'low', label: t('Low') },
-              { value: 'medium', label: t('Medium') }, { value: 'high', label: t('High') }]}
-            onValueChange={value => props.reasoning?.onChange(chatReasoning(value))} />}
+          {reasoning && <Tooltip content={t('Reasoning level')} visualOnly><span className="chat-composer-reasoning">
+            <Select label={t('Reasoning level')} value={reasoning.value} disabled={busy || preparing}
+              options={[{ value: 'none', label: t('None') }, { value: 'low', label: t('Low') },
+                { value: 'medium', label: t('Medium') }, { value: 'high', label: t('High') }]}
+              onValueChange={value => {
+                const level = reasoningLevels.find(level => level === value);
+                if (level) reasoning.onChange(level);
+              }} />
+          </span></Tooltip>}
           <Button className="chat-composer-icon" type="button" variant="subtle" aria-label={t('View context')}
             title={t('View context')} aria-haspopup="dialog" onClick={props.onViewContext}><ChatIcon name="info" /></Button>
         </>}

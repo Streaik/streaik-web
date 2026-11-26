@@ -6,14 +6,14 @@ import { ChatIcon } from './ChatIcon';
 import { DialogTabs } from './DialogTabs';
 import { browserNumberFormat, useAppTranslation } from './i18n';
 
-const dollars = browserNumberFormat({ style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 8 });
+const costFormat = browserNumberFormat({ minimumFractionDigits: 2, maximumFractionDigits: 8 });
 
 function imageDetails({ response, providerMetadata, images }: ImageResponse) {
   const gateway = providerMetadata?.gateway;
   const cost = gateway && typeof gateway === 'object' && 'cost' in gateway ? gateway.cost : undefined;
   return {
     model: response.modelId?.trim(),
-    amount: typeof cost === 'number' && Number.isFinite(cost) && cost >= 0 ? dollars.format(cost) : undefined,
+    amount: typeof cost === 'number' && Number.isFinite(cost) && cost >= 0 ? costFormat.format(cost) : undefined,
     batch: images.length > 1,
   };
 }
@@ -24,7 +24,7 @@ export function ImageBadges({ response }: { response: ImageResponse }) {
   if (!model && !amount) return null;
   return <span className="image-badges" aria-hidden="true">
     {model && <span className="chat-badge" title={model}><ChatIcon name="models" /><span>{model}</span></span>}
-    {amount && <span className="chat-badge" title={t(batch ? 'Batch cost (USD)' : 'Gateway cost (USD)')}><ChatIcon name="cost" />
+    {amount && <span className="chat-badge" title={t(batch ? 'Batch cost' : 'Gateway cost')}><ChatIcon name="cost" />
       <span>{batch ? t('Batch: {{amount}}', { amount }) : amount}</span></span>}
   </span>;
 }
@@ -56,7 +56,7 @@ export function ImagePreview({ image, response, onClose }: { image: string; resp
       <dl className="image-preview-details">
         {model && <><dt>{t('Model')}</dt><dd>{model}</dd></>}
         {Number.isFinite(timestamp.getTime()) && <><dt>{t('Generated at')}</dt><dd><time dateTime={timestamp.toISOString()}>{timestamp.toLocaleString()}</time></dd></>}
-        {amount && <><dt>{t(batch ? 'Batch cost (USD)' : 'Gateway cost (USD)')}</dt><dd>{amount}</dd></>}
+        {amount && <><dt>{t(batch ? 'Batch cost' : 'Gateway cost')}</dt><dd>{amount}</dd></>}
       </dl>
     </div>
     <div id={`${id}-headers-panel`} aria-labelledby={`${id}-headers-tab`} role="tabpanel" tabIndex={0} hidden={tab !== 'headers'}>

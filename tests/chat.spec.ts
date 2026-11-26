@@ -1036,7 +1036,7 @@ test('global Chat preferences persist and control badges and context independent
   await chooseChatModel(page);
 
   const bar = page.getByRole('progressbar', { name: 'Context window', exact: true });
-  const cost = page.getByRole('img', { name: /^Conversation cost \(USD\):/ });
+  const cost = page.getByRole('img', { name: /^Conversation cost:/ });
   const send = async (text: string) => {
     const composer = page.getByRole('textbox', { name: 'Message', exact: true });
     await composer.fill(text);
@@ -1054,26 +1054,26 @@ test('global Chat preferences persist and control badges and context independent
   await expect(bar).toHaveAttribute('value', '2000');
 
   await send('Second usage question');
-  await expect(cost).toHaveText('$0.125');
+  await expect(cost).toHaveText('0.125');
   await showSettings(page, 'Chat');
   for (const name of ['Show context size', 'Show tokens per message', 'Show provider logo', 'Links']) await toggle(name).uncheck();
   await toggle('Show metrics').check();
   await closeSettings(page);
   await expect(bar).toHaveCount(0);
-  await expect(cost).toHaveText('$0.125');
+  await expect(cost).toHaveText('0.125');
   await expect(lastReply.locator('.chat-provider-logo')).toHaveCount(0);
   await expect(lastReply.locator('.chat-speaker')).toHaveText(model);
   await expect(lastReply.getByRole('img', { name: /^Total tokens:/ })).toHaveCount(0);
   await expect(lastReply.getByRole('img', { name: /^Time to first token:/ })).toHaveText('1.25 s');
   await expect(lastReply.getByRole('img', { name: /^Tokens per second:/ })).toHaveText('25 tok/s');
-  await expect(lastReply.getByRole('img', { name: /^Gateway cost \(USD\):/ })).toBeVisible();
+  await expect(lastReply.getByRole('img', { name: /^Gateway cost:/ })).toHaveText('0.125');
 
   await page.getByRole('button', { name: 'Chat settings', exact: true }).click();
   await page.getByRole('dialog', { name: 'Chat settings', exact: true }).getByRole('button', { name: 'Defaults', exact: true }).click();
   await closeSettings(page);
   await page.reload();
   await expect(page.getByText('Usage reply 2', { exact: true })).toBeVisible();
-  await expect(cost).toHaveText('$0.125');
+  await expect(cost).toHaveText('0.125');
   await showSettings(page, 'Chat');
   for (const name of ['Dictate', 'Show context size', 'Show tokens per message', 'Show provider logo', 'Links']) await expect(toggle(name)).not.toBeChecked();
   await expect(toggle('Show metrics')).toBeChecked();
@@ -1685,7 +1685,7 @@ test('Gateway chat shares context, keeps composer reasoning through approval, an
   await expect(page.getByText('Chat reply 1', { exact: true })).toBeVisible();
   expect(requests[0].tools).toBeUndefined();
   expect(requests[0].providerMetadata).toBeUndefined();
-  expect(requests[0]).not.toHaveProperty('reasoning');
+  expect(requests[0].reasoning).toBe('medium');
   await page.getByRole('button', { name: 'New chat', exact: true }).click();
   await expect(page.getByText('Chat reply 1', { exact: true })).toHaveCount(0);
   await chooseChatModel(page);
@@ -1693,7 +1693,7 @@ test('Gateway chat shares context, keeps composer reasoning through approval, an
   const settingsButton = page.getByRole('button', { name: 'Chat settings', exact: true });
   const settings = page.getByRole('dialog', { name: 'Chat settings', exact: true });
   const contextButton = page.getByRole('button', { name: 'View context', exact: true });
-  const reasoning = page.getByRole('combobox', { name: 'Reasoning', exact: true });
+  const reasoning = page.getByRole('combobox', { name: 'Reasoning level', exact: true });
   const chooseReasoning = async (label: string) => {
     if (await reasoning.evaluate(el => el.tagName === 'SELECT')) await reasoning.selectOption({ label });
     else {
@@ -1712,6 +1712,8 @@ test('Gateway chat shares context, keeps composer reasoning through approval, an
   expect(reasoningBox.x + reasoningBox.width).toBeLessThanOrEqual(contextBox.x);
   expect((dictateBox ?? sendBox).x - contextBox.x - contextBox.width).toBeLessThan(12);
   expect(sendBox.x).toBeGreaterThan(contextBox.x);
+  await reasoning.hover();
+  await expect(page.getByRole('tooltip')).toHaveText('Reasoning level');
   await settingsButton.click();
   const general = settings.getByRole('tabpanel', { name: 'General' });
   await expect(general.getByRole('heading', { name: 'Chat', exact: true })).toBeVisible();
@@ -1836,6 +1838,10 @@ test('Gateway chat shares context, keeps composer reasoning through approval, an
   expect(JSON.stringify(requests[3])).not.toContain(privateText);
   expect(JSON.stringify(requests[3])).not.toContain('history-call');
   expect(requests[3].messages.filter(message => message.role === 'system')).toHaveLength(1);
+  await chooseReasoning('Low');
+  await page.reload();
+  await expect.poll(() => reasoning.evaluate(el => el instanceof HTMLSelectElement
+    ? el.selectedOptions[0]?.textContent : el.textContent?.trim())).toBe('Low');
 });
 
 async function openRoute(page: Page, group?: 'Gateway' | 'Direct' | 'Decisions') {
@@ -2791,8 +2797,8 @@ test('BYOK can chat and persist Direct performance and cost with every gateway r
   await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeHidden();
   const lastReply = page.getByRole('article', { name: 'Assistant', exact: true }).last();
   const badge = (label: string) => lastReply.getByRole('img', { name: new RegExp(`^${label.replace(/[()]/g, '\\$&')}:`) });
-  await expect(badge('Estimated direct cost (USD)')).toHaveText('0.0000104');
-  await expect(page.getByRole('img', { name: /^Conversation cost \(USD\):/ })).toHaveCount(0);
+  await expect(badge('Direct cost')).toHaveText('0.0000104');
+  await expect(page.getByRole('img', { name: /^Conversation cost:/ })).toHaveCount(0);
   await enableChatMetrics(page);
   await expect(badge('Time to first token')).toBeVisible();
   await expect(badge('Tokens per second')).toBeVisible();
@@ -2804,7 +2810,7 @@ test('BYOK can chat and persist Direct performance and cost with every gateway r
   await page.reload();
   await expect(page.getByText('Direct reply 1', { exact: true })).toBeVisible();
   await expect(page.getByText('Direct reply 2', { exact: true })).toBeVisible();
-  await expect(badge('Estimated direct cost (USD)')).toHaveText('0.0000104');
+  await expect(badge('Direct cost')).toHaveText('0.0000104');
   await expect(badge('Time to first token')).toHaveText(ttft!);
   await expect(badge('Tokens per second')).toHaveText(tps!);
   expect(gatewayCalls).toBe(0);
@@ -3096,7 +3102,7 @@ test.describe('Dutch regional settings with English interface', () => {
     const reply = page.getByRole('article', { name: 'Assistant' });
     await expect(reply.getByRole('img', { name: 'Total tokens: 1.234 (1.200 input · 34 output)', exact: true })).toHaveText('1.234');
     await expect(reply.getByRole('img', { name: /^Time to first token:/ })).toHaveText('1,25 s');
-    await expect(reply.getByRole('img', { name: /^Gateway cost \(USD\):/ })).toHaveText('0,0000104');
+    await expect(reply.getByRole('img', { name: /^Gateway cost:/ })).toHaveText('0,0000104');
   });
 });
 
@@ -3242,7 +3248,7 @@ test('compact badges, logo fallback, copy, pinned history and conversation repla
   await timing.hover();
   await expect(page.getByRole('tooltip', { name: 'Time to first token', exact: true })).toBeVisible();
   await expect(reply.getByRole('img', { name: /^Tokens per second:/ })).toHaveText('20 tok/s');
-  await expect(reply.getByRole('img', { name: /^Gateway cost \(USD\):/ })).toHaveText('0.00');
+  await expect(reply.getByRole('img', { name: /^Gateway cost:/ })).toHaveText('0.00');
   const copy = reply.getByRole('button', { name: 'Copy assistant message' });
   await expect(copy).toHaveText('');
   await copy.click();

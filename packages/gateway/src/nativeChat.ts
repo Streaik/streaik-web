@@ -20,9 +20,9 @@ function readGatewayMetrics(event: unknown): ChatMessageMetadata['gateway'] {
   const envelope = asRecord(frame?.response) ?? asRecord(frame?.message) ?? frame;
   const metrics = asRecord(asRecord(envelope?.metadata)?.gateway);
   if (!metrics) return;
-  const { ttft, tps, cost, estimated } = metrics;
+  const { ttft, tps, cost } = metrics;
   const number = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-  return { ttft: number(ttft), tps: number(tps), cost: number(cost), estimated: estimated === true };
+  return { ttft: number(ttft), tps: number(tps), cost: number(cost) };
 }
 
 function nativeAttachmentMessages(messages: ChatMessage[], endpoint: NativeChatEndpoint): ChatMessage[] {

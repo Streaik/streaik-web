@@ -4,7 +4,7 @@ import { browserNumberFormat, useAppTranslation } from './i18n';
 
 const compact = browserNumberFormat({ notation: 'compact', maximumFractionDigits: 1 });
 const integer = browserNumberFormat({ maximumFractionDigits: 0 });
-const dollars = browserNumberFormat({ style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 8 });
+const costFormat = browserNumberFormat({ minimumFractionDigits: 2, maximumFractionDigits: 8 });
 
 export function ComposerUsage({ context, cost }: { context?: { used: number; window: number; maxOutput?: number }; cost?: number }) {
   const { t } = useAppTranslation();
@@ -16,8 +16,8 @@ export function ComposerUsage({ context, cost }: { context?: { used: number; win
     t('Tokens available for output: {{max_output_tokens}}', { max_output_tokens: integer.format(context.maxOutput) }),
     t('Available space: {{availableSpace}}', { availableSpace: integer.format(Math.max(0, context.window - context.used - context.maxOutput)) }),
   ].join(' · ') : contextLabel;
-  const costLabel = t('Conversation cost (USD)');
-  const price = cost === undefined ? undefined : dollars.format(cost);
+  const costLabel = t('Conversation cost');
+  const price = cost === undefined ? undefined : costFormat.format(cost);
   return <div className="chat-composer-usage">
     {context && <Tooltip content={contextDetails} visualOnly><span className="chat-context-usage">
       <progress aria-label={t('Context window')} aria-valuetext={contextDetails} max={context.window} value={Math.min(context.used, context.window)} />
