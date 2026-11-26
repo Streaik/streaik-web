@@ -3,16 +3,18 @@ import { chartInstructions } from '@streaik/themes/chart-spec';
 import type { McpTool } from './mcp.ts';
 import { conversationTitle, newestFirst } from './conversations.ts';
 import type { Conversation } from './conversations.ts';
+import type { SearchConversationText } from './conversationSearch.ts';
 import { convertedAttachmentName } from './chatAttachments.ts';
-import directory from './provider-directory.json' with { type: 'json' };
+import { modelSearchDocument, providersForCatalog, providerSearchDocument } from './aiCatalog.ts';
+import { searchCatalog } from './catalogLookup.ts';
 
 type Property = { type: 'string' | 'integer' | 'number'; description: string; enum?: string[] };
 export type ToolDefinition = Pick<McpTool, 'name' | 'description' | 'inputSchema'>;
 type LocalResult = { content: { type: 'text'; text: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean };
-type PluginContext = { catalog: readonly CatalogModel[]; history: readonly Conversation[] };
+type PluginContext = { catalog: readonly CatalogModel[]; history: readonly Conversation[]; searchConversationText?: SearchConversationText };
 type LocalToolSpec = {
   definition: ToolDefinition;
-  run: (input: Record<string, unknown>, context: PluginContext) => Record<string, unknown>;
+  run: (input: Record<string, unknown>, context: PluginContext) => Record<string, unknown> | Promise<Record<string, unknown>>;
 };
 
 function define(name: string, description: string, properties: Record<string, Property>, required: string[] | undefined,
@@ -27,44 +29,42 @@ const order = (a: string, b: string) => a.localeCompare(b, undefined, { sensitiv
 const limit = (value: unknown, fallback = 500, max = 500) =>
   typeof value === 'number' ? Math.max(1, Math.min(max, Math.floor(value))) : fallback;
 
-const providerMetadata = new Map(directory.providers.map(provider => [provider.id, provider]));
-function providers(catalog: readonly CatalogModel[]) {
-  return [...new Set(catalog.map(({ provider }) => provider))].map(key => {
-    const entry = providerMetadata.get(key);
-    return { key, name: entry?.name ?? key, description: entry?.description, providerCountry: entry?.country,
-      inferenceRegions: entry?.regions, urls: entry?.urls };
-  }).sort((a, b) => order(a.name, b.name) || order(a.key, b.key));
-}
-
 const providerFilters = {
   country: string('Optional provider country filter (exact ISO country code match, case-insensitive), e.g. NL.'),
   inferenceRegion: { ...string('Optional inference region filter (exact token match, case-insensitive).'),
     enum: ['World', 'Europe', 'Americas', 'Asia', 'Africa', 'Oceania'] },
   limit: integer('Optional max number of providers to return.'),
 };
-function providerResults(catalog: readonly CatalogModel[], input: Record<string, unknown>) {
-  const query = keyword(input.query);
+async function providerResults(catalog: readonly CatalogModel[], input: Record<string, unknown>) {
+  const query = typeof input.query === 'string' ? input.query.trim() : '';
   const country = keyword(input.country);
   const region = keyword(input.inferenceRegion);
-  const filtered = providers(catalog).filter(p => (!query || [p.key, p.name].some(s => keyword(s).includes(query))) &&
-    (!country || keyword(p.providerCountry) === country) && (!region || p.inferenceRegions?.some(s => keyword(s) === region)));
-  const items = filtered.slice(0, limit(input.limit));
+  const providers = providersForCatalog(catalog);
+  const matches = query ? await searchCatalog(providers, providerSearchDocument, query)
+    : [...providers].sort((a, b) => order(a.name, b.name) || order(a.id, b.id));
+  const filtered = matches.filter(p => (!country || keyword(p.country) === country) &&
+    (!region || p.regions?.some(s => keyword(s) === region)));
+  const items = filtered.slice(0, limit(input.limit)).map(({ id, name, description, country, regions, urls }) =>
+    ({ key: id, name, description, providerCountry: country, inferenceRegions: regions, urls }));
   return { total: filtered.length, count: items.length, items };
 }
 
 const modelType = string('Optional model type filter (e.g. language, image, speech).');
-function modelResults(catalog: readonly CatalogModel[], input: Record<string, unknown>) {
+async function modelResults(catalog: readonly CatalogModel[], input: Record<string, unknown>) {
   const provider = keyword(input.provider);
   const type = keyword(input.type);
-  const query = keyword(input.query);
-  const names = providers(catalog);
-  const matchProvider = ({ key, name }: (typeof names)[number], exact: boolean) => [key, name].some(value =>
-    exact ? keyword(value) === provider : keyword(value).includes(provider));
-  const exact = names.filter(item => matchProvider(item, true));
-  const keys = new Set((exact.length ? exact : names.filter(item => matchProvider(item, false))).map(item => item.key));
-  return catalog.filter(model => (!provider || keys.has(model.provider)) && (!type || keyword(model.type).includes(type)) &&
-    keyword([model.id, model.name, model.type, model.provider, providerMetadata.get(model.provider)?.name, ...model.tags].join(' ')).includes(query))
-    .sort((a, b) => order(a.name, b.name) || order(a.id, b.id));
+  const query = typeof input.query === 'string' ? input.query.trim() : '';
+  let keys: Set<string> | undefined;
+  if (provider) {
+    const names = providersForCatalog(catalog);
+    const matchProvider = ({ id, name }: (typeof names)[number], exact: boolean) => [id, name].some(value =>
+      exact ? keyword(value) === provider : keyword(value).includes(provider));
+    const exact = names.filter(item => matchProvider(item, true));
+    keys = new Set((exact.length ? exact : names.filter(item => matchProvider(item, false))).map(item => item.id));
+  }
+  const matches = query ? await searchCatalog(catalog, modelSearchDocument, query) : catalog;
+  const filtered = matches.filter(model => (!keys || keys.has(model.provider)) && (!type || keyword(model.type).includes(type)));
+  return query ? filtered : filtered.sort((a, b) => order(a.name, b.name) || order(a.id, b.id));
 }
 
 const aiTools = [
@@ -72,24 +72,25 @@ const aiTools = [
     (input, { catalog }) => providerResults(catalog, { ...input, query: undefined })),
   define('local_ai_provider_countries_list', 'List provider country codes and their provider counts.', {}, [], (_input, { catalog }) => {
     const counts = new Map<string, number>();
-    for (const { providerCountry } of providers(catalog)) {
-      const code = providerCountry?.trim().toUpperCase();
+    for (const { country } of providersForCatalog(catalog)) {
+      const code = country?.trim().toUpperCase();
       if (code) counts.set(code, (counts.get(code) ?? 0) + 1);
     }
     const items = Array.from(counts, ([code, providerCount]) => ({ code, providerCount })).sort((a, b) => order(a.code, b.code));
     return { total: items.length, count: items.length, items };
   }),
-  define('local_ai_providers_search', 'Search Gateway providers by key or display name.', {
-    query: string('Search text matched case-insensitively against provider key and name.'), ...providerFilters,
+  define('local_ai_providers_search', 'Search providers available in the Gateway model catalog.', {
+    query: string('Words or prefixes from provider names, keys, descriptions, categories, countries, or regions.'), ...providerFilters,
   }, ['query'], (input, { catalog }) => providerResults(catalog, input)),
   define('local_ai_models_search', 'Search models and capabilities in the Gateway catalog.', {
-    query: string('Search text for Gateway models.'), provider: string('Optional provider filter by provider key or display name.'),
+    query: string('Words or prefixes from model names, IDs, descriptions, providers, types, or tags.'),
+    provider: string('Optional provider filter by provider key or display name.'),
     type: modelType, limit: integer('Max number of models to return.'),
-  }, ['query', 'limit'], (input, { catalog }) => ({ data: modelResults(catalog, input).slice(0, limit(input.limit)) })),
+  }, ['query', 'limit'], async (input, { catalog }) => ({ data: (await modelResults(catalog, input)).slice(0, limit(input.limit)) })),
   define('local_ai_models_list_by_provider', 'List Gateway models by provider, with an optional model type filter.', {
     provider: string('Provider key or display name.'), type: modelType, limit: integer('Optional max number of models to return.'),
-  }, ['provider'], (input, { catalog }) => {
-    const matches = modelResults(catalog, { ...input, query: undefined });
+  }, ['provider'], async (input, { catalog }) => {
+    const matches = await modelResults(catalog, { ...input, query: undefined });
     const data = matches.slice(0, limit(input.limit));
     return { total: matches.length, count: data.length, data };
   }),
@@ -105,34 +106,11 @@ const historyTools = [
       messageCount: record.messages.filter(isConversationText).length, activityAt: record.metadata?.updatedAt })),
   })),
   define('local_conversations_search_text', 'Search local conversations by text. All query words must occur in the same text part.', {
-    query: string('Search query. Single words use substring match; multi-word queries require every word in the same text part.'),
+    query: string('Words or word prefixes to find together in a user or assistant text part.'),
     limit: { type: 'number', description: 'Max results (default 20, max 50)' },
-  }, ['query'], (input, { history }) => {
-    const query = (input.query as string).trim();
-    const terms = [...new Set(keyword(query).split(/\s+/))];
-    const cap = limit(input.limit, 20, 50);
-    const results = [];
-    let total = 0;
-    for (const record of [...history].sort(newestFirst)) {
-      for (const [messageIndex, message] of record.messages.entries()) {
-        if (!isConversationText(message)) continue;
-        for (const [partIndex, part] of message.parts.entries()) {
-          if (part.type !== 'text') continue;
-          const text = part.text.toLowerCase();
-          const indices = terms.map(term => text.indexOf(term));
-          if (indices.includes(-1)) continue;
-          total++;
-          if (results.length >= cap) continue;
-          const matchIndex = Math.min(...indices);
-          const start = Math.max(0, matchIndex - 90);
-          const end = Math.min(part.text.length, start + 260);
-          results.push({ conversationId: record.id, conversationName: conversationTitle(record), messageId: message.id,
-            messageIndex, role: message.role, partIndex, matchIndex,
-            snippet: `${start ? '…' : ''}${part.text.slice(start, end).replace(/\s+/g, ' ').trim()}${end < part.text.length ? '…' : ''}` });
-        }
-      }
-    }
-    return { query, total, limit: cap, results };
+  }, ['query'], (input, { searchConversationText }) => {
+    if (!searchConversationText) throw new Error('Local chat history search is not available.');
+    return searchConversationText((input.query as string).trim(), limit(input.limit, 20, 50));
   }),
   define('local_conversations_get_conversation', 'Get the text of a local conversation by ID.', {
     conversationId: string('Id of the conversation'),
@@ -186,7 +164,7 @@ export function activeChatTools(route: ChatRoute, enabled: readonly LocalPluginI
   return tools;
 }
 
-export function runLocalTool(tool: Extract<ChatTool, { source: 'local' }>, input: unknown, context: PluginContext): LocalResult {
+export async function runLocalTool(tool: Extract<ChatTool, { source: 'local' }>, input: unknown, context: PluginContext): Promise<LocalResult> {
   try {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Expected tool arguments as a JSON object.');
     const schema = tool.definition.inputSchema;
@@ -202,7 +180,7 @@ export function runLocalTool(tool: Extract<ChatTool, { source: 'local' }>, input
         : typeof value !== 'number' || !Number.isFinite(value) || value <= 0 ||
           (property.type === 'integer' && !Number.isSafeInteger(value))) throw new Error(`Invalid argument: ${key}.`);
     }
-    const structuredContent = tool.spec.run(values, context);
+    const structuredContent = await tool.spec.run(values, context);
     if (JSON.stringify(structuredContent).length > 128 * 1024) throw new Error('Result is too large. Try a narrower search.');
     return { content: [], structuredContent };
   } catch (error) {

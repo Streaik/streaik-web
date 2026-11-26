@@ -3,28 +3,19 @@ import type { IconName } from '@streaik/themes';
 import type { CatalogModel } from '@streaik/gateway';
 import { useId, useState } from 'react';
 import type { ReactNode } from 'react';
+import { directoryProviders, modelSearchDocument, providerCategories, providerName, providerSearchDocument } from './aiCatalog';
 import { CatalogMark } from './CatalogMark';
 import { ChatIcon } from './ChatIcon';
-import directory from './provider-directory.json';
 import { browserNumberFormat, useAppTranslation } from './i18n';
+import { useCatalogSearch } from './useCatalogSearch';
 
 const pageSize = 48;
 const number = browserNumberFormat();
+const noModels: readonly CatalogModel[] = [];
 const providerLinks = [
   ['homepage', 'website', 'Website'], ['docs', 'docs', 'Docs'], ['pricing', 'pricing', 'Pricing'],
   ['termsOfService', 'terms', 'Terms'], ['privacyPolicy', 'privacy', 'Privacy'], ['console', 'console', 'Console'],
 ] as const;
-type Provider = {
-  id: string; name: string; description?: string; category?: string; country?: string; regions?: string[];
-  urls?: Partial<Record<typeof providerLinks[number][0], string>>;
-};
-const providers: Provider[] = [...directory.providers].sort((a, b) => a.name.localeCompare(b.name));
-const providerNames = new Map(providers.map(({ id, name }) => [id, name]));
-export const providerName = (id: string) => providerNames.get(id) ?? id;
-const categories = new Map([
-  ['model_provider', 'Model builder'], ['gateway_router', 'Gateway'], ['inference_compute', 'Inference & compute'],
-  ['media_voice', 'Media & voice'], ['search_data', 'Search & data'], ['app_tools', 'Apps & tools'],
-]);
 const otherType = ['Other', 'shapes'] as const;
 const types = new Map<string, readonly [label: string, icon: IconName]>([
   ['language', ['Language', 'language']], ['image', ['Image', 'images']], ['decision', ['Decision', 'decision']],
@@ -35,7 +26,7 @@ const types = new Map<string, readonly [label: string, icon: IconName]>([
 const modelType = (model: CatalogModel) => model.type && types.has(model.type) ? model.type : 'other';
 const sortedValues = (values: string[], label = (value: string) => value, language?: string) =>
   [...new Set(values.filter(Boolean))].sort((a, b) => label(a).localeCompare(label(b), language));
-const regionOptions = sortedValues(providers.flatMap(p => p.regions ?? []));
+const regionOptions = sortedValues(directoryProviders.flatMap(p => p.regions ?? []));
 
 function CatalogHeader({ title, children }: { title: string; children: ReactNode }) {
   const { t } = useAppTranslation();
@@ -104,11 +95,10 @@ export function ModelsView({ models, status, refresh }: { models?: CatalogModel[
   const [provider, setProvider] = useState('');
   const [tab, setTab] = useState('all');
   const id = useId();
+  const { results, message: searchMessage } = useCatalogSearch(models ?? noModels, search, modelSearchDocument);
   const options = sortedValues((models ?? []).map(model => model.provider), providerName);
   const selectedProvider = options.includes(provider) ? provider : '';
-  const query = search.trim().toLowerCase();
-  const matching = (models ?? []).filter(model => (!selectedProvider || model.provider === selectedProvider) &&
-    (!query || [model.name, model.id, providerName(model.provider), model.description, ...model.tags].some(text => text?.toLowerCase().includes(query))));
+  const matching = results.filter(model => !selectedProvider || model.provider === selectedProvider);
   const groups = new Map<string, CatalogModel[]>([['all', matching]]);
   for (const model of matching) {
     const type = modelType(model);
@@ -152,9 +142,10 @@ export function ModelsView({ models, status, refresh }: { models?: CatalogModel[
            }}><ChatIcon name={icon} />{t(label)} ({number.format(groups.get(key)?.length ?? 0)})</button>)}
       </div>
       <section id={`${id}-results`} role="tabpanel" aria-labelledby={`${id}-${selected}`} tabIndex={0}>
-        <CardGrid key={JSON.stringify([selected, query, selectedProvider])} items={groups.get(selected) ?? []}
-          render={model => <ModelCard key={JSON.stringify([model.id, model.type])} model={model} />}
-          empty={t(models.length ? 'No models match these filters.' : 'The gateway did not return any models.')} />
+        {searchMessage ? <p className="catalog-empty" role="status">{t(searchMessage)}</p> :
+          <CardGrid key={JSON.stringify([selected, search.trim(), selectedProvider])} items={groups.get(selected) ?? []}
+            render={model => <ModelCard key={JSON.stringify([model.id, model.type])} model={model} />}
+            empty={t(models.length ? 'No models match these filters.' : 'The gateway did not return any models.')} />}
       </section>
     </>}
   </div>;
@@ -174,29 +165,29 @@ export function ProvidersView({ appName }: { appName: string }) {
   const language = i18n.resolvedLanguage ?? 'en';
   const countryNames = new Intl.DisplayNames([language], { type: 'region' });
   const countryName = (code: string) => /^[A-Z]{2}$/.test(code) ? countryNames.of(code) ?? code : code;
-  const countryOptions = sortedValues(providers.map(p => p.country ?? ''), countryName, language);
+  const countryOptions = sortedValues(directoryProviders.map(p => p.country ?? ''), countryName, language);
   const [search, setSearch] = useState('');
   const [country, setCountry] = useState('');
   const [region, setRegion] = useState('');
-  const query = search.trim().toLowerCase();
-  const filtered = providers.filter(provider => (!country || provider.country === country) &&
-    (!region || provider.regions?.includes(region)) && [provider.name, provider.id, provider.description].some(value => value?.toLowerCase().includes(query)));
+  const { results, message: searchMessage } = useCatalogSearch(directoryProviders, search, providerSearchDocument);
+  const filtered = results.filter(provider => (!country || provider.country === country) && (!region || provider.regions?.includes(region)));
   return <div className="catalog-content">
-    <CatalogHeader title={t('Providers')}>{t('Browse the {{appName}} directory of {{count, number}} AI providers.', { appName, count: providers.length })}</CatalogHeader>
+    <CatalogHeader title={t('Providers')}>{t('Browse the {{appName}} directory of {{count, number}} AI providers.', { appName, count: directoryProviders.length })}</CatalogHeader>
     <div className="catalog-filters">
       <Search label={t('Search providers')} value={search} change={setSearch} />
       <Filter label={t('Country of origin')} all={t('All countries')} value={country} options={countryOptions} display={countryName} change={setCountry} />
       <Filter label={t('AI region')} all={t('All regions')} value={region} options={regionOptions} display={value => t(value)} change={setRegion} />
     </div>
+    {searchMessage ? <p className="catalog-empty" role="status">{t(searchMessage)}</p> : <>
     <p className="catalog-count" role="status">{t('{{count, number}} providers', { count: filtered.length })}</p>
-    <CardGrid key={JSON.stringify([query, country, region])} items={filtered} empty={t('No providers match these filters.')} render={provider =>
+    <CardGrid key={JSON.stringify([search.trim(), country, region])} items={filtered} empty={t('No providers match these filters.')} render={provider =>
       <article className="catalog-card" key={provider.id}>
         <div className="catalog-card-title"><CatalogMark provider={provider.id} name={provider.name} /><div>
           <h2>{provider.name}</h2>{provider.country && <p>{countryName(provider.country)}</p>}
         </div></div>
         {provider.description && <p className="catalog-description">{provider.description}</p>}
         <div className="catalog-badges">
-          {provider.category && categories.has(provider.category) && <span>{t(categories.get(provider.category)!)}</span>}
+          {provider.category && providerCategories.has(provider.category) && <span>{t(providerCategories.get(provider.category)!)}</span>}
           {provider.regions?.map(area => <Tooltip key={area} content={t('AI region')}><span>{t(area)}</span></Tooltip>)}
         </div>
         <div className="catalog-links">{providerLinks.map(([key, icon, label]) => {
@@ -205,5 +196,6 @@ export function ProvidersView({ appName }: { appName: string }) {
           return href && <Tooltip key={key} content={name}><a href={href} target="_blank" rel="noopener noreferrer" aria-label={name}><ChatIcon name={icon} /></a></Tooltip>;
         })}</div>
       </article>} />
+    </>}
   </div>;
 }

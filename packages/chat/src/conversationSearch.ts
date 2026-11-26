@@ -6,34 +6,34 @@ import { createSearchTokenizer, normalizeWord, tokenize, wordPattern } from './s
 
 type SearchHit = { id: string; excerpt?: string };
 export type SearchHistory = (term: string) => Promise<SearchHit[]>;
+type TextMatch = { conversationId: string; conversationName: string; messageId: string; messageIndex: number;
+  role: 'user' | 'assistant'; partIndex: number; matchIndex: number; snippet: string };
+export type SearchConversationText = (query: string, limit: number) => Promise<{ query: string; total: number; limit: number; results: TextMatch[] }>;
 
-function searchableText({ messages }: Conversation) {
-  const parts: string[] = [];
-  for (const message of messages) {
+function* searchableParts({ messages }: Conversation) {
+  for (const [messageIndex, message] of messages.entries()) {
     if (message.role !== 'user' && message.role !== 'assistant') continue;
-    for (const part of message.parts) {
-      if (part.type === 'text' && convertedAttachmentName(part) === undefined) parts.push(part.text);
+    for (const [partIndex, part] of message.parts.entries()) {
+      if (part.type === 'text' && convertedAttachmentName(part) === undefined) yield { messageIndex, partIndex, text: part.text };
     }
   }
-  return parts.join('\n');
 }
 
-function excerpt(text: string, terms: string[]) {
+function firstMatch(text: string, terms: string[]) {
   for (const match of text.matchAll(wordPattern)) {
     const word = normalizeWord(match[0]);
-    if (!terms.some(term => word.startsWith(term))) continue;
-    const start = Math.max(0, match.index - 40);
-    const end = start + 160;
-    return `${start ? '…' : ''}${text.slice(start, end).replace(/\s+/g, ' ').trim()}${end < text.length ? '…' : ''}`;
+    if (terms.some(term => word.startsWith(term))) return match.index;
   }
 }
 
-function database() {
-  return create({ schema: { title: 'string', text: 'string' }, sort: { enabled: false },
-    components: { tokenizer: createSearchTokenizer() } });
+function excerpt(text: string, matchIndex: number, before: number, length: number) {
+  const start = Math.max(0, matchIndex - before);
+  const end = start + length;
+  return `${start ? '…' : ''}${text.slice(start, end).replace(/\s+/g, ' ').trim()}${end < text.length ? '…' : ''}`;
 }
 
-export function createConversationSearch() {
+function createHistoryIndex<Database>(database: () => Database,
+  update: (db: Database, record: Conversation | undefined, previous: Conversation | undefined, yieldIfNeeded: () => Promise<void>) => Promise<void>) {
   let db = database();
   let indexed = new Map<string, Conversation>();
   let snapshot: readonly Conversation[] | undefined;
@@ -49,21 +49,21 @@ export function createConversationSearch() {
     if (snapshot === records) return;
     const current = new Map(records.map(record => [record.id, record]));
     try {
-      for (const id of indexed.keys()) {
-        if (!current.has(id)) await remove(db, id);
-      }
       let deadline = performance.now() + 12;
-      for (const record of current.values()) {
-        const previous = indexed.get(record.id);
-        if (previous?.messages === record.messages && previous.metadata?.name === record.metadata?.name) continue;
-        const name = record.metadata?.name;
-        const title = (typeof name === 'string' && name.trim()) || conversationTitle(record, '');
-        await upsert(db, { id: record.id, title, text: searchableText(record) });
+      async function yieldIfNeeded() {
         if (performance.now() >= deadline) {
           // Let the UI paint during an initial backfill of a large history.
           await new Promise(resolve => setTimeout(resolve, 0));
           deadline = performance.now() + 12;
         }
+      }
+      for (const [id, previous] of indexed) {
+        if (!current.has(id)) await update(db, undefined, previous, yieldIfNeeded);
+      }
+      for (const record of current.values()) {
+        const previous = indexed.get(record.id);
+        if (previous?.messages === record.messages && previous.metadata?.name === record.metadata?.name) continue;
+        await update(db, record, previous, yieldIfNeeded);
       }
       indexed = current;
       snapshot = records;
@@ -78,13 +78,86 @@ export function createConversationSearch() {
 
   return {
     sync: (records: readonly Conversation[]) => enqueue(() => reconcile(records)),
-    search: (records: readonly Conversation[], term: string): Promise<SearchHit[]> => enqueue(async () => {
+    read: <T>(records: readonly Conversation[], query: (db: Database, indexed: ReadonlyMap<string, Conversation>) => Promise<T>) => enqueue(async () => {
+      await reconcile(records);
+      return query(db, indexed);
+    }),
+  };
+}
+
+function textDocuments(record: Conversation | undefined) {
+  const parts = new Map<string, string>();
+  if (record) for (const { messageIndex, partIndex, text } of searchableParts(record)) {
+    if (text.trim()) parts.set(JSON.stringify([record.id, messageIndex, partIndex]), text);
+  }
+  return parts;
+}
+
+function createTextPartIndex() {
+  return createHistoryIndex(() => create({ schema: { text: 'string' }, sort: { enabled: false },
+    components: { tokenizer: createSearchTokenizer() } }), async (db, record, previous, yieldIfNeeded) => {
+    if (previous?.messages === record?.messages) return;
+    const next = textDocuments(record);
+    const before = textDocuments(previous);
+    for (const id of before.keys()) {
+      if (!next.has(id)) {
+        await remove(db, id);
+        await yieldIfNeeded();
+      }
+    }
+    for (const [id, text] of next) {
+      if (before.get(id) !== text) {
+        await upsert(db, { id, text });
+        await yieldIfNeeded();
+      }
+    }
+  });
+}
+
+export function createConversationSearch() {
+  const conversations = createHistoryIndex(() => create({ schema: { title: 'string', text: 'string' }, sort: { enabled: false },
+    components: { tokenizer: createSearchTokenizer() } }), async (db, record, previous, yieldIfNeeded) => {
+    if (record) {
+      const name = record.metadata?.name;
+      const title = (typeof name === 'string' && name.trim()) || conversationTitle(record, '');
+      const text = Array.from(searchableParts(record), part => part.text).join('\n');
+      await upsert(db, { id: record.id, title, text });
+    } else if (previous) await remove(db, previous.id);
+    await yieldIfNeeded();
+  });
+  // Build this index only when the browser tool needs part-level results, not for the history UI.
+  let parts: ReturnType<typeof createTextPartIndex> | undefined;
+
+  return {
+    sync: conversations.sync,
+    async search(records: readonly Conversation[], term: string): Promise<SearchHit[]> {
       const terms = tokenize(term);
       if (!terms.length) return [];
-      await reconcile(records);
-      const { hits } = await search(db, { mode: 'fulltext', term, properties: ['title', 'text'],
-        boost: { title: 2 }, threshold: 0, limit: 30 });
-      return hits.map(({ id, document }) => ({ id, excerpt: excerpt(document.text, terms) }));
-    }),
+      return conversations.read(records, async db => {
+        const { hits } = await search(db, { mode: 'fulltext', term, properties: ['title', 'text'],
+          boost: { title: 2 }, threshold: 0, limit: 30 });
+        return hits.map(({ id, document }) => {
+          const match = firstMatch(document.text, terms);
+          return { id, excerpt: match === undefined ? undefined : excerpt(document.text, match, 40, 160) };
+        });
+      });
+    },
+    async searchText(records: readonly Conversation[], query: string, limit: number): ReturnType<SearchConversationText> {
+      const terms = tokenize(query);
+      if (!terms.length || !records.length) return { query, total: 0, limit, results: [] };
+      return (parts ??= createTextPartIndex()).read(records, async (db, indexed) => {
+        const { count, hits } = await search(db, { mode: 'fulltext', term: query, properties: ['text'], threshold: 0, limit });
+        const results: TextMatch[] = hits.flatMap(({ id, document: { text } }) => {
+          const [conversationId, messageIndex, partIndex] = JSON.parse(id) as [string, number, number];
+          const record = indexed.get(conversationId);
+          const message = record?.messages[messageIndex];
+          if (!record || (message?.role !== 'user' && message?.role !== 'assistant')) return [];
+          const matchIndex = firstMatch(text, terms) ?? 0;
+          return [{ conversationId, conversationName: conversationTitle(record), messageId: message.id, messageIndex,
+            role: message.role, partIndex, matchIndex, snippet: excerpt(text, matchIndex, 90, 260) }];
+        });
+        return { query, total: count, limit, results };
+      });
+    },
   };
 }

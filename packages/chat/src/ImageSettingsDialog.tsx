@@ -6,7 +6,7 @@ import type { ComponentType } from 'react';
 import { attachmentByteLimit, fileMediaType } from './chatAttachments';
 import { ChatIcon } from './ChatIcon';
 import { DialogTabs } from './DialogTabs';
-import { providerName } from './CatalogViews';
+import { providerName } from './aiCatalog';
 import { defaultImagePreferences, isDallE, supportsImageAspectRatio, supportsImageSeed } from './imagePreferences';
 import type { ImagePreferences } from './imagePreferences';
 import { canEditImage, imageMaskIssue } from './imageRoute';

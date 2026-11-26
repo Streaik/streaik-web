@@ -1,6 +1,6 @@
 import type { ChatModel } from '@streaik/gateway';
 import { Select } from '@streaik/themes';
-import { providerName } from './CatalogViews';
+import { providerName } from './aiCatalog';
 import { useAppTranslation } from './i18n';
 
 function modelSummary(selected: readonly string[], models: readonly ChatModel[]) {
