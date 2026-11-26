@@ -487,7 +487,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           return withReplyMetadata(stream, body.model, previous);
         }
         let model = body.model;
-        const enabledSkillIds = new Set(context?.skills?.availableSkills.skills.map(({ id }) => id));
+        const enabledSkillIds = new Set(context?.skills?.skills.map(({ skill_id }) => skill_id));
         const resourceServers = new Set(context?.mcp?.mcpResourceCatalog.servers.map(({ serverId }) => serverId));
         const replay = filterLocalToolReplay(request.messages, body.tools ?? [], isApiChat(route), enabledSkillIds, resourceServers);
         request = { ...request, body, messages: filterToolOutputContent(replay, preferences.toolOutput) };

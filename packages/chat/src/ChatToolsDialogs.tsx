@@ -203,7 +203,7 @@ export function ViewContextDialog({ context, tools, onClose }: { context?: Reque
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   const [tab, setTab] = useState<'system' | 'user' | 'tools' | 'skills'>('system');
-  const skills = context?.skills?.availableSkills.skills ?? [];
+  const skills = context?.skills?.skills ?? [];
   if (tab === 'skills' && !skills.length) setTab('system');
   useLayoutEffect(() => { dialog.current?.showModal(); }, []);
   return <dialog ref={dialog} className="chat-settings chat-tools-dialog" aria-labelledby={`${id}-title`} onClose={onClose}>
@@ -243,9 +243,9 @@ export function ViewContextDialog({ context, tools, onClose }: { context?: Reque
     </div>
     {skills.length > 0 && <div id={`${id}-skills-panel`} className="chat-skill-cards" role="tabpanel" tabIndex={0}
       aria-labelledby={`${id}-skills-tab`} hidden={tab !== 'skills'}>
-      {skills.map(({ id, name, description }) => <article key={id} className="chat-tool-card chat-context-skill-card">
+      {skills.map(({ skill_id, name, description }) => <article key={skill_id} className="chat-tool-card chat-context-skill-card">
         <h3>{name}</h3>
-        <code>{id}</code>
+        <code>{skill_id}</code>
         <p>{description}</p>
       </article>)}
     </div>}

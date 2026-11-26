@@ -10,32 +10,26 @@ export const skillTools: readonly ToolDefinition[] = [{
   name: activateSkill,
   description: 'Loads the body instructions for an enabled agent skill. Use this when one of the available skills matches the current task. After activation, use read_skill_resource to load referenced bundled files by relative path.',
   inputSchema: { type: 'object', properties: {
-    skill_id: { type: 'string', description: 'Exact enabled skill ID string to activate. Use the id/skill_id shown in the system context or returned by search_skills; do not invent IDs.' },
+    skill_id: { type: 'string', description: 'Exact enabled skill ID to activate, as listed in the system context.' },
   }, required: ['skill_id'] },
 }, {
   name: readSkillResource,
   description: 'Reads a bundled file from an enabled skill by relative path. Use this after activate_skill when the skill instructions reference scripts, references, or assets. Paths are relative to the skill root.',
   inputSchema: { type: 'object', properties: {
-    skill_id: { type: 'string', description: 'Exact enabled skill ID string that owns the resource. Reuse the same id/skill_id passed to activate_skill.' },
+    skill_id: { type: 'string', description: 'Exact enabled skill ID that owns the resource. Reuse the skill_id passed to activate_skill.' },
     path: { type: 'string', description: 'Relative path within the skill directory, for example references/REFERENCE.md or scripts/run.py.' },
   }, required: ['skill_id', 'path'] },
 }];
 
 export function skillSystemBlock(skills: readonly LocalSkill[], remote: readonly RemoteSkill[] = []) {
   const items = [
-    ...skills.filter(skill => skill.enabled).map(skill => ({ skillId: skill.id, ...defaultSkillVersion(skill).metadata })),
-    ...remote.map(({ id, name, description }) => ({ skillId: id, name, description })),
+    ...skills.filter(skill => skill.enabled).map(skill => {
+      const { name, description } = defaultSkillVersion(skill).metadata;
+      return { name, skill_id: skill.id, description };
+    }),
+    ...remote.map(({ id, name, description }) => ({ name, skill_id: id, description })),
   ];
-  if (!items.length) return undefined;
-  return { availableSkills: {
-    activationTool: activateSkill,
-    resourceTool: readSkillResource,
-    instructions: 'The following skills provide specialized instructions for specific tasks. When a task matches a skill description, call activate_skill with the exact skill_id shown below to load its instructions. Do not use the skill name as skill_id unless it exactly matches the listed skill_id. After activation, use read_skill_resource with the same skill_id and a relative path when the instructions reference bundled files.',
-    skillIdRequired: true,
-    activationExamples: items.map(skill => `- skill_id=${skill.skillId}; name=${skill.name}: ${skill.description}`),
-    skills: items.map(skill => ({ id: skill.skillId, skill_id: skill.skillId, exact_skill_id_to_activate: skill.skillId,
-      name: skill.name, description: skill.description, activation: `Call activate_skill with skill_id "${skill.skillId}".` })),
-  } };
+  return items.length ? { skills: items } : undefined;
 }
 
 function escapeXml(value: string) {
