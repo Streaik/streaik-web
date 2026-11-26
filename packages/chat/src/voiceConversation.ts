@@ -48,8 +48,9 @@ export function createVoiceProtocol(options: Pick<Options, 'protocol' | 'history
   const liveCalls = new Map<string, WireEvent[]>();
   const rejected = new Set<string>();
   let liveRow: ChatMessage | undefined;
-  let pending: { message: ChatMessage; ids: Set<string> } | undefined;
+  let pending: Set<string> | undefined;
   let manualReady = false;
+  let manualCommit = false;
   let closing = false;
   let clientDelegation: string | undefined;
   const call = (type: string, fields: WireEvent = {}) => send({ type, event_id: crypto.randomUUID(), ...fields });
@@ -89,7 +90,7 @@ export function createVoiceProtocol(options: Pick<Options, 'protocol' | 'history
       catch { output(id, { error: 'Invalid tool arguments.' }); rejected.add(message.id); }
     }
     if (calls.length) {
-      pending = { message, ids: new Set(calls.map(c => c.id)) };
+      pending = new Set(calls.map(c => c.id));
       setMic(false);
       events.tools({ ...message }, calls);
     } else if (rejected.delete(message.id) && !pending && seenCalls.size <= 150) call('response.create');
@@ -100,6 +101,11 @@ export function createVoiceProtocol(options: Pick<Options, 'protocol' | 'history
     if (type === 'input_audio_buffer.committed' && itemId) {
       manualReady = true;
       if (options.transcription) events.publish({ ...item(input, itemId, 'user') });
+      if (manualCommit) {
+        manualCommit = false;
+        manualReady = false;
+        call('response.create');
+      }
     } else if (itemId && options.transcription && type === 'conversation.item.input_audio_transcription.completed') {
       write(item(input, itemId, 'user'), str(event.transcript) ?? '');
     } else if (itemId && type === 'conversation.item.input_audio_transcription.failed') {
@@ -184,25 +190,30 @@ export function createVoiceProtocol(options: Pick<Options, 'protocol' | 'history
       if (id) seen.add(id);
       if (event.type === 'error' && !closing) {
         const code = obj(event.error).code;
-        if (code === 'input_audio_buffer_commit_empty' || code === 'response_cancel_not_active' || code === 'conversation_already_has_active_response') return;
+        if (code === 'input_audio_buffer_commit_empty') { manualCommit = false; return; }
+        if (code === 'response_cancel_not_active' || code === 'conversation_already_has_active_response') return;
         throw new Error('OpenAI rejected a voice session event. Check the selected model and Realtime settings.');
       }
       if (protocol === 'live') live(event); else realtime(event);
     },
     manualTurn() {
       if (closing || pending || !options.manual) return;
-      if (options.manual === 'commit') call('input_audio_buffer.commit');
-      else if (!manualReady) return;
-      manualReady = false;
-      call('response.create');
+      if (options.manual === 'commit') {
+        if (manualCommit) return;
+        manualCommit = true;
+        call('input_audio_buffer.commit');
+      } else if (manualReady) {
+        manualReady = false;
+        call('response.create');
+      }
     },
     toolResult(id: string, value: unknown) {
-      if (!pending?.ids.has(id) || closing) return;
+      if (!pending?.has(id) || closing) return;
       output(id, value);
-      pending.ids.delete(id);
+      pending.delete(id);
     },
     continueTools(choice?: string, end = false) {
-      if (!pending || pending.ids.size || closing) return;
+      if (!pending || pending.size || closing) return;
       pending = undefined;
       setMic(true);
       if (!end) call('response.create', protocol === 'realtime' && choice ? { response: { tool_choice: choice } } : {});

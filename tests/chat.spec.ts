@@ -78,6 +78,109 @@ async function mockModels(page: Page) {
   });
 }
 
+test('OpenAI voice uses the existing model picker, composer slot, and conversation', async ({ page }) => {
+  const realtime = 'openai/gpt-realtime', live = 'openai/gpt-live-1';
+  await page.addInitScript(() => {
+    const probe = { sent: [] as Record<string, unknown>[], captures: 0, stops: 0, deliver: (_event: object) => {} };
+    Object.defineProperty(window, 'voiceProbe', { value: probe });
+    Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { value: async () => {
+      probe.captures++;
+      const track = { enabled: true, stop() { probe.stops++; } };
+      return { getTracks: () => [track], getAudioTracks: () => [track] };
+    } });
+    class Channel {
+      readyState = 'connecting';
+      bufferedAmount = 0;
+      onopen?: () => void;
+      onmessage?: (ev: { data: string }) => void;
+      constructor() { probe.deliver = event => this.onmessage?.({ data: JSON.stringify(event) }); }
+      send(value: string) {
+        const event = JSON.parse(value);
+        probe.sent.push(event);
+        if (event.type === 'session.close') setTimeout(() => probe.deliver({ type: 'session.closed' }), 0);
+      }
+      close() { this.readyState = 'closed'; }
+    }
+    class Peer {
+      channel = new Channel();
+      localDescription?: { sdp: string };
+      createDataChannel() { return this.channel; }
+      addTrack() {}
+      async createOffer() { return { sdp: 'fixture-offer' }; }
+      async setLocalDescription(offer: { sdp: string }) { this.localDescription = offer; }
+      async setRemoteDescription() { this.channel.readyState = 'open'; this.channel.onopen?.(); }
+      close() {}
+    }
+    Object.defineProperty(window, 'RTCPeerConnection', { value: Peer });
+  });
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: model },
+    { id: realtime, type: 'audio', tags: ['realtime'] }, { id: live, type: 'audio', tags: ['realtime'] },
+    { id: 'openai/gpt-live-transcribe', type: 'transcription', tags: ['realtime'] }] } }));
+  await page.route('**/gateway/api/chat', route => route.fulfill({ contentType: 'text/event-stream',
+    headers: { 'x-vercel-ai-ui-message-stream': 'v1' }, body: sse('Earlier text reply', 1) }));
+  await page.route(`**/gateway/api/realtime/session/${realtime}`, route => {
+    expect(route.request().postDataJSON()).toMatchObject({ sdp: 'fixture-offer', sessionConfig: { providerOptions: { openai: {
+      audio: { output: { voice: 'cedar' } },
+    } } } });
+    return route.fulfill({ json: { sessionId: 'fixture', sdp: 'fixture-answer' } });
+  });
+  await page.route('**/gateway/v1/live/sessions', route => {
+    expect(route.request().postDataJSON()).toMatchObject({ session: { model: live, store: false, delegation: {
+      type: 'responses', responses: { model: 'gpt-4.1-mini' },
+    } }, transport: { type: 'webrtc', sdp: 'fixture-offer' } });
+    expect(JSON.stringify(route.request().postDataJSON().session.input)).toContain('Earlier text reply');
+    return route.fulfill({ json: { session: { id: 'fixture' }, transport: { type: 'webrtc', sdp: 'fixture-answer' } } });
+  });
+  type Probe = { sent: object[]; captures: number; stops: number; deliver: (event: object) => void };
+  const checkProbe = () => page.evaluate(() => {
+    const { sent, captures, stops } = (window as unknown as { voiceProbe: Probe }).voiceProbe;
+    return { sent, captures, stops };
+  });
+  const deliver = (...events: object[]) => page.evaluate((events: object[]) => {
+    const probe = (window as unknown as { voiceProbe: Probe }).voiceProbe;
+    for (const event of events) probe.deliver(event);
+  }, events);
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await chooseChatModel(page);
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('Earlier user message'); await composer.press('Enter');
+  await expect(page.getByText('Earlier text reply', { exact: true }).first()).toBeVisible();
+  const chatDialog = page.getByRole('dialog', { name: 'Chat settings', exact: true });
+  const voiceStart = page.getByRole('button', { name: 'Start voice session', exact: true });
+  const voiceStop = page.getByRole('button', { name: 'Stop voice session', exact: true });
+  await modelPicker(page).click();
+  await expect(page.getByRole('option', { name: 'gpt-live-transcribe', exact: true })).toHaveCount(0);
+  await page.getByRole('option', { name: 'gpt-realtime', exact: true }).click();
+  await expect(voiceStart).toBeVisible();
+  expect((await checkProbe()).captures).toBe(0);
+  await page.getByRole('button', { name: 'Chat settings', exact: true }).click();
+  await chatDialog.getByRole('tab', { name: 'OpenAI Realtime', exact: true }).click();
+  await chatDialog.getByRole('combobox', { name: 'Voice', exact: true }).selectOption('cedar');
+  await chatDialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await voiceStart.click(); await expect(voiceStop).toBeVisible();
+  expect(JSON.stringify((await checkProbe()).sent)).toContain('Earlier user message');
+  await deliver({ type: 'input_audio_buffer.committed', item_id: 'u' },
+    { type: 'conversation.item.input_audio_transcription.completed', item_id: 'u', transcript: 'Voice question' },
+    { type: 'response.output_audio_transcript.done', response_id: 'r', transcript: 'Realtime voice reply' });
+  await expect(page.getByText('Realtime voice reply', { exact: true })).toBeVisible();
+  await voiceStop.click(); await expect(voiceStart).toBeVisible();
+  await chooseModel(page, 'gpt-live-1');
+  await page.getByRole('button', { name: 'Chat settings', exact: true }).click();
+  await chatDialog.getByRole('tab', { name: 'OpenAI Realtime', exact: true }).click();
+  await chatDialog.getByLabel('Responses model', { exact: true }).fill(model);
+  await chatDialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await voiceStart.click(); await expect(voiceStop).toBeVisible();
+  await deliver({ type: 'session.output_transcript.delta', delta: 'Live voice reply' });
+  await expect(page.getByText('Live voice reply', { exact: true })).toBeVisible();
+  await voiceStop.click(); await expect(voiceStart).toBeVisible();
+  await chooseChatModel(page);
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeVisible();
+  await expect(page.getByText('Voice question', { exact: true })).toBeVisible();
+  await expect(page.getByText('Live voice reply', { exact: true })).toBeVisible();
+  expect((await checkProbe()).stops).toBeGreaterThanOrEqual(2);
+});
+
 for (const action of ['accept', 'decline', 'cancel'] as const) {
   test(`Echo asks for provider input and continues with ${action}`, async ({ page }) => {
     const echo = 'echo/echo-input-required';

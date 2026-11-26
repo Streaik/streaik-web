@@ -18,7 +18,7 @@ export function OpenAIRealtimeConfigForm({ value, onChange, models, agents, prot
   const id = useId();
   const live = value.live ?? {}, realtime = value.realtime ?? {};
   const vad = realtime.vad === undefined ? defaultRealtimeVad : realtime.vad;
-  const transcription = realtime.transcription === undefined ? defaultRealtimeTranscription : realtime.transcription;
+  const transcription: Realtime['transcription'] = realtime.transcription === undefined ? defaultRealtimeTranscription : realtime.transcription;
   const r = (update: Partial<Realtime>) => onChange({ ...value, realtime: { ...realtime, ...update } });
   const l = (update: Partial<Live>) => onChange({ ...value, live: { ...live, ...update } });
   const updateVad = (update: Partial<Vad>) => r({ vad: { ...(vad ?? defaultRealtimeVad), ...update } });
