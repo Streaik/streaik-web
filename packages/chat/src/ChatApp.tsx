@@ -1,7 +1,7 @@
 import { useChat } from '@ai-sdk/react';
 import { GatewayError, gatewayChatEndpoints, isVoiceCatalogModel, nativeChatEndpoints, voiceProtocolForModel, pickChatCatalogModels } from '@streaik/gateway';
 import type { AgentBackend, ChatRoute, DirectChat, GatewayChatEndpoint, HostedAgentSelection } from '@streaik/gateway';
-import type { CatalogModel, ChatMessage, ChatReasoning, ChatToolChoice, Gateway } from '@streaik/gateway';
+import type { CatalogModel, ChatMessage, ChatReasoning, ChatToolChoice, Gateway, GatewaySpeechEndpoint } from '@streaik/gateway';
 import { Button, ThemeRoot, useColorScheme } from '@streaik/themes';
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -95,6 +95,8 @@ import { useTranscriptionRoute } from './transcriptionPreferences';
 import type { TranscriptionRouteSetting } from './transcriptionPreferences';
 import { useSpeechRoute } from './speechPreferences';
 import type { SpeechRouteSetting } from './speechPreferences';
+import { useMessageSpeech } from './useMessageSpeech';
+import type { MessageSpeechState, ToggleMessageSpeech } from './useMessageSpeech';
 import { useVideoJobs } from './useVideoJobs';
 export { BrowserRouter as ChatRouter } from 'react-router';
 export { localizationReady, useAppTranslation } from './i18n';
@@ -152,7 +154,9 @@ function useModels(source: Gateway | DirectChat | undefined, ready: boolean, rev
 
 type MessagePreferences = Pick<ChatPreferences, 'showMessageTokens' | 'showProviderLogo' | 'showMetrics'>;
 
-const Message = memo(function Message({ message, showMessageTokens, showProviderLogo, showMetrics }: { message: ChatMessage } & MessagePreferences) {
+const Message = memo(function Message({ message, showMessageTokens, showProviderLogo, showMetrics, pendingReply, speechState, onReadAloud }: {
+  message: ChatMessage; pendingReply: boolean; speechState?: MessageSpeechState; onReadAloud?: ToggleMessageSpeech;
+} & MessagePreferences) {
   const { t } = useAppTranslation();
   const user = message.role === 'user';
   const groups = groupMessageParts(message.parts, user);
@@ -177,12 +181,16 @@ const Message = memo(function Message({ message, showMessageTokens, showProvider
       })}
     </div>
     <MessageActions message={message} showMessageTokens={showMessageTokens} showMetrics={showMetrics}
+      pendingReply={pendingReply} speechState={speechState} onReadAloud={onReadAloud}
       userText={user ? groups.flatMap(group => group.type === 'text' ? [group.text] : []).join('\n\n') : undefined} />
   </article>;
 });
 
-function Transcript({ messages, showMessageTokens, showProviderLogo, showMetrics }: { messages: ChatMessage[] } & MessagePreferences) {
+function Transcript({ messages, showMessageTokens, showProviderLogo, showMetrics, gateway, speechModel, speechRoute, scope, pendingReply }: {
+  messages: ChatMessage[]; gateway: Gateway; speechModel?: string; speechRoute: GatewaySpeechEndpoint; scope?: string; pendingReply?: string;
+} & MessagePreferences) {
   const { t } = useAppTranslation();
+  const speech = useMessageSpeech(gateway, speechModel, speechRoute, scope);
   const scroll = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
   useLayoutEffect(() => {
@@ -194,6 +202,8 @@ function Transcript({ messages, showMessageTokens, showProviderLogo, showMetrics
     if (node) follow.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
   }} className="chat-transcript" aria-label={t('Conversation')} tabIndex={0}>
     <MessageClock><div className="chat-column">{messages.map((message) => <Message key={message.id} message={message}
+      pendingReply={message.id === pendingReply} speechState={speech.state?.id === message.id ? speech.state : undefined}
+      onReadAloud={message.role === 'assistant' ? speech.toggle : undefined}
       showMessageTokens={showMessageTokens} showProviderLogo={showProviderLogo} showMetrics={showMetrics} />)}</div></MessageClock>
   </section>;
 }
@@ -485,8 +495,9 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const dictateChat = preferences.dictate && view === 'chat' && !locationIssue;
   const dictateView = dictateChat || preferences.dictate && (view === 'images' || view === 'videos' || view === 'speech');
   const transcriptionModelIds = dictateView ? defaultAgentModelIds(assignedAgent(agents, 'transcription')) : [];
+  const speechModelIds = hasGateway && view === 'chat' && !locationIssue ? defaultAgentModelIds(assignedAgent(agents, 'speech')) : [];
   const fetchGatewayModels = route.mode === 'direct' && (view === 'agents' ||
-    gateway.historyScope !== 'direct' && (mediaView || transcriptionModelIds.length > 0));
+    hasGateway && (mediaView || transcriptionModelIds.length > 0 || speechModelIds.length > 0));
   const gatewayModels = useModels(gateway, connection.ready && fetchGatewayModels, connection.modelRevision ?? 0, scope);
   const transport = useMemo<ReturnType<Gateway['chatTransport']>>(() => {
     const apiChat = gateway.chatTransport();
@@ -861,6 +872,9 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const mediaRouter = (view === 'images' || view === 'speech') && mediaModels ? modelDecisionRouter(agents, mediaModels.catalog, decisions.selected) : undefined;
   const mediaStatus = !hasGateway ? t('No gateway is configured.') : !connection.ready ? connection.emptyMessage
     : !mediaModels ? t('Loading models…') : mediaModels.error;
+  const speechModel = speechModelIds.length && mediaModels && !mediaModels.error
+    ? resolveModelSelection(mediaModels.catalog.filter(({ type }) => type === 'speech'), undefined, false, speechModelIds).selected[0]?.id
+    : undefined;
   const agentModelStatus = !connection.ready ? t('Connect to the gateway to browse models. You can still edit this agent.')
     : !agentModels ? t('Loading gateway models…') : agentModels.error;
   const textCatalog = pickChatCatalogModels(catalog);
@@ -1107,7 +1121,9 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       </main>}
       <main className="chat-main" data-empty={!messages.length} hidden={view !== 'chat' || !!locationIssue}>
         {messages.length ? <Transcript messages={messages} showMessageTokens={preferences.showMessageTokens}
-          showProviderLogo={preferences.showProviderLogo} showMetrics={preferences.showMetrics} /> : null}
+          showProviderLogo={preferences.showProviderLogo} showMetrics={preferences.showMetrics}
+          gateway={gateway} speechModel={speechModel} speechRoute={speech.selected} scope={scope}
+          pendingReply={(busy || toolBusy || pending || voicePhase && turn?.voiceMessage) && last?.role === 'assistant' ? last.id : undefined} /> : null}
         <div className="chat-column chat-dock">
            {!messages.length && !locationIssue && <WelcomeHeading request={welcomeRequest} discovering={!agentMode && connection.ready && !result && welcomeModels.length > 0} />}
            {storageIssue && !locationIssue && <div className="chat-notice" role="status">{t(storageIssue)}</div>}

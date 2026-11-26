@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { ChatIcon } from './ChatIcon';
 import { browserNumberFormat, useAppTranslation } from './i18n';
 import { messageTokens, nonnegativeNumber } from './messageMetadata';
+import type { MessageSpeechState, ToggleMessageSpeech } from './useMessageSpeech';
 
 const integer = browserNumberFormat({ maximumFractionDigits: 0 });
 const seconds = browserNumberFormat({ maximumFractionDigits: 2 });
@@ -20,13 +21,17 @@ function Badge({ icon, label, value, format, unit = '', details }: {
     aria-label={`${label}: ${text}${details ? ` (${details})` : ''}`}><ChatIcon name={icon} />{text}</span></Tooltip>;
 }
 
-export function MessageActions({ message, userText, showMessageTokens, showMetrics }: {
+export function MessageActions({ message, userText, showMessageTokens, showMetrics, pendingReply, speechState, onReadAloud }: {
   message: ChatMessage; userText?: string; showMessageTokens: boolean; showMetrics: boolean;
+  pendingReply: boolean; speechState?: MessageSpeechState; onReadAloud?: ToggleMessageSpeech;
 }) {
   const { t } = useAppTranslation();
   const [copyStatus, setCopyStatus] = useState('');
   const user = message.role === 'user';
   const text = user ? userText : message.parts.flatMap(part => part.type === 'text' && part.text ? [part.text] : []).join('\n\n');
+  const spokenText = message.role === 'assistant' && (!pendingReply || speechState) ? text?.trim() : undefined;
+  const speaking = speechState?.phase === 'generating' || speechState?.phase === 'playing';
+  const speechLabel = speechState?.phase === 'generating' ? t('Cancel speech generation') : speaking ? t('Stop reading aloud') : t('Read aloud');
   if (user && !text) return null;
   const metadata = user ? undefined : message.metadata;
   const { providerMetadata, gateway } = metadata ?? {};
@@ -40,6 +45,9 @@ export function MessageActions({ message, userText, showMessageTokens, showMetri
       try { await navigator.clipboard.writeText(text); setCopyStatus('Copied'); }
       catch { setCopyStatus('Copy failed'); }
     }}><ChatIcon name={copyStatus === 'Copied' ? 'check' : 'copy'} /></Button>}
+    {spokenText && <Button type="button" variant="subtle" className="chat-read-aloud" disabled={!onReadAloud}
+      aria-label={speechLabel} title={onReadAloud ? speechLabel : t('No configured speech model is available.')}
+      onClick={() => { void onReadAloud?.(message.id, spokenText); }}><ChatIcon name={speaking ? 'stop' : 'audio'} /></Button>}
     {showMessageTokens && <Badge icon="tokens" label={t(tokens !== undefined ? 'Total tokens' : input !== undefined ? 'Input tokens' : 'Output tokens')}
       value={tokens ?? input ?? output} format={integer} details={tokens !== undefined ? breakdown : undefined} />}
     <Badge icon="cost" label={t(costLabel)} value={metrics?.cost} format={costFormat} />
@@ -48,5 +56,8 @@ export function MessageActions({ message, userText, showMessageTokens, showMetri
       <Badge icon="speed" label={t('Tokens per second')} value={metrics?.tps} format={integer} unit=" tok/s" />
     </>}
     {copyStatus && <span role="status">{t(copyStatus)}</span>}
+    {speechState?.phase === 'generating' && <span role="status">{t('Generating speech…')}</span>}
+    {speechState?.phase === 'blocked' && <span role="status">{t('Select Read aloud again to play this message.')}</span>}
+    {speechState?.phase === 'error' && <span role="alert">{t(speechState.message)}</span>}
   </div>;
 }

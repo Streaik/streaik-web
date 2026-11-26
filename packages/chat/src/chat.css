@@ -186,7 +186,7 @@ body { margin: 0; }
   background: var(--soft); border-radius: 1rem; color: var(--foreground); font-variant-numeric: tabular-nums; font-weight: 550;
 }
 .chat-badge .chat-icon { width: .85rem; height: .85rem; }
-.chat-message-actions .chat-copy.ui-button { display: inline-grid; place-items: center; width: 2rem; min-height: 2rem; padding: 0; }
+.chat-message-actions :is(.chat-copy, .chat-read-aloud).ui-button { display: inline-grid; place-items: center; width: 2rem; min-height: 2rem; padding: 0; }
 .chat-message[data-role=user] .chat-message-body { padding: .55rem .8rem; background: var(--soft); border-radius: var(--radius); }
 .chat-message-body > :first-child { margin-block-start: 0; }
 .chat-message-body > :last-child { margin-block-end: 0; }
