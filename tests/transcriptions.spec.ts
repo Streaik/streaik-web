@@ -68,9 +68,10 @@ async function chooseModel(page: Page, model: string) {
 }
 
 const transcriptionComposer = (page: Page) => page.getByRole('form', { name: 'Transcription composer' });
+const transcriptionSettingsButton = (page: Page) => transcriptionComposer(page).getByRole('button', { name: 'Transcription settings', exact: true });
 async function transcriptionSettings(page: Page) {
-  await transcriptionComposer(page).getByRole('button', { name: 'Transcription settings', exact: true }).click();
-  return page.getByRole('dialog', { name: 'Transcription settings', exact: true });
+  await transcriptionSettingsButton(page).click();
+  return page.getByRole('dialog', { name: 'Settings', exact: true });
 }
 
 test('only the native OpenAI route uses General; Vercel routes keep provider settings separate', async ({ page }) => {
@@ -78,6 +79,7 @@ test('only the native OpenAI route uses General; Vercel routes keep provider set
   let dialog = await transcriptionSettings(page);
   await expect(dialog.getByRole('tab', { name: 'OpenAI', selected: true })).toBeVisible();
   await expect(dialog.getByRole('tab', { name: 'General' })).toHaveCount(0);
+  await expect(dialog.getByRole('heading', { name: 'General', exact: true })).toBeVisible();
   await expect(dialog.getByLabel('Response format')).toHaveCount(0);
   await expect(dialog.getByRole('switch', { name: 'Split large audio files' })).toHaveCount(0);
   await dialog.getByLabel('Transcription prompt').fill('Spell Streaik exactly.');
@@ -105,6 +107,31 @@ test('only the native OpenAI route uses General; Vercel routes keep provider set
   await composer.locator('input[type=file]').setInputFiles(file);
   await composer.getByRole('button', { name: 'Send', exact: true }).click();
   await expect(page.getByText('Plain text transcript', { exact: true })).toBeVisible();
+});
+
+test('transcription settings are disabled without a form for the selected model and route', async ({ page }) => {
+  const googleBatchModel = 'google/gemini-2.5-flash';
+  const modelWithoutForm = 'openrouter/transcription-model';
+  await openTranscriptions(page, 'Google Gemini', [
+    { id: googleBatchModel, type: 'transcription' },
+    { id: googleModel, type: 'transcription', tags: ['realtime'] },
+    { id: modelWithoutForm, type: 'transcription' },
+  ]);
+  const button = transcriptionSettingsButton(page);
+  await expect(button).toBeDisabled();
+  await chooseModel(page, modelWithoutForm);
+  await expect(button).toBeDisabled();
+
+  await chooseModel(page, googleBatchModel);
+  const dialog = await transcriptionSettings(page);
+  await expect(dialog.getByRole('heading', { name: 'General', exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await chooseRoute(page, '/v1/audio/transcriptions');
+  await expect(modelPicker(page)).toContainText('gemini-2.5-flash');
+  await expect(button).toBeDisabled();
+
+  await chooseModel(page, googleModel);
+  await expect(await transcriptionSettings(page)).toHaveText(/Language codes/);
 });
 
 test('settings split a 100 MB WAV in the browser and save one merged transcript', async ({ page }) => {

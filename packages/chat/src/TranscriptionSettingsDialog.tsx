@@ -111,6 +111,17 @@ function GoogleFields({ options, set }: FileFieldsProps) {
 const fileForms = { openai: OpenAIFields, deepgram: DeepgramFields, gladia: GladiaFields, google: GoogleFields };
 type FileProvider = keyof typeof fileForms;
 
+function fileSettingsForm(route: GatewayTranscriptionEndpoint, provider?: string) {
+  if (provider && Object.hasOwn(fileForms, provider) && (provider === 'openai' || provider === 'deepgram' || route === '/api/transcriptions')) {
+    return fileForms[provider as FileProvider];
+  }
+}
+
+export function hasTranscriptionSettings(route: GatewayTranscriptionEndpoint, fileModel?: string, liveModel?: string) {
+  // A supported real-time model always has settings, even when there is no file form.
+  return !!(liveModel || fileSettingsForm(route, fileModel?.split('/')[0]));
+}
+
 export function TranscriptionSettingsDialog({ initial, onSave, onClose, route, fileModel, liveModel }: {
   initial: TranscriptionProviderPreferences; onSave: (value: TranscriptionProviderPreferences) => void; onClose: () => void;
   route: GatewayTranscriptionEndpoint; fileModel?: string; liveModel?: string;
@@ -123,11 +134,10 @@ export function TranscriptionSettingsDialog({ initial, onSave, onClose, route, f
   const [value, setValue] = useState(initial);
   const [tab, setTab] = useState('general');
   const [reset, setReset] = useState(0);
-  const fileProvider = fileModel?.split('/')[0] as FileProvider | undefined;
+  const fileProvider = fileModel?.split('/')[0];
   const liveProvider = liveModel?.split('/')[0];
   const native = route === '/v1/audio/transcriptions';
-  const batch = route === '/api/transcriptions';
-  const Form = fileProvider && (fileProvider === 'openai' || fileProvider === 'deepgram' || batch) && Object.hasOwn(fileForms, fileProvider) ? fileForms[fileProvider] : undefined;
+  const Form = fileSettingsForm(route, fileProvider);
   const panels = [...new Set([Form && fileProvider, liveProvider].filter((provider): provider is string => !!provider))];
   const general = native && panels.includes('openai');
   const tabs = [...(general ? [['general', t('General')] as const] : []), ...panels.filter(provider => !(general && provider === 'openai'))
@@ -137,7 +147,7 @@ export function TranscriptionSettingsDialog({ initial, onSave, onClose, route, f
   return <dialog ref={dialog} className="chat-settings chat-tools-dialog image-settings-dialog" aria-labelledby={`${id}-title`} onClose={onClose}>
     <form onSubmit={event => { event.preventDefault(); onSave(value); dialog.current?.close(); }}>
       <header className="chat-settings-header">
-        <h2 id={`${id}-title`}>{t('Transcription settings')}</h2>
+        <h2 id={`${id}-title`}>{t('Settings')}</h2>
         <Button type="button" className="chat-close" variant="subtle" aria-label={t('Close')} onClick={() => dialog.current?.close()}><ChatIcon name="close" /></Button>
       </header>
       {!!tabs.length && <DialogTabs id={id} label={t('Transcription settings sections')} tabs={tabs} value={active ?? ''} onChange={setTab} />}
@@ -146,7 +156,7 @@ export function TranscriptionSettingsDialog({ initial, onSave, onClose, route, f
         const provider = key === 'general' ? 'openai' : key;
         return <div key={key} role="tabpanel" id={`${id}-${key}-panel`} aria-labelledby={`${id}-${key}-tab`} hidden={active !== key} onInvalid={() => setTab(key)}>
           {fileModel && Form && provider === fileProvider && <section className="chat-tool-card">
-            <h3>{key === 'general' ? providerName(provider) : t('File transcription')}</h3>
+            <h3>{key === 'general' ? providerName(provider) : t(provider === 'openai' || provider === 'google' ? 'General' : 'File transcription')}</h3>
             <div className="image-settings-fields"><Form key={reset} model={fileModel} route={route} options={value.providerOptions[provider] ?? {}}
               set={(name, option) => setValue(current => ({ ...current,
                 providerOptions: { ...current.providerOptions, [provider]: { ...current.providerOptions[provider], [name]: option } },

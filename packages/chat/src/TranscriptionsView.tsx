@@ -16,7 +16,7 @@ import { maxSplittableFileBytes, mergeTranscriptionChunks, splitTranscription } 
 import { deleteTranscript, listTranscripts, saveTranscript } from './transcriptionLibrary';
 import type { SavedTranscript } from './transcriptionLibrary';
 import { useTranscriptionPreferences } from './transcriptionPreferences';
-import { TranscriptionSettingsDialog } from './TranscriptionSettingsDialog';
+import { hasTranscriptionSettings, TranscriptionSettingsDialog } from './TranscriptionSettingsDialog';
 import type { TranscriptionSplitPreferences } from './transcriptionSplitPreferences';
 import { useCatalogSearch } from './useCatalogSearch';
 import './images.css';
@@ -128,6 +128,7 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
   const dictateModel = selectedModel && supportsFileTranscription(dictateRoute, selectedModel.id) ? selectedModel : undefined;
   const taggedLive = selectedModel?.tags.includes('realtime');
   const liveModel = selectedModel && taggedLive && isLiveTranscriptionModel(selectedModel.id) ? selectedModel : undefined;
+  const hasSettings = hasTranscriptionSettings(route, fileModel?.id, liveModel?.id);
   const busy = phase !== undefined;
   const live = phase === 'connecting' || phase === 'listening' || phase === 'finishing';
   const dictating = phase === 'dictate-connecting' || phase === 'dictating' || phase === 'dictate-finishing';
@@ -149,6 +150,10 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
   useEffect(() => {
     if (status && !loading) operation.current?.abort.abort();
   }, [status, loading]);
+
+  useEffect(() => {
+    if (!hasSettings) setShowSettings(false);
+  }, [hasSettings]);
 
   function add(files: FileList) {
     if (operation.current) return;
@@ -339,7 +344,7 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
           <Button className="chat-composer-icon" type="button" variant="subtle" aria-label={t('Add attachments')} title={t('Add attachments')}
             onClick={() => picker.current?.click()} disabled={busy}><ChatIcon name="add" /></Button>
           <Button className="chat-composer-icon" type="button" variant="subtle" aria-label={t('Transcription settings')} title={t('Transcription settings')}
-            aria-haspopup="dialog" onClick={() => setShowSettings(true)} disabled={busy}><ChatIcon name="settings" /></Button>
+            aria-haspopup="dialog" onClick={() => setShowSettings(true)} disabled={busy || !hasSettings}><ChatIcon name="settings" /></Button>
           <div className="transcription-submit">
             <Button className="chat-composer-icon" type="button" aria-label={dictateLabel} title={dictateLabel}
               aria-pressed={dictating} variant={dictating ? 'primary' : 'subtle'}
@@ -392,7 +397,7 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
         </section>
       </section>
     </div>
-    {showSettings && <TranscriptionSettingsDialog key={scope} initial={settings} route={route} fileModel={fileModel?.id} liveModel={liveModel?.id}
+    {showSettings && hasSettings && <TranscriptionSettingsDialog key={scope} initial={settings} route={route} fileModel={fileModel?.id} liveModel={liveModel?.id}
       onSave={change} onClose={() => setShowSettings(false)} />}
     <dialog className="chat-settings chat-link-dialog" ref={dictateWarning} aria-labelledby={`${id}-dictate-warning`}>
       <form method="dialog" onSubmit={event => {
