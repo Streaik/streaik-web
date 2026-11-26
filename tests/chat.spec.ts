@@ -2846,6 +2846,102 @@ function speechWav() {
   return wav;
 }
 
+async function sendReadAloudFixture(page: Page) {
+  await page.route('**/gateway/api/chat', route => {
+    const reasoning = [{ type: 'reasoning-start', id: 'r' }, { type: 'reasoning-delta', id: 'r', delta: 'Not for playback.' },
+      { type: 'reasoning-end', id: 'r' }].map(event => `data: ${JSON.stringify(event)}\n\n`).join('');
+    const body = sse('Read this assistant reply.', 1).replace(/^(data: [^\n]+\n\n)/, `$1${reasoning}`);
+    return route.fulfill({ contentType: 'text/event-stream', headers: { 'x-vercel-ai-ui-message-stream': 'v1' }, body });
+  });
+  await chooseChatModel(page);
+  await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Do not read this user message.');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  const reply = page.getByRole('article', { name: 'Assistant', exact: true });
+  await expect(reply.getByText('Read this assistant reply.', { exact: true })).toBeVisible();
+  return reply;
+}
+
+test('chat Read aloud stays visible but disabled without a model from the Speech agent', async ({ page }) => {
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: model }, { id: openaiSpeech, type: 'speech' }] } }));
+  await page.route('**/gateway/v1/skills?*', route => route.fulfill({ json: { data: [], has_more: false } }));
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  const reply = await sendReadAloudFixture(page);
+  const read = reply.getByRole('button', { name: 'Read aloud', exact: true });
+  await expect(read).toBeVisible();
+  await expect(read).toBeDisabled();
+  await expect(read).toHaveText('');
+  await expect(page.getByRole('article', { name: 'You', exact: true }).getByRole('button', { name: 'Read aloud' })).toHaveCount(0);
+});
+
+test('chat Read aloud uses the Speech agent and settings, cancels, retries playback, and does not save a clip', async ({ page }) => {
+  await page.addInitScript(() => {
+    const fetch = window.fetch;
+    let intercepted = false, playAttempts = 0;
+    window.fetch = (input, init) => {
+      if (intercepted || !String(input).endsWith('/gateway/v1/audio/speech')) return fetch(input, init);
+      intercepted = true;
+      document.documentElement.dataset.speechRequest = 'pending';
+      return new Promise((_, reject) => init?.signal?.addEventListener('abort', () => {
+        document.documentElement.dataset.speechRequest = 'aborted';
+        reject(init.signal?.reason);
+      }, { once: true }));
+    };
+    HTMLMediaElement.prototype.play = async function () {
+      if (++playAttempts === 1) throw new DOMException('Autoplay blocked', 'NotAllowedError');
+      document.documentElement.dataset.speechPlayback = 'playing';
+      window.addEventListener('finish-message-speech', () => this.dispatchEvent(new Event('ended')), { once: true });
+    };
+    HTMLMediaElement.prototype.pause = function () { document.documentElement.dataset.speechPlayback = 'stopped'; };
+  });
+  let requests = 0;
+  await page.route('**/gateway/v1/audio/speech', async route => {
+    requests++;
+    expect(await route.request().headerValue('x-google-key')).toBe('test-google-key');
+    expect(route.request().postDataJSON()).toEqual({ model: geminiSpeech, input: 'Read this assistant reply.', response_format: 'wav', speed: 1.25 });
+    if (requests === 2) return route.fulfill({ status: 503 });
+    return route.fulfill({ contentType: 'audio/wav', body: speechWav() });
+  });
+  await prepareSpeech(page);
+  await openRoute(page);
+  await page.getByRole('menuitemradio', { name: '/v1/audio/speech', exact: true }).click();
+  await page.getByRole('button', { name: 'Speech settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Speech settings', exact: true });
+  await settings.getByLabel('Speed', { exact: true }).fill('1.25');
+  await settings.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'New chat', exact: true }).click();
+  const reply = await sendReadAloudFixture(page);
+  const read = reply.getByRole('button', { name: 'Read aloud', exact: true });
+  const stop = reply.getByRole('button', { name: 'Stop reading aloud', exact: true });
+  await expect(read).toBeEnabled();
+  expect(requests).toBe(0);
+
+  await read.click();
+  await expect(page.locator('html')).toHaveAttribute('data-speech-request', 'pending');
+  await reply.getByRole('button', { name: 'Cancel speech generation', exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-speech-request', 'aborted');
+
+  await read.click();
+  await expect(reply.getByRole('status')).toHaveText('Select Read aloud again to play this message.');
+  await read.click();
+  await expect(stop).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('data-speech-playback', 'playing');
+  expect(requests).toBe(1);
+  await page.evaluate(() => window.dispatchEvent(new Event('finish-message-speech')));
+  await expect(read).toBeEnabled();
+  await expect(page.locator('html')).toHaveAttribute('data-speech-playback', 'stopped');
+
+  await read.click();
+  await expect(reply.getByRole('alert')).toHaveText('The gateway could not complete the request (HTTP 503).');
+  await read.click();
+  await expect(stop).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('data-speech-playback', 'playing');
+  await page.getByRole('button', { name: 'Speech', exact: true }).click();
+  await expect(page).toHaveURL(/\/speech$/);
+  await expect(page.locator('html')).toHaveAttribute('data-speech-playback', 'stopped');
+  await expect(page.getByRole('region', { name: 'My speech' }).getByRole('link', { name: 'Download' })).toHaveCount(0);
+});
+
 test('Speech imports local text, routes via Decisions, and saves playable history', async ({ page }) => {
   const wav = speechWav();
   let calls = 0;
