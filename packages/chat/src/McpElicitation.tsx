@@ -8,9 +8,12 @@ import type { RequestElicitation } from './elicitation';
 import { useAppTranslation } from './i18n';
 
 type Prompt = { id: number; request: ElicitRequestFormParams; answer: (result: ElicitResult) => void };
-const ElicitationContext = createContext<RequestElicitation | undefined>(undefined);
+const ElicitationContext = createContext<{ ask: RequestElicitation; enabled: boolean } | undefined>(undefined);
 
-export function useMcpElicitation() { return useContext(ElicitationContext); }
+export function useMcpElicitation(providerForm = false) {
+  const elicitation = useContext(ElicitationContext);
+  return providerForm || elicitation?.enabled ? elicitation?.ask : undefined;
+}
 
 export function McpElicitationProvider({ enabled, children }: { enabled: boolean; children: ReactNode }) {
   const [queue, setQueue] = useState<Prompt[]>([]);
@@ -36,7 +39,7 @@ export function McpElicitationProvider({ enabled, children }: { enabled: boolean
     setQueue(prompts => [...prompts, { id, request, answer: finish }]);
   }), []);
 
-  return <ElicitationContext.Provider value={enabled ? ask : undefined}>
+  return <ElicitationContext.Provider value={{ ask, enabled }}>
     {children}
     {queue[0] && <ElicitationDialog key={queue[0].id} prompt={queue[0]} />}
   </ElicitationContext.Provider>;

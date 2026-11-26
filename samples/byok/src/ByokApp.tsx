@@ -15,7 +15,9 @@ import { createVault, unlockVault } from './vault.ts';
 type Encrypter = Awaited<ReturnType<typeof createVault>>;
 type Vault = { state: 'session' } | { state: 'locked' } | { state: 'unlocked'; encrypt: Encrypter };
 
-export function ByokApp({ appName, base, agentBase, mcpConfig }: { appName: string; base?: URL; agentBase?: URL; mcpConfig?: McpConfig }) {
+export function ByokApp({ appName, base, agentBase, mcpConfig, enableKeylessEcho = false }: {
+  appName: string; base?: URL; agentBase?: URL; mcpConfig?: McpConfig; enableKeylessEcho?: boolean;
+}) {
   const { t } = useAppTranslation();
   const scope = base?.href ?? 'direct';
   const storageKey = `streaik.byok.vault:${scope}`;
@@ -30,7 +32,7 @@ export function ByokApp({ appName, base, agentBase, mcpConfig }: { appName: stri
   const [busy, setBusy] = useState(false);
   const [gateway] = useState(() => createGateway(base, (request) => {
     const headers = providerHeaders(keys.current, request);
-    if ((request.kind === 'chat' || request.kind === 'image' || request.kind === 'video' || request.kind === 'transcription' || request.kind === 'realtime') && ![...headers].length) throw new GatewayError('Set or unlock the provider key for this model.');
+    if ((request.kind === 'chat' || request.kind === 'image' || request.kind === 'video' || request.kind === 'transcription' || request.kind === 'realtime') && request.provider !== 'echo' && ![...headers].length) throw new GatewayError('Set or unlock the provider key for this model.');
     return headers;
   }));
   const [direct] = useState(() => createDirectChat(providerDirectory.providers, (provider) =>
@@ -124,7 +126,7 @@ export function ByokApp({ appName, base, agentBase, mcpConfig }: { appName: stri
 
   const configured = providerIds.filter((id) => !!keys.current[id]);
   return <ChatApp appName={appName} gateway={gateway} agents={vault.state === 'locked' ? undefined : appAgents} connection={{
-    ready: configured.length > 0, modelRevision: revision, mcp, direct, mcpSession: vault.state !== 'locked',
+    ready: configured.length > 0 || (enableKeylessEcho && !!base && vault.state !== 'locked'), modelRevision: revision, mcp, direct, mcpSession: vault.state !== 'locked',
     agentBackend: vault.state === 'locked' ? undefined : agentBackend,
     historyProfile: vault.state === 'locked' ? undefined : 'byok',
     emptyMessage: t(vault.state === 'locked' ? 'Unlock your provider keys in Settings to start chatting.' : 'Add a provider key in Settings to start chatting.'),

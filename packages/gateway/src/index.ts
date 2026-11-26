@@ -86,7 +86,7 @@ export function normalizeGatewayBase(value: string, appUrl: string): URL {
 
 // /v1/models is shared across protocols. These are the text-chat providers
 // supported by the current gateway's Vercel adapter, not every listed provider.
-const apiChatProviders = new Set(['openai', 'anthropic', 'openrouter', 'fireworks', 'deepseek', 'groq', 'together', 'cerebras', 'google', 'xai']);
+const apiChatProviders = new Set(['echo', 'openai', 'anthropic', 'openrouter', 'fireworks', 'deepseek', 'groq', 'together', 'cerebras', 'google', 'xai']);
 
 function apiChatProvider(id: string): string | undefined {
   const slash = id.indexOf('/');
@@ -277,7 +277,7 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
       if (!archive.size || archive.size > maxSkillZipBytes) throw new GatewayError('The skill ZIP must be between 1 byte and 16 MiB.');
       if (!root) throw new GatewayError('No gateway is configured.');
       const headers = new Headers(await credentials({ kind: 'skill', provider }));
-      if (targets.auth === 'provider-header') headers.set('X-Streaik-Provider', provider);
+      if (targets.auth === 'provider-header' || provider === 'echo' && !headers.has('X-Echo-Key')) headers.set('X-Streaik-Provider', provider);
       const body = new FormData(); body.append('files', archive, 'skill.zip');
       const response = await requestHttp(new URL('v1/skills', root).href, headers, { method: 'POST', body, signal }, fetcher);
       return response.json();

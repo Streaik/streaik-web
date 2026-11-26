@@ -78,6 +78,54 @@ async function mockModels(page: Page) {
   });
 }
 
+for (const action of ['accept', 'decline', 'cancel'] as const) {
+  test(`Echo asks for provider input and continues with ${action}`, async ({ page }) => {
+    const echo = 'echo/echo-input-required';
+    const toolCallId = 'call_echo_input_test';
+    const input = { mode: 'form', message: 'What should I echo?', requestedSchema: {
+      type: 'object', properties: { message: { type: 'string', title: 'Echo message' } }, required: ['message'],
+    } };
+    const requests: { model: string; messages: { parts: Record<string, unknown>[] }[] }[] = [];
+    await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: echo, name: 'Echo Input Required', type: 'language' }] } }));
+    await page.route('**/gateway/v1/skills?*', route => route.fulfill({ json: { data: [], has_more: false } }));
+    await page.route('**/gateway/api/chat', async route => {
+      requests.push(route.request().postDataJSON());
+      expect(await route.request().headerValue('x-echo-key')).toBeNull();
+      const events = [
+        { type: 'start', messageId: 'echo-form-reply' }, { type: 'start-step' },
+        { type: 'tool-input-available', toolCallId, toolName: 'ai_input_required', input, dynamic: true, providerExecuted: false },
+        { type: 'tool-approval-request', toolCallId, approvalId: 'echo-review', signature: 'fixture-signature' },
+        { type: 'finish-step' }, { type: 'finish', finishReason: 'tool-calls' },
+      ];
+      return route.fulfill({ contentType: 'text/event-stream', headers: { 'x-vercel-ai-ui-message-stream': 'v1' },
+        body: requests.length === 1 ? events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n'
+          : sse(`Echo continued: ${action}`, requests.length, echo) });
+    });
+    await page.goto('/');
+    // The BYOK sample gates chat on its vault setup; the Echo provider itself has no key.
+    await showSettings(page); await addKey(page); await closeSettings(page);
+    await chooseModel(page, 'Echo Input Required');
+    const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+    await composer.fill('Ask for input'); await composer.press('Enter');
+    const form = page.getByRole('dialog', { name: 'Elicitation' });
+    await expect(form.getByText('What should I echo?')).toBeVisible();
+    await form.getByRole('textbox', { name: 'Echo message' }).fill('round trip');
+    if (action === 'cancel') await form.press('Escape');
+    else await form.getByRole('button', { name: action === 'accept' ? 'Accept' : 'Decline', exact: true }).click();
+    await expect(page.getByText(`Echo continued: ${action}`)).toBeVisible();
+    expect(requests).toHaveLength(2);
+    expect(requests[1].model).toBe(echo);
+    expect(requests[1].messages.flatMap(message => message.parts).find(part => part.toolCallId === toolCallId)).toMatchObject({
+      toolName: 'ai_input_required', input, state: 'output-available', approval: { id: 'echo-review', signature: 'fixture-signature', approved: true },
+      output: action === 'accept' ? { action, content: { message: 'round trip' } } : { action },
+    });
+    if (action !== 'accept') expect(JSON.stringify(requests[1])).not.toContain('round trip');
+    await composer.fill('Start a new turn'); await composer.press('Enter');
+    await expect.poll(() => requests.length).toBe(3);
+    expect(JSON.stringify(requests[2])).not.toContain(toolCallId);
+  });
+}
+
 test('chat tool configuration sends namespaced options and defaults leave the tools attached', async ({ page }) => {
   await mockModels(page);
   const requests: Record<string, unknown>[] = [];

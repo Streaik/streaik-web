@@ -66,6 +66,7 @@ import type { createConversationSearch, SearchConversationText, SearchHistory } 
 import { callMcpTool, mcpFailure, readMcpResource } from './mcp';
 import type { McpOptions } from './mcp';
 import { McpElicitationProvider, useMcpElicitation } from './McpElicitation';
+import { echoInputModel, isEchoInputCall, providerElicitationForm } from './providerElicitation';
 import { mcpResourceCatalog, readResourceTool, resolveResourceRead } from './mcpChatContext';
 import { McpServerEditor, McpServersView, ModelContextDialog } from './McpServersView';
 import type { McpEditorTarget } from './McpServersView';
@@ -505,6 +506,12 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
             } finally { setDeciding(false); }
           }
         }
+        // A provider form is a continuation, not a historical tool result that can go to another model.
+        request = { ...request, messages: request.messages.flatMap((message, index, history) => {
+          if (isApiChat(route) && model === echoInputModel && index === history.length - 1 && message.role === 'assistant') return [message];
+          const parts = message.parts.filter(part => !('toolCallId' in part && isEchoInputCall(part)));
+          return parts.length === message.parts.length ? [message] : parts.some(part => part.type !== 'step-start') ? [{ ...message, parts }] : [];
+        }) };
         if (isApiChat(route)) {
           const provider = chatProviderRequest(providerSettings, model);
           const { tools, namespaces } = apiChatTools(body.tools ?? [], route, model);
@@ -553,6 +560,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const [staged, setStaged] = useState<{ turn: Turn; callId: string; result: { output: unknown } }>();
   const operation = useRef<AbortController | null>(null);
   const elicit = useMcpElicitation();
+  const elicitProvider = useMcpElicitation(true);
   const hasHistory = !!readHistory;
   const language = i18n.resolvedLanguage ?? i18n.language ?? 'en';
   const gatewayRoute = !hostedRoute && runRoute.mode === 'gateway';
@@ -603,6 +611,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const toolParts = parts.flatMap(part => {
     if (!('toolCallId' in part) || !turn || turn.hosted || part.providerExecuted || turn.seen.has(part.toolCallId)) return [];
     const name = toolPartName(part);
+    if (isApiChat(turn.route) && turn.model === echoInputModel && isEchoInputCall(part)) return [{ part, tool: undefined }];
     const tool = turn.tools.find(tool => tool.definition.name === name);
     return tool || (isApiChat(turn.route) && part.state === 'approval-requested') ? [{ part, tool }] : [];
   });
@@ -621,6 +630,12 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     if (status !== 'ready' || toolBusy || operation.current || !turn || !toolParts.length) return;
     if (pending && isApiChat(turn.route)) {
       const { part, tool } = pending;
+      if (turn.model === echoInputModel && isEchoInputCall(part) && part.state === 'approval-requested') {
+        if (turn.automatic.calls >= 8) { setTurn(undefined); return; }
+        turn.automatic.calls++;
+        void answerProviderForm(part);
+        return;
+      }
       if (part.state !== 'approval-requested' || !tool) {
         setToolNotice('The gateway did not return an approval for this client tool.');
         setTurn(undefined);
@@ -655,6 +670,28 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       void sendMessage(undefined, { body: requestBody(turn) });
     }
   });
+
+  async function answerProviderForm(part: Invocation) {
+    if (!turn || !last || !elicitProvider || part.state !== 'approval-requested') return;
+    const form = providerElicitationForm(part);
+    if (!form) { setToolNotice('Invalid provider input form.'); setTurn(undefined); return; }
+    const controller = new AbortController();
+    operation.current = controller;
+    setToolBusy(true);
+    try {
+      const output = await elicitProvider(form, { title: 'Echo', origin: 'echo' }, controller.signal);
+      if (controller.signal.aborted) return;
+      turn.resolved.add(part.toolCallId);
+      // Decline and cancel are MCP result values, not permission to read/send form data.
+      const answered: Invocation = { ...part, state: 'output-available', approval: { ...part.approval, approved: true }, output };
+      setMessages(current => current.map(message => message.id === last.id ? { ...message,
+        parts: message.parts.map(item => 'toolCallId' in item && item.toolCallId === part.toolCallId ? answered : item) } : message));
+    } catch {
+      if (!controller.signal.aborted) { setToolNotice('Could not apply the provider input result.'); setTurn(undefined); }
+    } finally {
+      if (operation.current === controller) { operation.current = null; setToolBusy(false); }
+    }
+  }
 
   async function completeTool(part: Invocation, tool: ChatTool, action: 'stage' | 'run' | 'decline') {
     if (!turn || turn.resolved.has(part.toolCallId) || operation.current || status !== 'ready') return;

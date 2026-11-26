@@ -15,6 +15,7 @@ function trustedBase(value: string | undefined) {
 const root = createRoot(document.getElementById('root')!);
 void localizationReady.then(() => root.render(<ChatRouter basename={site.pathname}>
   <ByokApp appName={import.meta.env.VITE_APP_NAME}
+    enableKeylessEcho={import.meta.env.VITE_ENABLE_KEYLESS_ECHO === 'true'}
     base={trustedBase(import.meta.env.VITE_GATEWAY_BASE ?? '/gateway')}
     agentBase={trustedBase(import.meta.env.VITE_AGENT_BASE?.trim())}
     mcpConfig={readMcpConfig(site, import.meta.env.VITE_MCP_BASE, import.meta.env.VITE_MCP_REGISTRY_URL)} />
