@@ -53,6 +53,22 @@ test('MCP defaults are backward compatible and saved settings remain scoped and 
   assert.deepEqual(normalizeChatPreferences({ mcp: { toolTimeoutMinutes: NaN, formElicitation: 'false' } }).mcp, defaultMcpPreferences);
 });
 
+test('browser tool choice, maximum and stop tools persist only in their profile', (t) => {
+  const storage = new Map();
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  t.after(() => { if (original) Object.defineProperty(globalThis, 'localStorage', original); else delete globalThis.localStorage; });
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value),
+  } });
+  const toolPolicy = { toolChoice: 'required', maxToolCalls: 12, stopTools: ['mcp_lookup', 'local_ai_models_search'] };
+  saveChatPreferences('alpha', { ...defaultChatPreferences, toolPolicy });
+  assert.deepEqual(loadChatPreferences('alpha').toolPolicy, toolPolicy);
+  assert.deepEqual(loadChatPreferences('beta').toolPolicy, { stopTools: [] });
+  assert.deepEqual(normalizeChatPreferences({ toolPolicy: { toolChoice: 'required', maxToolCalls: -1 } }).toolPolicy, { stopTools: [] });
+  saveChatPreferences('alpha', defaultChatPreferences);
+  assert.deepEqual(loadChatPreferences('alpha').toolPolicy, { stopTools: [] });
+});
+
 test('native chat settings round-trip per profile and apply to the matching model only', (t) => {
   const storage = new Map();
   const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');

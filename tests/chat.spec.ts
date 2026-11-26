@@ -172,6 +172,79 @@ test('chat tool configuration sends namespaced options and defaults leave the to
   expect(JSON.stringify(requests[1].tools)).not.toMatch(/allowed_callers|defer_loading/);
 });
 
+for (const policy of ['unlimited', 'maximum', 'stop tool'] as const) {
+  test(`browser tool batches retain approvals and respect the ${policy} setting`, async ({ page }) => {
+    await mockModels(page);
+    const toolName = 'local_ai_models_search';
+    const callCount = policy === 'unlimited' ? 9 : 2;
+    const requests: { toolChoice?: string; messages: { parts: Record<string, unknown>[] }[] }[] = [];
+    await page.route('**/gateway/api/chat', route => {
+      requests.push(route.request().postDataJSON());
+      const events = [
+        { type: 'start', messageId: 'tool-policy-reply' }, { type: 'start-step' },
+        ...Array.from({ length: callCount }, (_, index) => [
+          { type: 'tool-input-available', toolCallId: `call-${index}`, toolName, input: { query: 'gpt' }, dynamic: true },
+          { type: 'tool-approval-request', toolCallId: `call-${index}`, approvalId: `approval-${index}`, signature: `signature-${index}` },
+        ]).flat(),
+        { type: 'finish-step' }, { type: 'finish', finishReason: 'tool-calls' },
+      ];
+      return route.fulfill({ contentType: 'text/event-stream', headers: { 'x-vercel-ai-ui-message-stream': 'v1' },
+        body: requests.length === 1 ? events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n'
+          : sse('Tool batch complete.', requests.length) });
+    });
+    await page.goto('/');
+    await showSettings(page); await addKey(page); await closeSettings(page);
+    await chooseChatModel(page);
+    const settings = page.getByRole('dialog', { name: 'Chat settings', exact: true });
+    const open = () => page.getByRole('button', { name: 'Chat settings', exact: true }).click();
+    await open();
+    await settings.getByRole('tab', { name: 'Tools', exact: true }).click();
+    await settings.getByRole('switch', { name: 'Artificial Intelligence', exact: true }).check();
+    await settings.getByRole('tab', { name: 'General', exact: true }).click();
+    const maximum = settings.getByRole('spinbutton', { name: 'Maximum tool calls', exact: true });
+    const stopTools = settings.getByRole('button', { name: 'Tools that end the turn', exact: true });
+    await expect(maximum).toHaveValue('');
+    if (policy === 'maximum') await maximum.fill('1');
+    if (policy === 'stop tool') {
+      await stopTools.click();
+      await settings.getByRole('option', { name: toolName, exact: true }).click();
+      await settings.getByRole('searchbox', { name: 'Search tools', exact: true }).press('Escape');
+    }
+    if (policy !== 'unlimited') {
+      const choice = settings.getByRole('combobox', { name: 'Tool choice', exact: true });
+      if (await choice.evaluate(node => node instanceof HTMLSelectElement)) await choice.selectOption('required');
+      else {
+        await choice.click();
+        await page.getByRole('option', { name: 'Required', exact: true }).click();
+      }
+    }
+    await settings.getByRole('button', { name: 'Close', exact: true }).click();
+    const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+    await composer.fill('Look up the model catalog.'); await composer.press('Enter');
+    const approval = page.getByRole('dialog', { name: 'Review tool result', exact: true })
+      .getByRole('button', { name: 'Approve and share', exact: true });
+    for (let index = 0; index < callCount; index++) await approval.click();
+    await expect(page.getByText('Tool batch complete.', { exact: true })).toBeVisible();
+    expect(requests.map(request => request.toolChoice)).toEqual(policy === 'unlimited' ? [undefined, undefined] : ['required', 'none']);
+    const results = requests[1].messages.at(-1)?.parts.filter(part => part.type === 'dynamic-tool');
+    expect(results).toHaveLength(callCount);
+    for (let index = 0; index < callCount; index++) {
+      expect(results).toContainEqual(expect.objectContaining({ toolCallId: `call-${index}`, state: 'output-available',
+        approval: { id: `approval-${index}`, signature: `signature-${index}`, approved: true } }));
+    }
+    if (policy !== 'unlimited') {
+      await open();
+      await settings.getByRole('button', { name: 'Defaults', exact: true }).click();
+      await expect(maximum).toHaveValue('');
+      await expect(stopTools).toBeDisabled();
+      await settings.getByRole('button', { name: 'Close', exact: true }).click();
+      await composer.fill('Use defaults next turn.'); await composer.press('Enter');
+      await expect.poll(() => requests.length).toBe(3);
+      expect(requests[2]).not.toHaveProperty('toolChoice');
+    }
+  });
+}
+
 test('app agent defaults select only available models, and transcription clearing survives reload', async ({ page }) => {
   const alternatives = [{ id: model }, { id: 'openai/gpt-image-1', type: 'image' },
     { id: 'openai/other-video', type: 'video' }, { id: 'openai/gpt-4o-transcribe', type: 'transcription' }];

@@ -283,13 +283,34 @@ test('native transport replays a completed client tool inline and never exposes 
     messages: [messages[0], { id: 'assistant-tool', role: 'assistant', parts: [
       { type: 'dynamic-tool', toolName: 'lookup', toolCallId: 'call_1', state: 'output-available', input: { query: 'example' }, output: 'fixture result' },
     ] }],
-    body: { model, tools: [{ name: 'lookup', inputSchema: { type: 'object' } }] },
+    body: { model, tools: [{ name: 'lookup', inputSchema: { type: 'object' } }], toolChoice: 'none' },
   });
   assert.equal(request.tools[0].name, 'lookup');
+  assert.equal(request.tool_choice, 'none');
   assert.ok(request.input.some(item => item.type === 'function_call' && item.call_id === 'call_1'));
   assert.ok(request.input.some(item => item.type === 'function_call_output' && item.call_id === 'call_1' && item.output === 'fixture result'));
   assert.match(parts.find(part => part.type === 'error').errorText, /gateway denied access/);
   assert.doesNotMatch(JSON.stringify(parts), /private-upstream/);
+});
+
+for (const endpoint of nativeChatEndpoints) test(`Direct ${endpoint} translates the tool choice to the native protocol`, async () => {
+  const model = endpoint === messagesApi ? 'anthropic/claude-sonnet-4-6' : 'openai/gpt-4.1-mini';
+  const requests = [];
+  const direct = createDirectChat(providers, id => keys[id], async (_url, init) => {
+    const body = JSON.parse(init.body);
+    requests.push(body);
+    return response(endpoint, body.model);
+  });
+  const transport = direct.chatTransport(endpoint);
+  const tools = [{ name: 'lookup', inputSchema: { type: 'object' } }];
+  for (const toolChoice of ['required', 'none']) await send(transport, model, { body: { model, tools, toolChoice } });
+  if (endpoint === messagesApi) {
+    assert.equal(requests[0].tool_choice.type, 'any');
+    assert.ok(requests[1].tool_choice?.type === 'none' || !requests[1].tools?.length);
+  } else {
+    assert.equal(requests[0].tool_choice, 'required');
+    assert.equal(requests[1].tool_choice, 'none');
+  }
 });
 
 test('native cancellation aborts the scoped fetch without retry or reconnect', async () => {
