@@ -46,14 +46,14 @@ test('browser lease requests contain only the selected provider’s native token
   assert.deepEqual(wire(g.session).tools, [{ googleSearch: {} }, { functionDeclarations: [{ name: 'lookup', parametersJsonSchema: collect[0].parameters }] }]);
   assert.equal(x.session.voice, 'sal');
   assert.equal(x.session.turn_detection, null);
-  assert.equal(x.session.outputAudioTranscription, undefined);
+  assert.deepEqual(x.session.audio.input.transcription, { model: 'grok-transcribe' });
   const googleResult = await client.realtimeVoiceCredential(google, g.tokenOptions, signal);
   assert.equal(new URL(googleResult.url).searchParams.get('access_token'), 'auth_tokens/google-fixture');
   assert.deepEqual(await client.realtimeVoiceCredential(xai, x.tokenOptions, signal), { url: xaiSocket, protocols: ['xai-client-secret.xai-fixture'] });
   assert.deepEqual(sent, [{ kind: 'realtime', provider: 'google' },
     [`https://gateway.example/api-root/api/realtime/token/${google}`, { sessionConfig: { providerOptions: { google: wire(g.tokenOptions) } } }, 'no-store'],
     { kind: 'realtime', provider: 'xai' },
-    [`https://gateway.example/api-root/api/realtime/token/${xai}`, { sessionConfig: { providerOptions: { xai: { expires_after: { anchor: 'created_at', seconds: 90 } } } } }, 'no-store']]);
+    [`https://gateway.example/api-root/api/realtime/token/${xai}`, { sessionConfig: { providerOptions: { xai: { expires_after: { seconds: 90 } } } } }, 'no-store']]);
 });
 
 test('voice leases reject cross-provider destinations, raw keys, and expired credentials', async () => {
@@ -109,16 +109,29 @@ test('Gemini cancels pending approvals and never submits cancelled tool results'
   assert.deepEqual(sent, []);
 });
 
+test('Gemini 3.1 imports initial history without requesting a reply to that history', () => {
+  const model = 'google/gemini-3.1-flash-live-preview', sent = [];
+  const setup = socketVoiceSetup('google', model, undefined, [{ role: 'user', text: 'Earlier question' }, { role: 'assistant', text: 'Earlier reply' }], undefined, [], false);
+  const protocol = createSocketVoiceProtocol(setup, {}, { send: event => sent.push(wire(event)), ready: () => {} });
+  protocol.open(); protocol.receive({ setupComplete: {} });
+  assert.deepEqual(sent[0].setup.historyConfig, { initialHistoryInClientContent: true });
+  assert.deepEqual(wire(setup.tokenOptions).bidiGenerateContentSetup, sent[0].setup);
+  assert.deepEqual(sent[1], { clientContent: { turnComplete: true, turns: [{ role: 'user', parts: [{ text: 'Earlier question' }] },
+    { role: 'model', parts: [{ text: 'Earlier reply' }] }] } });
+});
+
 test('Grok Voice imports universal history, plays audio, and returns tools in xAI events', () => {
   const { protocol, sent, messages, batches, playback } = fixture('xai', { xai: { session: { turn_detection: null } } },
     [{ role: 'user', text: 'Portable question' }, { role: 'assistant', text: 'Portable answer' }]);
   protocol.open();
   protocol.receive({ type: 'session.updated' });
   assert.deepEqual(sent.map(event => event.type), ['session.update', 'conversation.item.create', 'conversation.item.create']);
-  assert.equal(sent[2].item.content[0].text, 'Portable answer');
+  assert.deepEqual(sent[2].item.content, [{ type: 'output_text', text: 'Portable answer' }]);
   for (let i = 0; i < 3; i++) protocol.audio('chunk', 2048);
   protocol.manualTurn();
   protocol.receive({ type: 'input_audio_buffer.committed', item_id: 'u1' });
+  protocol.receive({ type: 'conversation.item.input_audio_transcription.updated', item_id: 'u1', transcript: 'My que' });
+  protocol.receive({ type: 'conversation.item.input_audio_transcription.updated', item_id: 'u1', transcript: 'My question' });
   assert.deepEqual(sent.slice(-2).map(event => event.type), ['input_audio_buffer.commit', 'response.create']);
   protocol.receive({ type: 'response.created', response: { id: 'r1' } });
   protocol.receive({ type: 'response.output_audio.delta', delta: 'encoded' });

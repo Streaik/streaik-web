@@ -198,7 +198,7 @@ function voiceSocketCredential(provider: SocketVoiceProvider, payload: unknown, 
   if (provider === 'google') {
     if (destination.hostname !== 'generativelanguage.googleapis.com' || destination.search ||
       !/^\/ws\/google\.ai\.generativelanguage\.v1(?:alpha|beta)\.GenerativeService\.BidiGenerateContentConstrained$/.test(destination.pathname) ||
-      !/^auth_tokens\/[A-Za-z0-9._~-]+$/.test(token)) throw invalid();
+      !/^auth_tokens\/[A-Za-z0-9._~+=-]+$/.test(token)) throw invalid();
     destination.searchParams.set('access_token', token);
     return { url: destination.href };
   }

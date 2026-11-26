@@ -255,7 +255,7 @@ test('Gemini Live and Grok Voice switch in the same composer and save portable t
   await page.route(`**/gateway/api/realtime/token/${xai}`, route => {
     expect(route.request().headers()['x-xai-key']).toBe('test-xai-key');
     expect(route.request().headers()['x-google-key']).toBeUndefined();
-    expect(route.request().postDataJSON()).toEqual({ sessionConfig: { providerOptions: { xai: { expires_after: { anchor: 'created_at', seconds: 60 } } } } });
+    expect(route.request().postDataJSON()).toEqual({ sessionConfig: { providerOptions: { xai: { expires_after: { seconds: 60 } } } } });
     return route.fulfill({ json: { url: xaiUrl, token: 'temporary-xai' } });
   });
   await page.route('**/gateway/api/chat', route => {
@@ -283,9 +283,10 @@ test('Gemini Live and Grok Voice switch in the same composer and save portable t
       const message = JSON.parse(String(data));
       if (message.type === 'session.update') {
         expect(message.session.voice).toBe('rex');
+        expect(message.session.audio.input.transcription).toEqual({ model: 'grok-transcribe' });
         send({ type: 'session.updated' });
       }
-      if (message.type === 'conversation.item.create' && message.item.role === 'assistant' && message.item.content[0]?.text === 'Gemini answer')
+      if (message.type === 'conversation.item.create' && message.item.role === 'assistant' && message.item.content[0]?.type === 'output_text' && message.item.content[0]?.text === 'Gemini answer')
         received.geminiHistoryInGrok = true;
       if (message.type === 'input_audio_buffer.append' && !received.xaiAudio) {
         received.xaiAudio = typeof message.audio === 'string' && message.audio.length > 0;

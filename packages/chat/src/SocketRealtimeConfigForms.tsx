@@ -80,7 +80,7 @@ export function XaiRealtimeConfigForm({ value, onChange }: { value: XaiVoiceSett
       <h3>Grok Voice</h3>
       {select('Voice', session.voice, xaiVoices, voice => update({ voice }))}
       {text('Instructions', session.instructions, instructions => update({ instructions }), true)}
-      {number('Token TTL seconds', value.expires_after?.seconds, seconds => onChange({ ...value, expires_after: seconds === undefined ? undefined : { anchor: 'created_at', seconds } }), 1, 7200)}
+      {number('Token TTL seconds', value.expires_after?.seconds, seconds => onChange({ ...value, expires_after: seconds === undefined ? undefined : { seconds } }), 1, 3600)}
     </section>
     <section className="chat-tool-card" aria-label={t('Audio')}>
       <h3>{t('Audio')}</h3>
@@ -89,11 +89,7 @@ export function XaiRealtimeConfigForm({ value, onChange }: { value: XaiVoiceSett
     <section className="chat-tool-card" aria-label={t('Turn detection')}>
       <h3>{t('Turn detection')}</h3>
       {toggle('Server voice activity detection', vad !== null, enabled => update({ turn_detection: enabled ? { type: 'server_vad' } : null }))}
-      {vad !== null && <>
-        {number('Threshold', vad?.threshold, threshold => updateVad({ threshold }), 0, 1, .01)}
-        {number('Prefix padding (ms)', vad?.prefix_padding_ms, prefix_padding_ms => updateVad({ prefix_padding_ms }), 0, 10000)}
-        {number('Silence duration (ms)', vad?.silence_duration_ms, silence_duration_ms => updateVad({ silence_duration_ms }), 0, 10000)}
-      </>}
+      {vad !== null && number('Idle timeout (ms)', vad?.idle_timeout_ms, idle_timeout_ms => updateVad({ idle_timeout_ms }), 1, 600000)}
     </section>
   </div>;
 }

@@ -16,10 +16,10 @@ export type GoogleVoiceSettings = {
   };
 };
 export type XaiVoiceSettings = {
-  expires_after?: { anchor: 'created_at'; seconds: number };
+  expires_after?: { seconds: number };
   session?: {
     voice?: typeof xaiVoices[number]; instructions?: string;
-    turn_detection?: { type: 'server_vad'; threshold?: number; silence_duration_ms?: number; prefix_padding_ms?: number } | null;
+    turn_detection?: { type: 'server_vad'; idle_timeout_ms?: number } | null;
     audio?: { input?: { format?: VoiceFormat }; output?: { format?: VoiceFormat } };
   };
 };
@@ -60,18 +60,18 @@ function format(value: unknown): VoiceFormat | undefined {
 
 export function normalizeXaiVoice(value: unknown): XaiVoiceSettings {
   const v = obj(value), s = obj(v.session), a = obj(s.audio), t = obj(s.turn_detection);
-  const ttl = number(obj(v.expires_after).seconds, 1, 7200);
-  return { expires_after: ttl ? { anchor: 'created_at', seconds: ttl } : undefined, session: {
+  const ttl = number(obj(v.expires_after).seconds, 1, 3600);
+  return { expires_after: ttl ? { seconds: ttl } : undefined, session: {
     voice: choice(s.voice, xaiVoices), instructions: typeof s.instructions === 'string' && s.instructions.trim() ? s.instructions.slice(0, 16000) : undefined,
-    turn_detection: s.turn_detection === null ? null : t.type === 'server_vad' ? { type: 'server_vad', threshold: number(t.threshold, 0, 1, false),
-      silence_duration_ms: number(t.silence_duration_ms, 0, 10000), prefix_padding_ms: number(t.prefix_padding_ms, 0, 10000) } : undefined,
+    turn_detection: s.turn_detection === null ? null : t.type === 'server_vad' ? { type: 'server_vad',
+      idle_timeout_ms: number(t.idle_timeout_ms, 1, 600000) } : undefined,
     audio: { input: { format: format(obj(a.input).format) }, output: { format: format(obj(a.output).format) } },
   } };
 }
 
 type FunctionTool = { type: string; name: string; description?: string; parameters: object };
 export type SocketVoiceSetup = { provider: SocketVoiceProvider; tokenOptions: object; session: object; input: VoiceFormat;
-  output: VoiceFormat; manual: boolean; history: readonly VoiceHistoryItem[]; toolNames: ReadonlySet<string> };
+  output: VoiceFormat; manual: boolean; history: readonly VoiceHistoryItem[]; initialHistory?: boolean; toolNames: ReadonlySet<string> };
 
 export function socketVoiceSetup(provider: SocketVoiceProvider, model: string, settings: { google?: GoogleVoiceSettings; xai?: XaiVoiceSettings } | undefined,
   history: readonly VoiceHistoryItem[], instructions: string | undefined, tools: readonly FunctionTool[], allowBuiltIns: boolean): SocketVoiceSetup {
@@ -81,11 +81,13 @@ export function socketVoiceSetup(provider: SocketVoiceProvider, model: string, s
     const setup = config.bidiGenerateContentSetup ?? defaultGoogleVoiceSetup;
     const nativeTools = [...(allowBuiltIns ? setup.tools ?? [] : []), ...(tools.length ? [{ functionDeclarations:
       tools.map(({ name, description, parameters }) => ({ name, description, parametersJsonSchema: parameters })) }] : [])];
+    const initialHistory = history.length > 0 && /^google\/gemini-3\.1-flash-live(?:-|$)/.test(model);
     const session = { ...setup, model: `models/${model.slice('google/'.length)}`,
       generationConfig: { ...setup.generationConfig, responseModalities: ['AUDIO'] },
+      ...(initialHistory && { historyConfig: { initialHistoryInClientContent: true } }),
       systemInstruction: instructions ? { parts: [{ text: instructions }] } : undefined, tools: nativeTools.length ? nativeTools : undefined };
     // The constrained connection receives the same native setup that was locked into the token.
-    return { ...common, tokenOptions: { ...config, bidiGenerateContentSetup: session }, session, input: pcm16, output: pcm24,
+    return { ...common, tokenOptions: { ...config, bidiGenerateContentSetup: session }, session, input: pcm16, output: pcm24, initialHistory,
       manual: setup.realtimeInputConfig?.automaticActivityDetection?.disabled === true };
   }
   const config = normalizeXaiVoice(settings?.xai), s = config.session;
@@ -93,5 +95,6 @@ export function socketVoiceSetup(provider: SocketVoiceProvider, model: string, s
   return { ...common, tokenOptions: { expires_after: config.expires_after }, input, output, manual: s?.turn_detection === null,
     session: { voice: s?.voice, instructions: [instructions, s?.instructions].filter(Boolean).join('\n\n') || undefined,
       turn_detection: s?.turn_detection === undefined ? { type: 'server_vad' } : s.turn_detection,
-      audio: { input: { format: input }, output: { format: output } }, tools: tools.length ? tools : undefined } };
+      audio: { input: { format: input, transcription: { model: 'grok-transcribe' } }, output: { format: output } },
+      tools: tools.length ? tools : undefined } };
 }

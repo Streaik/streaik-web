@@ -70,9 +70,9 @@ export function createSocketVoiceProtocol(setup: SocketVoiceSetup, events: Voice
     if (active) return;
     if (google && setup.history.length) io.send({ clientContent: { turns: setup.history.map(({ role, text }) => ({
       role: role === 'user' ? 'user' : 'model', parts: [{ text }],
-    })), turnComplete: false } });
+    })), turnComplete: setup.initialHistory === true } });
     if (!google) for (const { role, text } of setup.history) io.send({ type: 'conversation.item.create', item: {
-      type: 'message', role, content: [{ type: role === 'user' ? 'input_text' : 'text', text }],
+      type: 'message', role, content: [{ type: role === 'user' ? 'input_text' : 'output_text', text }],
     } });
     active = true;
     io.ready();
@@ -125,11 +125,13 @@ export function createSocketVoiceProtocol(setup: SocketVoiceSetup, events: Voice
       io.interrupt();
       interrupted = !!responseId;
       if (itemId) events.publish({ ...recent(userItems, itemId, 'user') });
-    } else if (itemId && type === 'input_audio_buffer.committed') {
-      const message = recent(userItems, itemId, 'user');
-      if (!message.parts.length) events.publish({ ...message });
+    } else if (type === 'input_audio_buffer.committed') {
+      if (itemId) {
+        const message = recent(userItems, itemId, 'user');
+        if (!message.parts.length) events.publish({ ...message });
+      }
       if (setup.manual && prompted && !stopping) io.send({ type: 'response.create' });
-    } else if (itemId && type === 'conversation.item.input_audio_transcription.completed') {
+    } else if (itemId && (type === 'conversation.item.input_audio_transcription.completed' || type === 'conversation.item.input_audio_transcription.updated')) {
       transcript(recent(userItems, itemId, 'user'), text(event.transcript) ?? '', false);
     } else if (type === 'response.created') {
       responseId = text(obj(event.response).id);
@@ -165,7 +167,7 @@ export function createSocketVoiceProtocol(setup: SocketVoiceSetup, events: Voice
       bytesSent += byteLength;
     },
     manualTurn() {
-      if (!active || stopping || batch || !setup.manual || prompted || (google ? !hearing : bytesSent < (setup.input.type === 'audio/pcm' ? setup.input.rate / 5 : 800))) return;
+      if (!active || stopping || batch || !setup.manual || prompted || (google ? !hearing : bytesSent < (setup.input.type === 'audio/pcm' ? setup.input.rate / 5 : 1600))) return;
       prompted = true; hearing = false; bytesSent = 0;
       io.send(google ? { realtimeInput: { activityEnd: {} } } : { type: 'input_audio_buffer.commit' });
     },
