@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page, Route } from '@playwright/test';
 import { appAgents } from '../samples/shared/appAgents';
+import { exportSkillZip } from '../packages/chat/src/skillBundles';
 import { faviconEndpoint, iconResponse, openAiFavicon } from './icon-fixtures';
 
 test.beforeEach(async ({ page }) => {
@@ -32,6 +33,78 @@ async function create(page: Page, name: string) {
   await editor.getByLabel('Instructions', { exact: true }).fill('Write something helpful.');
   return editor;
 }
+
+test('agent Skills keeps Local copies and Central links separate and saves only on submit', async ({ page }) => {
+  const remote = { id: 'openai/skill_notes', name: 'provider-notes', description: 'A Central skill.', default_version: '1', latest_version: '2' };
+  const zip = await exportSkillZip({ metadata: { name: remote.name, description: remote.description }, instructions: 'Use the provider template.', files: [] });
+  let downloads = 0;
+  let rejectDownload = true;
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: 'openai/gpt-6-luna' }] } }));
+  await page.route('**/gateway/v1/skills?*', route => route.fulfill({ json: { data: [remote], has_more: false } }));
+  await page.route('**/gateway/v1/skills/openai/skill_notes/versions/2/content', route => {
+    downloads++;
+    return rejectDownload ? route.fulfill({ status: 500, body: '' }) : zip.arrayBuffer().then(bytes =>
+      route.fulfill({ contentType: 'application/zip', body: Buffer.from(bytes) }));
+  });
+  await page.goto('/');
+  await enableOpenAI(page);
+  await page.getByRole('button', { name: 'Skills', exact: true }).click();
+  await page.getByRole('button', { name: 'Add skill', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'New', exact: true }).click();
+  const skillEditor = page.getByRole('dialog', { name: 'Create skill' });
+  await skillEditor.getByLabel('Name', { exact: true }).fill('local-notes');
+  await skillEditor.getByLabel('Description', { exact: true }).fill('A local skill.');
+  await skillEditor.getByRole('button', { name: 'Create', exact: true }).click();
+  await expect(skillEditor).toBeHidden();
+
+  await agents(page).click();
+  const editor = await create(page, 'Skill Agent');
+  const openSkills = async (dialog = editor) => {
+    await dialog.getByRole('tab', { name: 'Skills', exact: true }).click();
+    const panel = dialog.getByRole('tabpanel', { name: 'Skills', exact: true });
+    return { panel, central: panel.getByRole('region', { name: 'Central', exact: true }), local: panel.getByRole('region', { name: 'Local', exact: true }) };
+  };
+  const { panel, central, local } = await openSkills();
+  const localSkill = local.getByRole('switch', { name: 'local-notes', exact: true });
+  await localSkill.click();
+  await expect(localSkill).toBeChecked();
+  await central.getByRole('switch', { name: remote.name, exact: true }).check();
+  const attachment = central.getByLabel(`Attachment for ${remote.name}`, { exact: true });
+  await expect(attachment).toHaveValue('reference');
+  await expect(central.getByLabel(`Version for ${remote.name}`, { exact: true })).toHaveValue('latest');
+  expect(downloads).toBe(0);
+  await attachment.selectOption('inline');
+  await expect(panel.getByRole('alert')).toContainText('No selection was changed');
+  await expect(attachment).toHaveValue('reference');
+  rejectDownload = false;
+  await attachment.selectOption('inline');
+  await expect(attachment).toHaveValue('inline');
+  expect(downloads).toBe(2);
+  await editor.getByRole('button', { name: 'Save agent', exact: true }).click();
+  await expect(card(page, 'Skill Agent')).toBeVisible();
+
+  await page.reload();
+  await expect(card(page, 'Skill Agent')).toBeVisible();
+  const dialog = page.getByRole('dialog', { name: 'Edit agent', exact: true });
+  await card(page, 'Skill Agent').getByRole('button', { name: 'Edit', exact: true }).click();
+  const reopened = await openSkills(dialog);
+  await expect(reopened.local.getByRole('switch', { name: 'local-notes', exact: true })).toBeChecked();
+  await expect(reopened.central.getByLabel(`Attachment for ${remote.name}`, { exact: true })).toHaveValue('inline');
+  await reopened.central.getByRole('switch', { name: remote.name, exact: true }).uncheck();
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await card(page, 'Skill Agent').getByRole('button', { name: 'Edit', exact: true }).click();
+  await openSkills(dialog);
+  await expect(reopened.central.getByRole('switch', { name: remote.name, exact: true })).toBeChecked();
+  await reopened.central.getByLabel(`Attachment for ${remote.name}`, { exact: true }).selectOption('reference');
+  await dialog.getByRole('button', { name: 'Save agent', exact: true }).click();
+  const saved = await page.evaluate(() => {
+    const key = Object.keys(localStorage).find(key => key.startsWith('streaik.agents.v1:'))!;
+    return JSON.parse(localStorage.getItem(key)!).local[0].definition.skills;
+  });
+  expect(saved).toEqual([{ type: 'inline', name: 'local-notes', description: 'A local skill.', source: {
+    type: 'base64', media_type: 'application/zip', data: expect.any(String),
+  } }, { type: 'skill_reference', skill_id: remote.id, version: 'latest' }]);
+});
 
 test('agent tool configuration preserves portable fields and auto-attaches only after MCP installation', async ({ page }) => {
   await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: replyModel, name: 'Answer model', type: 'language' }] } }));

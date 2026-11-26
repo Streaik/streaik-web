@@ -74,6 +74,7 @@ export function AgentSkillFields({ active, skills, onChange, onBusyChange, local
     });
   }
 
+  if (!active) return null;
   const selected = entries.flatMap<Selection>((entry, index) => isAgentSkillReference(entry)
     ? [{ origin: { id: entry.skill_id, version: entry.version }, entry, index }]
     : isInlineAgentSkill(entry) ? [{ origin: origins.get(entry), entry, index }] : []);
@@ -89,13 +90,14 @@ export function AgentSkillFields({ active, skills, onChange, onBusyChange, local
   if (skills != null && !Array.isArray(skills)) return <p>{t('This agent has an unsupported skills format. Its saved skills will not be changed.')}</p>;
 
   return <>
+    {inspecting && <p role="status">{t('Checking saved skill attachments…')}</p>}
     {busy && <p role="status">{t('Preparing skill archive…')}</p>}
     {error && <p className="chat-error" role="alert">{t(error)}</p>}
     <section className="agent-field-group" aria-label={t('Local')}>
       <h3>{t('Local')}</h3>
       <p>{t('Attach a copy of a skill from this browser.')}</p>
       {!local.ready ? <p role="status">{t('Loading local skills…')}</p> : !local.skills.length && <p>{t('No local skills yet.')}</p>}
-      {local.skills.map(item => {
+      {!inspecting && local.skills.map(item => {
         const bundle = defaultSkillVersion(item);
         const { name, description } = bundle.metadata;
         const current = selected.find(({ origin, entry }) => origin?.id === item.id && isInlineAgentSkill(entry));
@@ -111,7 +113,7 @@ export function AgentSkillFields({ active, skills, onChange, onBusyChange, local
           {current && <small>{t('Embedded')}</small>}
         </div>;
       })}
-      {selected.filter(({ origin, entry }) => isInlineAgentSkill(entry) && (!origin ||
+      {!inspecting && selected.filter(({ origin, entry }) => isInlineAgentSkill(entry) && (!origin ||
         (!isCentralSkillId(origin.id) && !local.skills.some(item => item.id === origin.id)))).map(({ entry, index }) =>
         isInlineAgentSkill(entry) && <div className="agent-skill-row" key={index}>
           <label><input type="checkbox" role="switch" checked disabled={disabled} onChange={() => setEntry(index)} /> {entry.name}</label>
@@ -126,8 +128,8 @@ export function AgentSkillFields({ active, skills, onChange, onBusyChange, local
         placeholder={t('Search Central skills…')} value={query} onChange={event => setQuery(event.currentTarget.value)} />}
       {remote.busy && <p role="status">{t('Loading provider skills…')}</p>}
       {remote.error && <p className="chat-error" role="alert">{t(remote.error)}</p>}
-      {online && !remote.busy && !remote.error && !centralRows.length && <p>{t(match ? 'No matching skills.' : 'No provider skills found.')}</p>}
-      {centralRows.map(([id, item]) => {
+      {online && !inspecting && !remote.busy && !remote.error && !centralRows.length && <p>{t(match ? 'No matching skills.' : 'No provider skills found.')}</p>}
+      {!inspecting && centralRows.map(([id, item]) => {
         const current = selected.find(({ origin }) => origin?.id === id);
         const attached = current?.entry;
         const inline = isInlineAgentSkill(attached) ? attached : undefined;

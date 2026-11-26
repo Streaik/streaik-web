@@ -27,7 +27,7 @@ export function browserChatSkills({ mode, skills, local, catalog, selectedIds, g
       archives.set(id, { id, name: skill.name, description: skill.description, load: () => inlineAgentSkillZip(skill) });
     } else if (gateway && isAgentSkillReference(skill) && isCentralSkillId(skill.skill_id)) {
       const item = remote.get(skill.skill_id);
-      const id = `agent-link:${skill.skill_id}:${encodeURIComponent(skill.version ?? '')}`;
+      const id = `agent-link:${JSON.stringify([skill.skill_id, skill.version ?? ''])}`;
       linkedIds.add(skill.skill_id);
       // A versioned link may still be downloadable when the provider no longer lists it.
       archives.set(id, { id, name: item?.name ?? skill.skill_id, description: item?.description ?? '',
