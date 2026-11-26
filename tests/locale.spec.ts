@@ -20,6 +20,22 @@ async function expectProtocolLinks(page: Page, title: string, protocol: string, 
   await expect(specification).toBeFocused();
 }
 
+test('localizes the link dialog and the unselected agent picker', async ({ page }) => {
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [] } }));
+  await page.goto('/');
+  await page.getByRole('button', { name: /^(Bijlagen toevoegen|Aan bericht toevoegen)$/ }).click();
+  await page.getByRole('menuitem', { name: 'Link', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Link', exact: true });
+  await expect(dialog.getByRole('button', { name: 'Toevoegen', exact: true })).toBeVisible();
+  const type = dialog.getByLabel('Type link', { exact: true });
+  await type.selectOption({ label: 'text/html' });
+  await expect(type).toHaveValue('text/html');
+  await dialog.getByRole('button', { name: 'Annuleren', exact: true }).click();
+
+  await page.getByRole('button', { name: 'Agent chat', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Agent', exact: true })).toHaveText('Selecteer een agent');
+});
+
 test('localizes the MCP overview tabs and uses matching cards for registry and installed servers', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   const description = 'Published server description';

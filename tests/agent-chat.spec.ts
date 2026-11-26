@@ -35,6 +35,13 @@ async function start(page: Page) {
   await page.getByRole('button', { name: 'Close', exact: true }).click();
   await chatMode(page, 'Agent').click();
   await expect(agentPicker(page)).toBeEnabled();
+  await expect(agentPicker(page)).toHaveText('Select an agent');
+}
+
+async function pickChatAgent(page: Page) {
+  await agentPicker(page).click();
+  await page.getByRole('option', { name: 'ChatAgent', exact: true }).click();
+  await expect(agentPicker(page)).toHaveText('ChatAgent');
 }
 
 async function routeGroup(page: Page, name: string) {
@@ -67,7 +74,9 @@ test('agent mode prefers hosted API Chat and offers four hosted routes', async (
     await route.fulfill(stream('Hosted reply'));
   });
   await start(page);
-  await expect(agentPicker(page)).toHaveText('ChatAgent');
+  await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Run the hosted agent');
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+  await pickChatAgent(page);
   await routeGroup(page, 'Agents');
   await expect(page.getByRole('menuitemradio', { name: '/api/chat', exact: true })).toHaveAttribute('aria-checked', 'true');
   await expectConversationalRoutes(page);
@@ -76,6 +85,8 @@ test('agent mode prefers hosted API Chat and offers four hosted routes', async (
   await expect(page.getByText('Hosted reply', { exact: true })).toBeVisible();
   await chatMode(page, 'Model').click();
   await expect(page.getByRole('button', { name: 'Model', exact: true })).toBeVisible();
+  await chatMode(page, 'Agent').click();
+  await expect(agentPicker(page)).toHaveText('ChatAgent');
 });
 
 test('agent mode falls back to browser-run Gateway when the configured agent backend is offline', async ({ page }) => {
@@ -90,6 +101,7 @@ test('agent mode falls back to browser-run Gateway when the configured agent bac
   });
   await start(page);
   await expect(page.getByText('Agent backend unavailable. Using a browser route.')).toBeVisible();
+  await pickChatAgent(page);
   await routeGroup(page, 'Gateway');
   await expect(page.getByRole('menuitemradio', { name: '/api/chat', exact: true })).toHaveAttribute('aria-checked', 'true');
   await expectConversationalRoutes(page);

@@ -2,13 +2,13 @@ import type { AgentBackend, HostedAgent, NativeChatEndpoint } from '@streaik/gat
 import { useEffect, useState } from 'react';
 import { resolveAgentChatRoute } from './agentChat';
 import type { AgentChatRoute } from './agentChat';
-import type { AgentEntry, AgentKey } from './agentCatalog';
+import type { AgentEntry } from './agentCatalog';
 import { isAgentDefinition } from './agentDefinition';
 import type { AgentDefinition } from './agentDefinition';
 
-export function useAgentChat({ active, backend, ready, scope, revision, entries, defaultKey, gateway, direct }: {
+export function useAgentChat({ active, backend, ready, scope, revision, entries, gateway, direct }: {
   active: boolean; backend?: AgentBackend; ready: boolean; scope?: string; revision: number;
-  entries: readonly AgentEntry[]; defaultKey?: AgentKey | null; gateway: boolean; direct: readonly NativeChatEndpoint[];
+  entries: readonly AgentEntry[]; gateway: boolean; direct: readonly NativeChatEndpoint[];
 }) {
   const stamp = JSON.stringify([scope, revision]);
   const [requested, setRoute] = useState<AgentChatRoute>();
@@ -31,7 +31,7 @@ export function useAgentChat({ active, backend, ready, scope, revision, entries,
   const remoteOptions = (remote ?? []).map(agent => ({ ...agent, key: `remote:${agent.id}`, hosted: true }));
   const localOptions = entries.map(entry => ({ key: entry.key, name: entry.definition.name, definition: entry.definition, id: entry.id }));
   const options = [...localOptions, ...remoteOptions];
-  const option = options.find(({ key }) => key === selectedKey) ?? options.find(({ key }) => key === defaultKey) ?? remoteOptions[0] ?? localOptions[0];
+  const option = options.find(({ key }) => key === selectedKey);
   const remoteId = option && 'hosted' in option ? option.id : undefined;
   useEffect(() => {
     if (!active || !backend || !ready || !remoteId) return;

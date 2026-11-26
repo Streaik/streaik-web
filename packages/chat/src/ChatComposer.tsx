@@ -282,7 +282,7 @@ export function ChatComposer(props: ComposerProps) {
       onPrompt={sendText} onResource={attachResource} close={() => setMcpPicker(undefined)} />}
     {!video && <dialog ref={dialog} className="chat-settings chat-link-dialog" aria-labelledby={`${id}-link-title`}>
       <form onSubmit={addLink}>
-        <header className="chat-settings-header"><h2 id={`${id}-link-title`}>{t('Add link')}</h2></header>
+        <header className="chat-settings-header"><h2 id={`${id}-link-title`}>{t('Link')}</h2></header>
         <div className="chat-link-fields">
           <label htmlFor={`${id}-url`}>{t('URL')}</label>
           <input id={`${id}-url`} type="url" autoFocus required maxLength={4096} placeholder="https://" value={linkInput}
@@ -290,14 +290,13 @@ export function ChatComposer(props: ComposerProps) {
           {!image && <><label htmlFor={`${id}-type`}>{t('Link type')}</label>
           <select id={`${id}-type`} value={linkType} onChange={event => setLinkType(event.currentTarget.value)}>
             <option value="">{t('Automatic')}</option>
-            <option value="text/html">{t('Web page')}</option>
-            {['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'image/gif'].map(type => <option value={type} key={type}>{type}</option>)}
+            {['text/html', 'application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'image/gif'].map(type => <option value={type} key={type}>{type}</option>)}
           </select></>}
           {linkError && <p role="alert">{t('Enter an HTTP or HTTPS URL without credentials.')}</p>}
         </div>
         <footer className="chat-tool-footer">
           <Button type="button" variant="subtle" onClick={() => dialog.current?.close()}>{t('Cancel')}</Button>
-          <Button type="submit" variant="primary">{t('Add link')}</Button>
+          <Button type="submit" variant="primary">{t('Add')}</Button>
         </footer>
       </form>
     </dialog>}

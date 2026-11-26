@@ -808,9 +808,9 @@ test('composer attaches picked files, dropped files and links, with opt-in local
   await chooser.setFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('raw notes') });
   await plus.click();
   await menu.getByRole('menuitem', { name: 'Link', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Add link' });
+  const dialog = page.getByRole('dialog', { name: 'Link', exact: true });
   await dialog.getByLabel('URL', { exact: true }).fill('https://example.test/report.pdf');
-  await dialog.getByRole('button', { name: 'Add link' }).click();
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click();
   await expect(composer.getByRole('link', { name: 'example.test/report.pdf' })).toBeVisible();
   await composer.getByRole('button', { name: 'Send' }).click();
   await expect(page.getByText('Attachment reply 1')).toBeVisible();
@@ -1932,9 +1932,9 @@ test('Images uses explicit routes and persists compatible records only for the c
   await (await picking).setFiles({ name: 'seed.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
   await top.getByRole('button', { name: 'Add attachments' }).click();
   await top.getByRole('menuitem', { name: 'Link', exact: true }).click();
-  const addLink = page.getByRole('dialog', { name: 'Add link' });
+  const addLink = page.getByRole('dialog', { name: 'Link', exact: true });
   await addLink.getByLabel('URL', { exact: true }).fill('https://example.org/reference.png');
-  await addLink.getByRole('button', { name: 'Add link', exact: true }).click();
+  await addLink.getByRole('button', { name: 'Add', exact: true }).click();
   await top.getByRole('button', { name: 'Send', exact: true }).click();
   await expect(generated).toHaveCount(3);
   await expect(top.getByRole('button', { name: 'Add attachments' })).toBeEnabled();
@@ -2165,8 +2165,8 @@ test('Images routes checked models through the shared agent and generates with t
   await imageSettings.getByLabel('Number of images').fill('5');
   await imageSettings.getByLabel('Aspect ratio').fill('16:9');
   await expect(imageSettings.getByRole('combobox', { name: 'Image model', exact: true })).toHaveCount(0);
-  await imageSettings.getByRole('tab', { name: 'Google', exact: true }).click();
-  await imageSettings.getByRole('tabpanel', { name: 'Google', exact: true }).getByLabel('Output format').selectOption('jpeg');
+  await imageSettings.getByRole('tab', { name: 'Google Gemini', exact: true }).click();
+  await imageSettings.getByRole('tabpanel', { name: 'Google Gemini', exact: true }).getByLabel('Output format').selectOption('jpeg');
   await imageSettings.getByRole('tab', { name: 'ImageRouter', exact: true }).click();
   await imageSettings.getByRole('tabpanel', { name: 'ImageRouter', exact: true }).getByLabel('Quality').selectOption('low');
   await imageSettings.getByRole('tab', { name: 'OpenRouter', exact: true }).click();
@@ -2181,8 +2181,8 @@ test('Images routes checked models through the shared agent and generates with t
   await expect(imageSettings.getByRole('tabpanel', { name: 'General', exact: true }).getByLabel('Quality')).toHaveValue('high');
   await expect(imageSettings.getByRole('tab', { name: 'OpenAI', exact: true })).toHaveCount(0);
   await expect(imageSettings.getByLabel('Edit mask')).toHaveCount(0);
-  await imageSettings.getByRole('tab', { name: 'Google', exact: true }).click();
-  await expect(imageSettings.getByRole('tabpanel', { name: 'Google', exact: true }).getByLabel('Output format')).toHaveValue('jpeg');
+  await imageSettings.getByRole('tab', { name: 'Google Gemini', exact: true }).click();
+  await expect(imageSettings.getByRole('tabpanel', { name: 'Google Gemini', exact: true }).getByLabel('Output format')).toHaveValue('jpeg');
   await imageSettings.getByRole('tab', { name: 'ImageRouter', exact: true }).click();
   await expect(imageSettings.getByRole('tabpanel', { name: 'ImageRouter', exact: true }).getByLabel('Quality')).toHaveValue('low');
   await imageSettings.getByRole('tab', { name: 'OpenRouter', exact: true }).click();
@@ -2196,9 +2196,9 @@ test('Images routes checked models through the shared agent and generates with t
   await page.getByRole('menuitemradio', { name: '/v1/images/edits', exact: true }).click();
   await composer.getByRole('button', { name: 'Add attachments' }).click();
   await composer.getByRole('menuitem', { name: 'Link', exact: true }).click();
-  const link = page.getByRole('dialog', { name: 'Add link' });
+  const link = page.getByRole('dialog', { name: 'Link', exact: true });
   await link.getByLabel('URL', { exact: true }).fill(reference);
-  await link.getByRole('button', { name: 'Add link', exact: true }).click();
+  await link.getByRole('button', { name: 'Add', exact: true }).click();
   await send('Make it brighter', 10);
   expect(requests).toEqual([
     { model: gptImage2, prompt: 'A blue bird', n: 5, quality: 'high' },

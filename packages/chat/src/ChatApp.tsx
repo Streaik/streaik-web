@@ -56,7 +56,7 @@ import { useLocalSkills } from './useLocalSkills';
 import type { LocalSkills } from './useLocalSkills';
 import { useRemoteSkills } from './useRemoteSkills';
 import type { RemoteSkills } from './useRemoteSkills';
-import { assignedAgent, effectiveRoleAssignment } from './agentCatalog';
+import { assignedAgent } from './agentCatalog';
 import type { AgentsConfig } from './agentCatalog';
 import { agentModels as configuredAgentModels } from './agentDefinition';
 import { agentProviderOptions, agentProviderRequest } from './agentProviderSettings';
@@ -420,7 +420,6 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const darkMode = useColorScheme() === 'dark';
   const agents = useAgents();
   const defaultChatAgent = assignedAgent(agents, 'chat');
-  const chatRole = agents?.config.roles?.find(({ id }) => id === 'chat');
   const [useAgentMode, setAgentMode] = useState(false);
   const agentModeEnabled = !!(agents || connection.agentBackend);
   const agentMode = useAgentMode && agentModeEnabled;
@@ -441,7 +440,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const directEndpoints = direct?.endpoints(!connection.ready);
   const revision = connection.modelRevision ?? 0;
   const agentChat = useAgentChat({ active: agentMode && view === 'chat', backend: connection.agentBackend, ready: connection.ready,
-    scope, revision, entries: agents?.entries ?? [], defaultKey: agents && chatRole && effectiveRoleAssignment(agents.data, chatRole),
+    scope, revision, entries: agents?.entries ?? [],
     gateway: hasGateway, direct: directEndpoints ?? [] });
   const agentRoute = agentMode ? agentChat.route : undefined;
   const hostedRoute = agentRoute?.mode === 'agents' ? agentRoute : undefined;
@@ -837,7 +836,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const modelStatus = !connection.ready ? connection.emptyMessage : agentMode
     ? agentChat.checking ? t('Connecting to the agent backend…')
       : !agentRoute ? t('No chat route is available for agents.')
-      : !agentChat.option ? t('Create an agent in Agents to start chatting.')
+      : !agentChat.options.length ? t('Create an agent in Agents to start chatting.')
+      : !agentChat.option ? null
       : agentChat.loadingDefinition ? t('Loading agent…')
       : !hostedRoute && !chatAgent ? t('This hosted agent has no browser-readable definition.')
       : !hostedRoute && !runResult ? t('Loading models…')
