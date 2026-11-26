@@ -14,6 +14,15 @@ type Props = { active: boolean; skills?: JsonValue; onChange: (skills?: JsonValu
   local: LocalSkills; remote: RemoteSkills; gateway: Gateway };
 type Selection = { origin?: SkillOrigin; entry: AgentSkillReference | InlineAgentSkill; index: number };
 
+function AgentSkillSwitch({ name, checked, disabled, onChange }: {
+  name: string; checked: boolean; disabled: boolean; onChange: (checked: boolean) => void;
+}) {
+  return <div className="chat-tool-switches">
+    <label><input type="checkbox" role="switch" checked={checked} disabled={disabled}
+      onChange={event => onChange(event.currentTarget.checked)} /><span>{name}</span></label>
+  </div>;
+}
+
 export function AgentSkillFields({ active, skills, onChange, onBusyChange, local, remote, gateway }: Props) {
   const { t } = useAppTranslation();
   const [query, setQuery] = useState('');
@@ -75,73 +84,75 @@ export function AgentSkillFields({ active, skills, onChange, onBusyChange, local
   }
 
   if (!active) return null;
+  if (skills != null && !Array.isArray(skills)) return <p>{t('This agent has an unsupported skills format. Its saved skills will not be changed.')}</p>;
+
   const selected = entries.flatMap<Selection>((entry, index) => isAgentSkillReference(entry)
     ? [{ origin: { id: entry.skill_id, version: entry.version }, entry, index }]
     : isInlineAgentSkill(entry) ? [{ origin: origins.get(entry), entry, index }] : []);
+  const match = query.trim().toLowerCase();
+  const matches = (...fields: (string | undefined)[]) => !match || fields.join(' ').toLowerCase().includes(match);
+  const localRows = local.skills.map(item => {
+    const bundle = defaultSkillVersion(item);
+    const current = selected.find(({ origin, entry }) => origin?.id === item.id && isInlineAgentSkill(entry));
+    return { id: item.id, bundle, current };
+  }).filter(({ id, bundle, current }) => current || matches(bundle.metadata.name, bundle.metadata.description, id));
+  const savedLocal = selected.filter(({ origin, entry }) => isInlineAgentSkill(entry) && (!origin ||
+    (!isCentralSkillId(origin.id) && !local.skills.some(item => item.id === origin.id))));
   const central = new Map<string, RemoteSkill | undefined>(remote.skills.map(item => [item.id, item]));
   for (const { origin, entry } of selected) {
     if (origin && (isAgentSkillReference(entry) || isCentralSkillId(origin.id)) && !central.has(origin.id)) central.set(origin.id, undefined);
   }
+  const centralRows = [...central].map(([id, item]) => ({ id, item, current: selected.find(({ origin }) => origin?.id === id) }))
+    .filter(({ id, item, current }) => current || matches(item?.name, item?.description, id));
   const disabled = busy || inspecting;
-  const match = query.trim().toLowerCase();
-  const centralRows = [...central].filter(([id, item]) => !match || selected.some(selection => selection.origin?.id === id) ||
-    `${item?.name ?? ''} ${item?.description ?? ''} ${id}`.toLowerCase().includes(match));
-
-  if (skills != null && !Array.isArray(skills)) return <p>{t('This agent has an unsupported skills format. Its saved skills will not be changed.')}</p>;
 
   return <>
+    <input type="search" className="ui-input agent-input" aria-label={t('Search skills')}
+      placeholder={t('Search skills...')} value={query} onChange={event => setQuery(event.currentTarget.value)}
+      onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) event.preventDefault(); }} />
     {inspecting && <p role="status">{t('Checking saved skill attachments…')}</p>}
     {busy && <p role="status">{t('Preparing skill archive…')}</p>}
     {error && <p className="chat-error" role="alert">{t(error)}</p>}
     <section className="agent-field-group" aria-label={t('Local')}>
       <h3>{t('Local')}</h3>
-      <p>{t('Attach a copy of a skill from this browser.')}</p>
-      {!local.ready ? <p role="status">{t('Loading local skills…')}</p> : !local.skills.length && <p>{t('No local skills yet.')}</p>}
-      {!inspecting && local.skills.map(item => {
-        const bundle = defaultSkillVersion(item);
-        const { name, description } = bundle.metadata;
-        const current = selected.find(({ origin, entry }) => origin?.id === item.id && isInlineAgentSkill(entry));
-        return <div className="agent-skill-row" key={item.id}>
-          <label><input type="checkbox" role="switch" checked={!!current} disabled={disabled} onChange={event => {
-            if (!event.currentTarget.checked && current) setEntry(current.index);
-            else {
-              const origin = { id: item.id, version: String(bundle.version) };
+      {!local.ready ? <p role="status">{t('Loading local skills…')}</p> : !inspecting && !localRows.length && !savedLocal.length &&
+        <p>{t(match && local.skills.length ? 'No matching skills.' : 'No local skills yet.')}</p>}
+      {!inspecting && localRows.map(({ id, bundle, current }) => {
+        const name = isInlineAgentSkill(current?.entry) ? current.entry.name : bundle.metadata.name;
+        return <div className="agent-skill-row" key={id}>
+          <AgentSkillSwitch name={name} checked={!!current} disabled={disabled} onChange={checked => {
+            if (!checked && current) setEntry(current.index);
+            else if (checked) {
+              const origin = { id, version: String(bundle.version) };
               void prepare(-1, origin, () => embedAgentSkill(bundle, origin));
             }
-          }} /> {current && isInlineAgentSkill(current.entry) ? current.entry.name : name}</label>
-          <p>{current && isInlineAgentSkill(current.entry) ? current.entry.description : description}</p>
+          }} />
           {current && <small>{t('Embedded')}</small>}
         </div>;
       })}
-      {!inspecting && selected.filter(({ origin, entry }) => isInlineAgentSkill(entry) && (!origin ||
-        (!isCentralSkillId(origin.id) && !local.skills.some(item => item.id === origin.id)))).map(({ entry, index }) =>
+      {!inspecting && savedLocal.map(({ entry, index }) =>
         isInlineAgentSkill(entry) && <div className="agent-skill-row" key={index}>
-          <label><input type="checkbox" role="switch" checked disabled={disabled} onChange={() => setEntry(index)} /> {entry.name}</label>
-          <p>{entry.description}</p><small>{t('Embedded')}</small>
+          <AgentSkillSwitch name={entry.name} checked disabled={disabled} onChange={() => setEntry(index)} />
+          <small>{t('Embedded')}</small>
         </div>)}
     </section>
     <section className="agent-field-group" aria-label={t('Central')}>
       <h3>{t('Central')}</h3>
-      <p>{t('Link to a catalog skill or embed a copy in this agent.')}</p>
       {!online && <p>{t('Connect to a Gateway to browse Central skills.')}</p>}
-      {online && !!remote.skills.length && <input type="search" className="ui-input agent-input" aria-label={t('Search Central skills')}
-        placeholder={t('Search Central skills…')} value={query} onChange={event => setQuery(event.currentTarget.value)} />}
       {remote.busy && <p role="status">{t('Loading provider skills…')}</p>}
       {remote.error && <p className="chat-error" role="alert">{t(remote.error)}</p>}
-      {online && !inspecting && !remote.busy && !remote.error && !centralRows.length && <p>{t(match ? 'No matching skills.' : 'No provider skills found.')}</p>}
-      {!inspecting && centralRows.map(([id, item]) => {
-        const current = selected.find(({ origin }) => origin?.id === id);
+      {online && !inspecting && !needsLoad && !remote.busy && !remote.error && !centralRows.length &&
+        <p>{t(match ? 'No matching skills.' : 'No provider skills found.')}</p>}
+      {!inspecting && centralRows.map(({ id, item, current }) => {
         const attached = current?.entry;
         const inline = isInlineAgentSkill(attached) ? attached : undefined;
         const name = inline?.name ?? item?.name ?? id;
-        const description = inline?.description ?? item?.description;
         const version = current?.origin?.version ?? '';
         const versions = [...new Set([version, item?.default_version, item?.latest_version])]
           .filter((value): value is string => !!value && value !== latestSkillVersion);
         return <div className="agent-skill-row" key={id}>
-          <label><input type="checkbox" role="switch" checked={!!current} disabled={disabled || (!current && !item)} onChange={event =>
-            event.currentTarget.checked ? setEntry(-1, linkAgentSkill(id)) : current && setEntry(current.index)} /> {name}</label>
-          {description && <p>{description}</p>}
+          <AgentSkillSwitch name={name} checked={!!current} disabled={disabled || (!current && !item)} onChange={checked =>
+            checked ? setEntry(-1, linkAgentSkill(id)) : current && setEntry(current.index)} />
           {current && <div className="agent-skill-options">
             <label className="agent-field">{t('Attachment')}
               <select className="ui-select" aria-label={t('Attachment for {{name}}', { name })} value={inline ? 'inline' : 'reference'}

@@ -24,7 +24,12 @@ import { ToolConfigurationEditor } from './ToolConfigurationEditor';
 import type { ToolConfigurationRow } from './ToolConfigurationEditor';
 
 type DialogRef = RefObject<HTMLDialogElement | null>;
-type ChatSettingsTab = 'general' | 'tools' | 'tool-configuration' | 'skills' | ChatProviderId;
+import { OpenAIRealtimeConfigForm } from './OpenAIRealtimeConfigForm';
+import type { LiveClientAgent } from './OpenAIRealtimeConfigForm';
+import { normalizeRealtimeSettings } from './realtimeSettings';
+import type { RealtimeSettings } from './realtimeSettings';
+
+type ChatSettingsTab = 'general' | 'tools' | 'tool-configuration' | 'skills' | 'realtime' | ChatProviderId;
 
 function ToolPolicyFields({ value, onChange, rows, disabled }: {
   value: ChatToolPolicy; onChange: (policy: ChatToolPolicy) => void; rows: readonly ToolConfigurationRow[]; disabled: boolean;
@@ -64,30 +69,32 @@ function ToolPolicyFields({ value, onChange, rows, disabled }: {
   </section>;
 }
 
-export function ChatSettingsDialog({ dialog, value, onChange, gateway, browserToolsSupported, hasHistory, locked, localSkills, remoteSkills, providerModels, toolRows, namespaceSupported, toolOptionsSupported }: {
+export function ChatSettingsDialog({ dialog, value, onChange, gateway, browserToolsSupported, hasHistory, locked, localSkills, remoteSkills, providerModels, toolRows, namespaceSupported, toolOptionsSupported, voice }: {
   dialog: DialogRef; value: ChatPreferences; onChange: (preferences: ChatPreferences) => void;
   gateway: boolean; browserToolsSupported: boolean; hasHistory: boolean; locked: boolean; localSkills: LocalSkills; remoteSkills: RemoteSkills;
   providerModels: readonly ChatModel[];
+  voice?: { protocol?: 'live' | 'realtime'; models: readonly ChatModel[]; agents: readonly LiveClientAgent[] };
   toolRows: readonly ToolConfigurationRow[]; namespaceSupported: boolean; toolOptionsSupported: boolean;
 }) {
   const { t } = useAppTranslation();
   const id = useId();
   const [requestedTab, setTab] = useState<ChatSettingsTab>('general');
   const [draft, setDraft] = useState<ProviderChatSettings>();
+  const [voiceDraft, setVoiceDraft] = useState<RealtimeSettings>();
   const [resetKey, setResetKey] = useState(0);
   const providers = activeChatProviders(providerModels);
   const tabs: [ChatSettingsTab, string][] = [['general', t('General')], ['tools', t('Tools')],
-    ['tool-configuration', t('Tool configuration')], ['skills', t('Skills')],
+    ['tool-configuration', t('Tool configuration')], ['skills', t('Skills')], ...(voice ? [['realtime', t('OpenAI Realtime')] as [ChatSettingsTab, string]] : []),
     ...[...providers.keys()].map((provider): [ChatProviderId, string] => [provider, chatProviders[provider].label])];
   const tab = tabs.some(([key]) => key === requestedTab) ? requestedTab : 'general';
-  const providerTab = tab !== 'general' && tab !== 'tools' && tab !== 'skills' && tab !== 'tool-configuration' ? tab : undefined;
+  const providerTab = tab !== 'general' && tab !== 'tools' && tab !== 'skills' && tab !== 'tool-configuration' && tab !== 'realtime' ? tab : undefined;
   const providerSettings = draft ?? value.providerSettings;
   const { online, needsLoad, load, cursor, busy, error, skills } = remoteSkills;
   useEffect(() => {
     if (tab === 'skills' && dialog.current?.open && gateway && online && !busy && error === undefined && (needsLoad || cursor)) load(cursor);
   }, [tab, dialog, gateway, online, busy, error, needsLoad, cursor, load]);
   return <dialog ref={dialog} className="chat-settings chat-tools-dialog" aria-labelledby={`${id}-title`} onClose={() => {
-    setTab('general'); setDraft(undefined);
+    setTab('general'); setDraft(undefined); setVoiceDraft(undefined);
   }}>
     <header className="chat-settings-header">
       <h2 id={`${id}-title`}>{t('Chat settings')}</h2>
@@ -170,6 +177,12 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, browserTo
         {!gateway && <p>{t('Skills are available only on Gateway routes.')}</p>}
       </section>
     </div>
+    {voice && <div id={`${id}-realtime-panel`} role="tabpanel" aria-labelledby={`${id}-realtime-tab`} hidden={tab !== 'realtime'}>
+      {tab === 'realtime' && <fieldset className="chat-provider-fields" disabled={locked} aria-label={t('OpenAI Realtime')}>
+        <OpenAIRealtimeConfigForm value={voiceDraft ?? value.realtimeSettings ?? {}} onChange={setVoiceDraft}
+          models={voice.models} agents={voice.agents} protocol={voice.protocol} />
+      </fieldset>}
+    </div>}
     {[...providers].map(([provider, models]) => <div key={provider} id={`${id}-${provider}-panel`}
       role="tabpanel" aria-labelledby={`${id}-${provider}-tab`} hidden={tab !== provider}>
       {tab === provider && <fieldset className="chat-provider-fields" disabled={locked} aria-label={chatProviders[provider].label}>
@@ -179,14 +192,17 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, browserTo
     </div>)}
     <footer className="chat-tool-footer">
       <Button variant="subtle" disabled={locked} onClick={() => {
-        if (providerTab) {
+        if (tab === 'realtime') {
+          setVoiceDraft(current => voice?.protocol ? { ...(current ?? value.realtimeSettings), [voice.protocol]: undefined } : {});
+        } else if (providerTab) {
           setDraft(current => ({ ...(current ?? value.providerSettings), [providerTab]: undefined }));
           setResetKey(key => key + 1);
         } else onChange({ ...value, ...(tab === 'tool-configuration' ? toolConfigurationDefaults : composerToolDefaults) });
       }}>{t(providerTab ? 'Reset provider settings' : 'Defaults')}</Button>
-      <Button variant={draft ? 'subtle' : undefined} onClick={() => dialog.current?.close()}>{t(draft ? 'Cancel' : 'Close')}</Button>
-      {(providerTab || draft) && <Button disabled={locked || !draft || !providers.size} onClick={() => {
-        onChange({ ...value, providerSettings: normalizeProviderChatSettings(draft) });
+      <Button variant={draft || voiceDraft ? 'subtle' : undefined} onClick={() => dialog.current?.close()}>{t(draft || voiceDraft ? 'Cancel' : 'Close')}</Button>
+      {(providerTab || draft || tab === 'realtime' || voiceDraft) && <Button disabled={locked || (!draft && !voiceDraft)} onClick={() => {
+        onChange({ ...value, ...(draft && { providerSettings: normalizeProviderChatSettings(draft) }),
+          ...(voiceDraft && { realtimeSettings: normalizeRealtimeSettings(voiceDraft) }) });
         dialog.current?.close();
       }}>{t('Save')}</Button>}
     </footer>

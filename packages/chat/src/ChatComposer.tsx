@@ -31,6 +31,7 @@ type ComposerMcp = { count: number; disabled: boolean; open: () => void; servers
 type ComposerProps = { busy: boolean; canSend: boolean; dictation?: ComposerDictation } & (
   { image?: undefined; video?: undefined; convert: boolean; onSend: (parts: AttachmentPart[]) => void; onChatSettings: () => void; onViewContext: () => void;
     mcp?: ComposerMcp; badges?: readonly ComposerBadge[]; onStop: () => void;
+    voice?: { phase?: 'connecting' | 'active' | 'closing'; start: () => void; stop: () => void; manualTurn?: () => void };
     reasoning?: { value: ReasoningLevel; onChange: (value: ReasoningLevel) => void } } |
   { image: { draft: ImageDraft; onChange: (value: ImageDraft) => void; onSend: () => void; onSettings: () => void }; video?: undefined; onStop: () => void } |
   { image?: undefined; video: { prompt: string; onChange: (prompt: string) => void; onSend: () => void }; onStop?: undefined }
@@ -44,6 +45,8 @@ export function ChatComposer(props: ComposerProps) {
   const reasoning = !image && !video ? props.reasoning : undefined;
   const mcp = !image && !video ? props.mcp : undefined;
   const badges = !image && !video ? props.badges : undefined;
+  const voice = !image && !video ? props.voice : undefined;
+  const voiceLabel = t(voice?.phase === 'connecting' ? 'Cancel voice session' : voice?.phase ? 'Stop voice session' : 'Start voice session');
   const plusLabel = t(mcp ? 'Add to message' : 'Add attachments');
   const id = useId();
   const [localDraft, setLocalDraft] = useState('');
@@ -135,6 +138,10 @@ export function ChatComposer(props: ComposerProps) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (voice) {
+      if (voice.phase === 'active' && !draft.trim() && !fileCount) voice.manualTurn?.();
+      return;
+    }
     if ((!draft.trim() && (media || !fileCount)) || !canSend || busy || pending.current || dictation.active()) return;
     const mediaComposer = image ?? video;
     if (mediaComposer) { setNotice(''); mediaComposer.onSend(); return; }
@@ -281,10 +288,14 @@ export function ChatComposer(props: ComposerProps) {
         <div className="chat-composer-submit">
           {props.dictation !== undefined && <Button className="chat-composer-icon" type="button" aria-label={dictateLabel} title={dictateLabel}
             aria-pressed={dictating} aria-busy={dictation.phase === 'finishing' || undefined} variant={dictating ? 'primary' : 'subtle'}
-            disabled={dictation.phase === 'finishing' || !props.dictation || busy || preparing} onClick={() => { if (!pending.current) void dictation.toggle(); }}>
+            disabled={dictation.phase === 'finishing' || !props.dictation || busy || preparing || !!voice?.phase} onClick={() => { if (!pending.current) void dictation.toggle(); }}>
             <ChatIcon name={dictating ? 'stop' : 'mic'} />
           </Button>}
-          {busy && onStop ? <Button key="stop" className="chat-send" type="button" aria-label={t('Stop')} title={t('Stop')}
+          {voice ? <Button key="voice" className="chat-send" type="button" variant="primary" aria-label={voiceLabel} title={voiceLabel}
+            aria-pressed={!!voice.phase} aria-busy={voice.phase === 'connecting' || voice.phase === 'closing' || undefined}
+            disabled={voice.phase === 'closing' || !voice.phase && (busy || !canSend || preparing || dictating)}
+            onClick={voice.phase ? voice.stop : voice.start}><ChatIcon name={voice.phase ? 'stop' : 'mic'} /></Button>
+          : busy && onStop ? <Button key="stop" className="chat-send" type="button" aria-label={t('Stop')} title={t('Stop')}
             onClick={onStop}><ChatIcon name="stop" /></Button>
           : <Button key="send" className="chat-send" type="submit" variant="primary" aria-label={t('Send')} title={t('Send')}
             disabled={busy || !canSend || preparing || dictating || (!draft.trim() && (media || !fileCount))}><ChatIcon name="send" /></Button>}

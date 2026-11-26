@@ -66,9 +66,28 @@ test('agent Skills keeps Local copies and Central links separate and saves only 
   };
   const { panel, central, local } = await openSkills();
   const localSkill = local.getByRole('switch', { name: 'local-notes', exact: true });
+  const providerSkill = central.getByRole('switch', { name: remote.name, exact: true });
+  const search = panel.getByRole('searchbox', { name: 'Search skills', exact: true });
+  await expect(panel.getByRole('searchbox')).toHaveCount(1);
+  await expect(localSkill).toHaveCSS('appearance', 'none');
+  await expect(providerSkill).toHaveCSS('appearance', 'none');
+  await expect(panel).not.toContainText(/A local skill\.|A Central skill\.|Attach a copy of a skill|Link to a catalog skill/);
+
+  await search.fill(' PROVIDER ');
+  await expect(providerSkill).toBeVisible();
+  await expect(localSkill).toHaveCount(0);
+  await expect(local.getByText('No matching skills.')).toBeVisible();
+  await search.press('Enter');
+  await expect(editor).toBeVisible();
+  await search.fill('local-notes');
+  await expect(localSkill).toBeVisible();
+  await expect(providerSkill).toHaveCount(0);
+  await expect(central.getByText('No matching skills.')).toBeVisible();
   await localSkill.click();
   await expect(localSkill).toBeChecked();
-  await central.getByRole('switch', { name: remote.name, exact: true }).check();
+  await search.fill('provider');
+  await expect(localSkill).toBeChecked();
+  await providerSkill.check();
   const attachment = central.getByLabel(`Attachment for ${remote.name}`, { exact: true });
   await expect(attachment).toHaveValue('reference');
   await expect(central.getByLabel(`Version for ${remote.name}`, { exact: true })).toHaveValue('latest');
@@ -88,10 +107,18 @@ test('agent Skills keeps Local copies and Central links separate and saves only 
   const dialog = page.getByRole('dialog', { name: 'Edit agent', exact: true });
   await card(page, 'Skill Agent').getByRole('button', { name: 'Edit', exact: true }).click();
   const reopened = await openSkills(dialog);
-  await expect(reopened.local.getByRole('switch', { name: 'local-notes', exact: true })).toBeChecked();
+  const reopenedLocal = reopened.local.getByRole('switch', { name: 'local-notes', exact: true });
+  await expect(reopenedLocal).toBeChecked();
   await expect(reopened.central.getByLabel(`Attachment for ${remote.name}`, { exact: true })).toHaveValue('inline');
-  // The BYOK connection is locked after reload, so removing the attachment also removes the row.
+  // Local search still works when the BYOK connection is locked after reload.
   await expect(reopened.central.getByText('Connect to a Gateway to browse Central skills.')).toBeVisible();
+  const offlineSearch = reopened.panel.getByRole('searchbox', { name: 'Search skills', exact: true });
+  await offlineSearch.fill('no-match');
+  await reopenedLocal.click();
+  await expect(reopenedLocal).toHaveCount(0);
+  await offlineSearch.clear();
+  await expect(reopenedLocal).not.toBeChecked();
+  // Removing the disconnected Central attachment also removes its row.
   const centralSkill = reopened.central.getByRole('switch', { name: remote.name, exact: true });
   await centralSkill.click();
   await expect(centralSkill).toHaveCount(0);
