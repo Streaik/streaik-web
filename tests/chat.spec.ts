@@ -1688,6 +1688,7 @@ test('Gateway chat shares context, keeps composer reasoning through approval, an
   expect(requests[0]).not.toHaveProperty('reasoning');
   await page.getByRole('button', { name: 'New chat', exact: true }).click();
   await expect(page.getByText('Chat reply 1', { exact: true })).toHaveCount(0);
+  await chooseChatModel(page);
 
   const settingsButton = page.getByRole('button', { name: 'Chat settings', exact: true });
   const settings = page.getByRole('dialog', { name: 'Chat settings', exact: true });
@@ -1707,8 +1708,9 @@ test('Gateway chat shares context, keeps composer reasoning through approval, an
   const contextBox = (await contextButton.boundingBox())!;
   const reasoningBox = (await reasoning.boundingBox())!;
   const sendBox = (await sendButton.boundingBox())!;
+  const dictateBox = await page.getByRole('button', { name: 'Dictate', exact: true }).boundingBox({ timeout: 100 }).catch(() => null);
   expect(reasoningBox.x + reasoningBox.width).toBeLessThanOrEqual(contextBox.x);
-  expect(sendBox.x - contextBox.x - contextBox.width).toBeLessThan(12);
+  expect((dictateBox ?? sendBox).x - contextBox.x - contextBox.width).toBeLessThan(12);
   expect(sendBox.x).toBeGreaterThan(contextBox.x);
   await settingsButton.click();
   const general = settings.getByRole('tabpanel', { name: 'General' });
