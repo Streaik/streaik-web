@@ -59,7 +59,7 @@ export function persistOpenAIOptions(value: NativeOptions): NativeOptions {
   }) } : value;
 }
 
-export function openAIChatOptions(value: NativeOptions): NativeOptions {
+export function openAIChatOptions(value: NativeOptions, allowClientSearch = false): NativeOptions {
   // Managed session options are native to the session endpoint, not the Responses endpoint.
   const { agent: _agent, environment: _environment, includeEncryptedReasoning, include, tools: saved, ...response } = value;
   // The opt-out is a local preference. Only the native include array goes to API Chat.
@@ -69,7 +69,7 @@ export function openAIChatOptions(value: NativeOptions): NativeOptions {
     : entries.includes(encryptedReasoningInclude) ? entries : [...entries, encryptedReasoningInclude];
   const tools = list(saved).flatMap(item => {
     const tool = object(item);
-    if (tool.type === 'tool_search' && tool.execution === 'client') return [];
+    if (tool.type === 'tool_search' && tool.execution === 'client' && !allowClientSearch) return [];
     if (tool.type === 'shell') {
       const environment = object(tool.environment);
       if (environment.type === 'local' || environment.type === 'container_reference') return [];

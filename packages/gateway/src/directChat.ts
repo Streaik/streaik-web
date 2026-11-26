@@ -78,7 +78,12 @@ export function createDirectChat(catalog: readonly CatalogProvider[], getKey: (p
           url, model: qualifiedModel.slice(slash + 1),
           direct: { provider, rates: resolved => (resolved ? price(resolved.startsWith(`${provider}/`) ? resolved : `${provider}/${resolved}`) : undefined)
             ?? price(qualifiedModel) },
-          fetch: async (_input, init = {}) => expectEventStream(await requestHttp(url, auth, init, fetcher, 'provider')),
+          fetch: async (_input, init = {}) => {
+            const beta = endpoint === '/v1/responses' && provider === 'openai' && new Headers(init.headers).get('openai-beta');
+            const selected = new Headers(auth);
+            if (beta) selected.set('OpenAI-Beta', beta);
+            return expectEventStream(await requestHttp(url, selected, init, fetcher, 'provider'));
+          },
         };
       });
     },

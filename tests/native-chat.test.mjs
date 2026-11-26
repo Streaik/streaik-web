@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { readUIMessageStream } from 'ai';
 import { createDirectChat, createGateway, nativeChatEndpoints } from '../packages/gateway/src/index.ts';
+import { isClientToolSearch, searchClientTools } from '../packages/chat/src/clientToolSearch.ts';
 
 const { providers } = JSON.parse(readFileSync(new URL('../packages/chat/src/provider-directory.json', import.meta.url)));
 const root = new URL('https://gateway.example.test/prefix/');
@@ -50,6 +52,102 @@ function response(endpoint, model, bridged = false) {
 
 async function send(transport, model, extras = {}) {
   return Array.fromAsync(await transport.sendMessages({ chatId: 'conversation', messages, body: { model }, trigger: 'submit-message', ...extras }));
+}
+
+for (const direct of [false, true]) {
+  test(`${direct ? 'Direct' : 'Gateway'} Responses merges hosted search and replays both native items`, async () => {
+    const requests = [];
+    const model = 'openai/gpt-6-luna';
+    const history = [messages[0]];
+    const namespace = { id: 'inventory', name: 'inventory' };
+    const inputSchema = { type: 'object', properties: {} };
+    const lookup = { type: 'function', name: 'lookup', parameters: inputSchema, defer_loading: true };
+    const search = { type: 'tool_search', execution: 'server' };
+    const loaded = { type: 'namespace', name: 'inventory', description: 'Inventory tools', tools: [lookup] };
+    const call = { type: 'tool_search_call', id: 'tsc_1', status: 'completed', call_id: null, execution: 'server', arguments: { paths: ['inventory'] } };
+    const output = { type: 'tool_search_output', id: 'tso_1', status: 'completed', call_id: null, execution: 'server', tools: [loaded] };
+    const fetcher = async (_url, init) => {
+      const body = JSON.parse(init.body);
+      requests.push(body);
+      if (requests.length !== 1) return response(responses, body.model);
+      const envelope = { id: 'r1', created_at: 1, model: body.model, usage: { input_tokens: 5, output_tokens: 2, total_tokens: 7 } };
+      return sse([{ type: 'response.created', response: envelope }, ...[call, output].flatMap((item, output_index) => [
+        { type: 'response.output_item.added', output_index, item: { ...item, status: 'in_progress' } },
+        { type: 'response.output_item.done', output_index, item },
+      ]), { type: 'response.completed', response: { ...envelope, output: [call, output] } }]);
+    };
+    const client = direct ? createDirectChat(providers, id => keys[id], fetcher) : createGateway(root, () => ({}), fetcher);
+    const body = { model, tools: [{ name: 'lookup', inputSchema, namespace, defer_loading: true }, { name: 'eager', inputSchema }],
+      providerMetadata: { openai: { tools: [search], reasoning: { effort: 'medium', summary: 'auto' }, include: ['reasoning.encrypted_content'],
+        store: true, previous_response_id: 'never', model: 'never' } } };
+    const stream = await client.chatTransport(responses).sendMessages({ chatId: 'conversation', messages: history, body, trigger: 'submit-message' });
+    const reply = (await Array.fromAsync(readUIMessageStream({ stream, terminateOnError: true }))).at(-1);
+    const part = reply.parts.find(part => part.toolName === 'tool_search' || part.type === 'tool-tool_search');
+    assert.equal(part?.state, 'output-available');
+    assert.equal(part.providerExecuted, true);
+    assert.deepEqual(part.output, { tools: [loaded] });
+    assert.equal(requests[0].model, direct ? 'gpt-6-luna' : model);
+    assert.deepEqual(requests[0].reasoning, { effort: 'medium', summary: 'auto' });
+    assert.deepEqual(requests[0].tools.filter(tool => tool.type === 'tool_search'), [search]);
+    assert.equal(requests[0].tools.find(tool => tool.type === 'namespace').tools[0].defer_loading, true);
+    assert.equal(requests[0].tools.find(tool => tool.name === 'eager').defer_loading, undefined);
+    const chunks = await send(client.chatTransport(responses), model, { body, messages: [...history, JSON.parse(JSON.stringify(reply)), messages[2]] });
+    assert.deepEqual(chunks.filter(chunk => chunk.type === 'error'), []);
+    for (const request of requests) {
+      assert.equal(request.store, false);
+      assert.equal(request.previous_response_id, undefined);
+      assert.ok(request.input.every(item => item.type !== 'item_reference'));
+    }
+    assert.deepEqual(requests[1].input.filter(item => item.type?.startsWith('tool_search')), [call, output]);
+  });
+
+  test(`${direct ? 'Direct' : 'Gateway'} Responses continues client search with only the selected deferred tools`, async () => {
+    const requests = [];
+    const model = 'openai/gpt-6-luna';
+    const route = { mode: direct ? 'direct' : 'gateway', endpoint: responses };
+    const scope = { id: 'inventory', name: 'inventory' };
+    const tools = [{ name: 'lookup', defer_loading: true, namespace: scope, inputSchema: { type: 'object' } },
+      { name: 'eager', inputSchema: { type: 'object' } }];
+    const body = { model, tools, providerMetadata: { openai: { tools: [{ type: 'tool_search', execution: 'client',
+      description: 'Search the catalog', parameters: { type: 'object', properties: { goal: { type: 'string' } } } }] } } };
+    const call = { type: 'tool_search_call', id: 'tsc_client', call_id: 'call_search', execution: 'client', status: 'completed', arguments: { goal: 'stock levels' } };
+    const fetcher = async (_url, init) => {
+      const request = JSON.parse(init.body);
+      requests.push(request);
+      if (requests.length !== 1) return response(responses, request.model);
+      const envelope = { id: 'r1', created_at: 1, model: request.model, usage: { input_tokens: 5, output_tokens: 2, total_tokens: 7 } };
+      return sse([{ type: 'response.created', response: envelope },
+        { type: 'response.output_item.added', output_index: 0, item: { ...call, status: 'in_progress' } },
+        { type: 'response.output_item.done', output_index: 0, item: call },
+        { type: 'response.completed', response: { ...envelope, output: [call] } }]);
+    };
+    const client = direct ? createDirectChat(providers, id => keys[id], fetcher) : createGateway(root, () => ({}), fetcher);
+    const stream = await client.chatTransport(responses).sendMessages({ chatId: 'conversation', messages: [messages[0]], body, trigger: 'submit-message' });
+    const reply = (await Array.fromAsync(readUIMessageStream({ stream, terminateOnError: true }))).at(-1);
+    const part = reply.parts.find(part => part.toolName === 'tool_search' || part.type === 'tool-tool_search');
+    assert.equal(part?.state, 'input-available');
+    assert.ok(!part.providerExecuted);
+    assert.ok(isClientToolSearch(part.input, part.toolCallId, part.callProviderMetadata));
+    assert.deepEqual(requests[0].tools.map(tool => tool.type === 'function' ? tool.name : tool.type), ['eager', 'tool_search']);
+    const transport = { async sendMessages({ messages, body }) {
+      assert.equal(body.tools, undefined);
+      const input = JSON.parse(messages.at(-1).parts[0].text);
+      assert.equal(input.goal, 'stock levels');
+      assert.deepEqual(input.catalog.map(tool => tool.name), ['lookup']);
+      return new ReadableStream({ start(controller) {
+        controller.enqueue({ type: 'text-delta', delta: '{"selectedToolNames":["not_in_catalog","lookup","lookup","eager"]}' });
+        controller.enqueue({ type: 'finish', finishReason: 'stop' });
+        controller.close();
+      } });
+    } };
+    const output = await searchClientTools({ model, instructions: 'Select tools', context: {}, transport }, part.input, tools, route, model, new AbortController().signal);
+    assert.deepEqual(output.tools[0].tools.map(tool => tool.name), ['lookup']);
+    Object.assign(part, { state: 'output-available', output });
+    const chunks = await send(client.chatTransport(responses), model, { body, messages: [messages[0], JSON.parse(JSON.stringify(reply))] });
+    assert.deepEqual(chunks.filter(chunk => chunk.type === 'error'), []);
+    assert.deepEqual(requests[1].input.filter(item => item.type?.startsWith('tool_search')), [call,
+      { type: 'tool_search_output', execution: 'client', call_id: 'call_search', status: 'completed', tools: JSON.parse(JSON.stringify(output.tools)) }]);
+  });
 }
 
 for (const endpoint of nativeChatEndpoints) {

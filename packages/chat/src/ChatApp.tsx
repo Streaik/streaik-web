@@ -52,6 +52,7 @@ import type { ChatTool } from './localPlugins';
 import { agentMcpAllows, agentMcpServers } from './agentTools';
 import { apiChatTools, chatRequestTools, chatToolCapabilities, configureChatTools } from './chatToolRequest';
 import type { ChatRequestTool } from './chatToolRequest';
+import { isClientToolSearch, searchClientTools } from './clientToolSearch';
 import { continueToolPolicy, toolComplete, toolPolicyForTurn } from './chatToolPolicy';
 import type { ChatToolPolicy, ToolProgress } from './chatToolPolicy';
 import { resolveSkillTool } from './skillTools';
@@ -84,7 +85,7 @@ export type { McpAppAuth, McpOptions, McpRemoteHeader } from './mcp';
 export { isMcpRuntime } from './mcp';
 import { chatDecisionInput, chatModelDecision, modelDecisionRouter, selectModelRoleId, useDecisionRoute } from './modelDecisions';
 import type { ModelDecision } from './modelDecisions';
-import { conversationNameRoleId, runTextAppAgent, welcomeRoleId } from './textAppAgents';
+import { conversationNameRoleId, runTextAppAgent, toolSearchRoleId, welcomeRoleId } from './textAppAgents';
 import type { TextAppRequest } from './textAppAgents';
 import { WelcomeHeading } from './WelcomeHeading';
 import { useAppTranslation } from './i18n';
@@ -424,7 +425,7 @@ type Turn = { model: string; route: ChatRoute; tools: ChatTool[]; context?: Requ
   requestTools: ChatRequestTool[];
   voiceMessage?: string; liveClient?: { id: string; lastId?: string; finished: boolean };
   catalog: readonly CatalogModel[]; skills: readonly LocalSkill[]; skillArchives?: TurnSkillArchives;
-  providerSettings?: ProviderChatSettings; reasoning?: ChatReasoning;
+  providerSettings?: ProviderChatSettings; reasoning?: ChatReasoning; toolSearchAgent?: TextAppRequest;
   toolPolicy: ChatToolPolicy; toolChoice?: ChatToolChoice; toolProgress: ToolProgress; resolved: Set<string> };
 const isApiChat = (route: ChatRoute | undefined) => !route || (route.mode === 'gateway' && route.endpoint === '/api/chat');
 
@@ -505,9 +506,10 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       async sendMessages(request) {
         const last = request.messages.at(-1);
         const previous = request.trigger === 'submit-message' && last?.role === 'assistant' ? last : undefined;
-        const { route, decision, context, providerSettings, hosted, ...body } = (request.body ?? {}) as {
+        const { route, decision, context, providerSettings, clientToolSearch, hosted, ...body } = (request.body ?? {}) as {
           model?: string; route?: ChatRoute; decision?: ModelDecision; context?: RequestContext; tools?: ChatRequestTool[];
           providerSettings?: ProviderChatSettings; hosted?: HostedTurn; reasoning?: ChatReasoning; toolChoice?: ChatToolChoice;
+          clientToolSearch?: boolean;
         };
         if (hosted) {
           if (!connection.agentBackend) throw new GatewayError('The agent backend is not configured.');
@@ -546,15 +548,15 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           const parts = message.parts.filter(part => !('toolCallId' in part && isEchoInputCall(part)));
           return parts.length === message.parts.length ? [message] : parts.some(part => part.type !== 'step-start') ? [{ ...message, parts }] : [];
         }) };
+        const provider = chatProviderRequest(providerSettings, model, clientToolSearch === true);
+        const headers = new Headers(request.headers);
+        for (const [key, value] of Object.entries(provider?.headers ?? {})) headers.set(key, value);
         if (isApiChat(route)) {
-          const provider = chatProviderRequest(providerSettings, model);
           const { tools, namespaces } = apiChatTools(body.tools ?? [], route, model);
           const providerMetadata = provider?.providerMetadata;
           const openai = providerMetadata?.openai;
           const existing = Array.isArray(openai?.tools) ? openai.tools : [];
           const metadata = namespaces.length ? { ...providerMetadata, openai: { ...openai, tools: [...existing, ...namespaces] } } : providerMetadata;
-          const headers = new Headers(request.headers);
-          for (const [key, value] of Object.entries(provider?.headers ?? {})) headers.set(key, value);
           const hasTools = tools.length || Object.values(metadata ?? {}).some(options => Array.isArray(options?.tools) && options.tools.length > 0);
           const toolChoice = body.toolChoice === 'required' && !hasTools ? undefined : body.toolChoice;
           const stream = await apiChat.sendMessages({ ...request, headers, body: { ...request.body,
@@ -562,15 +564,17 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
             messages: withRequestContext(request.messages, context) });
           return withReplyMetadata(stream, model, previous);
         }
+        const nativeOptions = route?.endpoint === '/v1/responses' && provider?.providerMetadata.openai
+          ? { providerMetadata: provider.providerMetadata } : {};
         if (route?.mode === 'gateway' && gatewayChatEndpoints.includes(route.endpoint)) {
-          const stream = await gateway.chatTransport(route.endpoint).sendMessages({ ...request,
-            body: { ...request.body, ...(context && { instructions: requestContextText(context) }) } });
+          const stream = await gateway.chatTransport(route.endpoint).sendMessages({ ...request, headers,
+            body: { ...request.body, ...nativeOptions, ...(context && { instructions: requestContextText(context) }) } });
           return withReplyMetadata(stream, model, previous);
         }
         if (route?.mode === 'direct' && direct && nativeChatEndpoints.includes(route.endpoint)) {
           // Direct native transports use this field for client-provided system context.
-          const stream = await direct.chatTransport(route.endpoint).sendMessages({ ...request,
-            body: { ...request.body, ...(context && { mcpInstructions: requestContextText(context) }) } });
+          const stream = await direct.chatTransport(route.endpoint).sendMessages({ ...request, headers,
+            body: { ...request.body, ...nativeOptions, ...(context && { mcpInstructions: requestContextText(context) }) } });
           return withReplyMetadata(stream, model, previous);
         }
         throw new GatewayError('The selected chat route is unavailable.');
@@ -649,12 +653,14 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   ];
   const last = turn?.voiceMessage ? messages.find(message => message.id === turn.voiceMessage) : messages.at(-1);
   const parts = last?.role === 'assistant' ? last.parts : [];
+  const isSearch = (part: Invocation) => !!turn?.toolSearchAgent && !turn.voiceMessage && turn.model.startsWith('openai/') &&
+    toolPartName(part) === 'tool_search' && isClientToolSearch(part.input, part.toolCallId, part.callProviderMetadata);
   const toolParts = parts.flatMap(part => {
     if (!('toolCallId' in part) || !turn || turn.hosted || (!turn.voiceMessage && turn.toolChoice === 'none') || part.providerExecuted || turn.toolProgress.seen.has(part.toolCallId)) return [];
     const name = toolPartName(part);
     if (isApiChat(turn.route) && turn.model === echoInputModel && isEchoInputCall(part)) return [{ part, tool: undefined }];
     const tool = turn.tools.find(tool => tool.definition.name === name);
-    return tool || (isApiChat(turn.route) && part.state === 'approval-requested') ? [{ part, tool }] : [];
+    return tool || isSearch(part) || (isApiChat(turn.route) && part.state === 'approval-requested') ? [{ part, tool }] : [];
   });
   const pending = toolParts.find(({ part }) => !toolComplete(part) && !turn?.resolved.has(part.toolCallId));
   const stagedResult = staged && staged.turn === turn && staged.callId === pending?.part.toolCallId ? staged.result : undefined;
@@ -662,7 +668,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
 
   function requestBody(turn: Turn) {
     return { model: turn.model, route: turn.route, context: turn.context, providerSettings: turn.providerSettings, hosted: turn.hosted,
-      tools: turn.requestTools, toolChoice: turn.toolChoice, ...(turn.reasoning && { reasoning: turn.reasoning }) };
+      tools: turn.requestTools, toolChoice: turn.toolChoice, clientToolSearch: !!turn.toolSearchAgent, ...(turn.reasoning && { reasoning: turn.reasoning }) };
   }
 
   // When Gateway review is required, stage results outside the SDK transcript until approved.
@@ -671,6 +677,12 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     if (status !== 'ready' || toolBusy || operation.current || !turn) return;
     if (!toolParts.length) {
       if (turn.liveClient && last?.role === 'assistant' && last.id !== turn.liveClient.lastId) finishLiveClient(turn, last);
+      return;
+    }
+    if (pending && isSearch(pending.part)) {
+      const api = isApiChat(turn.route);
+      if (pending.part.state === (api ? 'approval-requested' : 'input-available') && !stagedResult)
+        void completeSearch(turn, pending.part, api);
       return;
     }
     if (pending && isApiChat(turn.route)) {
@@ -706,6 +718,26 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       }
     }
   });
+
+  async function completeSearch(target: Turn, part: Invocation, review: boolean) {
+    if (!target.toolSearchAgent || operation.current) return;
+    const controller = new AbortController();
+    operation.current = controller;
+    setToolBusy(true);
+    try {
+      const output = await searchClientTools(target.toolSearchAgent, part.input, target.requestTools, target.route, target.model, controller.signal);
+      controller.signal.throwIfAborted();
+      if (review) setStaged({ turn: target, callId: part.toolCallId, result: { output } });
+      else {
+        target.resolved.add(part.toolCallId);
+        await addToolOutput({ tool: 'tool_search', toolCallId: part.toolCallId, output });
+      }
+    } catch {
+      if (!controller.signal.aborted) { setToolNotice('Could not complete the tool search.'); setTurn(undefined); }
+    } finally {
+      if (operation.current === controller) { operation.current = null; setToolBusy(false); }
+    }
+  }
 
   async function answerProviderForm(part: Invocation) {
     if (!turn || !last || !elicitProvider || part.state !== 'approval-requested') return;
@@ -815,11 +847,15 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   function createTurn(model: string): Turn {
     const seen = new Set(latestMessages.current.flatMap(message => message.parts.flatMap(part => 'toolCallId' in part ? [part.toolCallId] : [])));
     const toolPolicy = toolPolicyForTurn(preferences.toolPolicy, new Set(enabledTools.map(tool => tool.definition.name)));
+    const searchAgent = assignedAgent(agents, toolSearchRoleId);
+    const searchModel = configuredAgentModels(searchAgent).find(({ id, type }) => type !== 'decision' && compatibleById.has(id));
+    const toolSearchAgent = !hostedRoute && (isApiChat(runRoute) || runRoute.endpoint === '/v1/responses') && searchModel && searchAgent && appAgentTransport
+      ? { model: searchModel.id, instructions: searchAgent.instructions, transport: appAgentTransport, context: appAgentContext } : undefined;
     return { model, route: runRoute, tools: enabledTools, context, catalog: runCatalog, skills: chatSkills.local,
       toolPolicy, toolChoice: hostedRoute ? undefined : toolPolicy.toolChoice, toolProgress: { seen, completed: 0 }, resolved: new Set(),
-      requestTools: chatRequestTools(configuredTools),
+      requestTools: chatRequestTools(configuredTools), toolSearchAgent,
       hosted: hostedRoute && hostedSelection ? { endpoint: hostedRoute.endpoint, selection: hostedSelection } : undefined,
-      providerSettings: !hostedRoute && isApiChat(runRoute) ? turnProviderSettings : undefined,
+      providerSettings: !hostedRoute && (isApiChat(runRoute) || runRoute.endpoint === '/v1/responses') ? turnProviderSettings : undefined,
       reasoning: !hostedRoute && isApiChat(runRoute) && preferences.reasoning !== 'none' ? preferences.reasoning : undefined,
       skillArchives: chatSkills.archives.length ? { skills: chatSkills.archives, bundles: new Map() } : undefined };
   }
@@ -1165,7 +1201,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       <ChatSettingsDialog dialog={chatSettings} value={preferences} onChange={onPreferences} gateway={gatewayRoute}
         voice={voiceProtocol ? { protocol: voiceProtocol, models: textCatalog, agents: voiceAgents.map(({ key, definition }) => ({ id: key, name: definition.name })) } : undefined}
         browserToolsSupported={!hostedRoute} hasHistory={hasHistory} locked={routesLocked} localSkills={localSkills} remoteSkills={remoteSkills}
-        providerModels={!agentMode && isApiChat(route) ? selected.filter(model => !isVoiceCatalogModel(model)) : []} namespaceSupported={toolCapabilities.namespaces} toolOptionsSupported={toolCapabilities.options}
+        providerModels={agentMode ? [] : selected.filter(model => !isVoiceCatalogModel(model) &&
+          (isApiChat(route) || route.endpoint === '/v1/responses' && model.provider === 'openai'))} namespaceSupported={toolCapabilities.namespaces} toolOptionsSupported={toolCapabilities.options}
         toolRows={configuredTools.map(({ tool, source, options, namespace }) => ({ key: tool.definition.name, label: tool.definition.name, source,
           options, namespace: toolCapabilities.namespaces ? namespace?.name : undefined }))} />
       {contextOpen && <ViewContextDialog onClose={() => setContextOpen(false)} context={(busy || toolParts.length > 0) && turn ? turn.context : context}

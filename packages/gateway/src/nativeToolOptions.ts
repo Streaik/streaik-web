@@ -1,6 +1,39 @@
 import type { NativeChatEndpoint } from './index.ts';
 import { asRecord } from './directMetrics.ts';
 
+const ownedResponsesFields = new Set([
+  'model', 'input', 'messages', 'instructions', 'prompt', 'stream', 'stream_options', 'store', 'background',
+  'previous_response_id', 'conversation', 'tools', 'tool_choice', 'authorization', 'api_key', 'apikey', 'x-api-key', 'headers', 'openai',
+]);
+
+export function mergeOpenAIResponsesOptions(body: BodyInit | null | undefined, options: Record<string, unknown> | undefined,
+  registeredSearch: boolean) {
+  if ((!options && !registeredSearch) || typeof body !== 'string') return body;
+  const request = asRecord(JSON.parse(body));
+  if (!request) return body;
+  // The SDK needs the search definition to decode/replay search parts. The saved native
+  // definition is authoritative on the wire (and may be absent on a replay-only turn).
+  const generated = (Array.isArray(request.tools) ? request.tools : []).filter(tool => asRecord(tool)?.type !== 'tool_search');
+  const saved = Array.isArray(options?.tools) ? options.tools : [];
+  const clientSearch = saved.map(asRecord).some(tool => tool?.type === 'tool_search' && tool.execution === 'client');
+  const deferredFunction = (raw: unknown) => { const tool = asRecord(raw); return tool?.type === 'function' && tool.defer_loading === true; };
+  const tools = [...generated, ...saved].flatMap(raw => {
+    if (!clientSearch) return [raw];
+    const tool = asRecord(raw);
+    if (tool?.type === 'namespace' && Array.isArray(tool.tools)) {
+      const members = tool.tools.filter(member => !deferredFunction(member));
+      return members.length ? [{ ...tool, tools: members }] : [];
+    }
+    return deferredFunction(raw) ? [] : [raw];
+  });
+  for (const [key, value] of Object.entries(options ?? {})) {
+    if (!ownedResponsesFields.has(key.toLowerCase())) request[key] = value;
+  }
+  if (tools.length) request.tools = tools;
+  else { delete request.tools; delete request.tool_choice; }
+  return JSON.stringify(request);
+}
+
 /** Extend only client function definitions; let the SDK own all other protocol fields. */
 export function extendNativeTools(body: BodyInit | null | undefined, definitions: unknown, endpoint: NativeChatEndpoint, model: string) {
   const provider = model.split('/')[0]?.toLowerCase();

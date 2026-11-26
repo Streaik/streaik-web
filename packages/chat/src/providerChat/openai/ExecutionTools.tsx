@@ -128,7 +128,7 @@ export function ExecutionTools({ value, onChange }: OptionsEditor) {
         <Choice label="Tool search execution" choices={{ hosted: 'Hosted', client: 'Client' }} value={search.execution ?? 'hosted'}
           onChange={mode => setTool('tool_search', mode === 'client' ? { ...search, ...clientSearch }
             : setOption(setOption(setOption(search, 'execution'), 'parameters'), 'description'))} />
-        {search.execution === 'client' && <p role="status">{t('Client tool search is saved but not sent. Default Chat does not have a client tool-search continuation handler.')}</p>}
+        {search.execution === 'client' && <p role="status">{t('Client tool search uses the assigned Tool search agent to select from deferred tools.')}</p>}
       </>}
     </Card>
     <Card title="Programmatic tool calling">

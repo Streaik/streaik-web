@@ -492,8 +492,10 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
         if (!provider) throw new GatewayError('Choose a model supported by this gateway route.');
         if (!root) throw new GatewayError('No gateway is configured. Choose Route → Direct to chat with a provider.');
         const url = new URL(endpoint.slice(1), root).href;
-        return { url, model, gateway: true, fetch: async (_input, init) =>
-          expectEventStream(await request(url, { kind: 'chat', provider }, init)) };
+        return { url, model, gateway: true, fetch: async (_input, init) => {
+          const beta = endpoint === '/v1/responses' && provider === 'openai' && new Headers(init?.headers).get('openai-beta');
+          return expectEventStream(await request(url, { kind: 'chat', provider }, init, beta ? { 'OpenAI-Beta': beta } : undefined));
+        } };
       });
       return new DefaultChatTransport<ChatMessage>({
         api: chatUrl,

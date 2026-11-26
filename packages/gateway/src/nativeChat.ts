@@ -4,7 +4,7 @@ import { asRecord, createDirectMetrics } from './directMetrics.ts';
 import type { DirectMetricsOptions } from './directMetrics.ts';
 import { chatToolChoice, GatewayError } from './index.ts';
 import type { ChatMessage, ChatMessageMetadata, NativeChatEndpoint } from './index.ts';
-import { extendNativeTools } from './nativeToolOptions.ts';
+import { extendNativeTools, mergeOpenAIResponsesOptions } from './nativeToolOptions.ts';
 
 type NativeTarget = {
   url: string;
@@ -41,10 +41,18 @@ function nativeAttachmentMessages(messages: ChatMessage[], endpoint: NativeChatE
 
 export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (model: string) => NativeTarget): ChatTransport<ChatMessage> {
   return {
-    async sendMessages({ messages, body, abortSignal }) {
-      const { model, tools: definitions, toolChoice, instructions: gatewayInstructions, mcpInstructions } = asRecord(body) ?? {};
+    async sendMessages({ messages, body, headers, abortSignal }) {
+      const { model, tools: definitions, toolChoice, instructions: gatewayInstructions, mcpInstructions, providerMetadata } = asRecord(body) ?? {};
       if (typeof model !== 'string') throw new GatewayError('Choose a model for this route.');
       const target = resolve(model);
+      const openAIResponses = !target.requestBody && endpoint === '/v1/responses' && model.startsWith('openai/');
+      const nativeOptions = openAIResponses ? asRecord(asRecord(providerMetadata)?.openai) : undefined;
+      const nativeTools = Array.isArray(nativeOptions?.tools) ? nativeOptions.tools : [];
+      const search = nativeTools.map(asRecord).find(tool => tool?.type === 'tool_search');
+      const registerSearch = openAIResponses && (!!search || messages.some(message => message.parts.some(part =>
+        (part.type === 'dynamic-tool' && part.toolName === 'tool_search' || part.type === 'tool-tool_search') &&
+        typeof part.callProviderMetadata?.openai?.itemId === 'string')));
+      const beta = openAIResponses ? new Headers(headers).get('openai-beta') : null;
       const inputInstructions = target.gateway ? gatewayInstructions : mcpInstructions;
       const instructions = typeof inputInstructions === 'string' ? inputInstructions
         : Array.isArray(inputInstructions) && inputInstructions.every(text => typeof text === 'string')
@@ -56,23 +64,28 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
       const fetcher: typeof fetch = (input, init) => {
         if (input !== target.url || init?.method !== 'POST') throw new GatewayError('Unexpected chat request.');
         direct?.start();
-        const body = target.requestBody ? target.requestBody(init.body) : extendNativeTools(init.body, definitions, endpoint, model);
-        return target.fetch(input, body === init.body ? init : { ...init, body });
+        let body = target.requestBody ? target.requestBody(init.body) : extendNativeTools(init.body, definitions, endpoint, model);
+        if (openAIResponses) body = mergeOpenAIResponsesOptions(body, nativeOptions, registerSearch);
+        if (!beta) return target.fetch(input, body === init.body ? init : { ...init, body });
+        const outgoing = new Headers(init.headers);
+        outgoing.set('OpenAI-Beta', beta);
+        return target.fetch(input, { ...init, body, headers: outgoing });
       };
       const sdk = { baseURL, apiKey: 'supplied-by-scoped-fetch', fetch: fetcher };
-      const adapter = endpoint === '/v1/messages'
-        ? (await import('@ai-sdk/anthropic')).createAnthropic(sdk)(target.model)
-        : (await import('@ai-sdk/openai')).createOpenAI(sdk)[endpoint === '/v1/responses' ? 'responses' : 'chat'](target.model);
+      const openai = endpoint !== '/v1/messages' ? (await import('@ai-sdk/openai')).createOpenAI(sdk) : undefined;
+      const adapter = openai ? openai[endpoint === '/v1/responses' ? 'responses' : 'chat'](target.model)
+        : (await import('@ai-sdk/anthropic')).createAnthropic(sdk)(target.model);
       abortSignal?.throwIfAborted();
 
       const tools: ToolSet = Object.fromEntries((Array.isArray(definitions) ? definitions : []).map(
         ({ name, description, inputSchema }: { name: string; description?: string; inputSchema: JSONSchema7 }) =>
           [name, tool({ description, inputSchema: jsonSchema(inputSchema) })],
       ));
+      if (registerSearch && openai) tools.tool_search = openai.tools.toolSearch({ execution: search?.execution === 'client' ? 'client' : 'server' });
       let gateway: ChatMessageMetadata['gateway'];
       const result = streamText({
         model: adapter, messages: await convertToModelMessages(nativeAttachmentMessages(messages, endpoint), { tools, ignoreIncompleteToolCalls: true }),
-        instructions, tools, toolChoice: Object.keys(tools).length ? chatToolChoice(toolChoice) : undefined,
+        instructions, tools, toolChoice: Object.keys(tools).length || nativeTools.length ? chatToolChoice(toolChoice) : undefined,
         abortSignal, maxRetries: 0, includeRawChunks: target.gateway || !!direct,
         ...(endpoint === '/v1/responses' ? { providerOptions: { openai: { store: false, passThroughUnsupportedFiles: true } } }
           : endpoint === '/v1/chat/completions' && (target.gateway || model.startsWith('openai/'))

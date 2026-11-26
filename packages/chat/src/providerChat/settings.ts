@@ -15,7 +15,7 @@ function reasoningForModel(options: NativeOptions, key: string, supported: boole
 // Keep provider-native field names and values here and in the forms. Restrictions
 // apply both when editing and when a saved preference is replayed for another model.
 export const chatProviders = {
-  openai: { label: 'OpenAI', options: openAIChatOptions, headers: openAIChatHeaders, persist: persistOpenAIOptions },
+  openai: { label: 'OpenAI', options: (value: NativeOptions) => openAIChatOptions(value), headers: openAIChatHeaders, persist: persistOpenAIOptions },
   cerebras: { label: 'Cerebras', options: (value, id) => reasoningForModel(value, 'reasoning_effort', supportsGptOssEffort(id)) },
   together: { label: 'Together AI', options: (value, id) => reasoningForModel(value, 'reasoning_effort', supportsGptOssEffort(id)) },
 } satisfies Record<string, { label: string; options: (value: NativeOptions, modelId: string) => NativeOptions;
@@ -66,14 +66,14 @@ export function activeChatProviders(models: readonly ChatModel[]) {
   return groups;
 }
 
-export function chatProviderRequest(settings: ProviderChatSettings | undefined, modelId: string | undefined) {
+export function chatProviderRequest(settings: ProviderChatSettings | undefined, modelId: string | undefined, allowClientSearch = false) {
   if (!settings || !modelId) return;
   const provider = chatProviderForModel(modelId);
   if (!provider) return;
   const saved = settings[provider];
   if (!saved) return;
   const adapter = chatProviders[provider];
-  const options = adapter.options(saved, modelId);
+  const options = provider === 'openai' ? openAIChatOptions(saved, allowClientSearch) : adapter.options(saved, modelId);
   if (Object.values(options).some(value => value !== undefined)) return {
     providerMetadata: { [provider]: options }, headers: 'headers' in adapter ? adapter.headers(options) : undefined,
   };
