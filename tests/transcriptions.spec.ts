@@ -1,10 +1,14 @@
 import { expect, test } from '@playwright/test';
-import type { Locator, Page } from '@playwright/test';
+import type { Locator, Page, WebSocketRoute } from '@playwright/test';
 
 const batchModel = 'openai/gpt-4o-transcribe';
 const liveModel = 'openai/gpt-realtime-transcribe';
 const googleModel = 'google/gemini-3.5-transcribe-live';
 const googleSocket = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained';
+const deepgramModel = 'deepgram/nova-3';
+const deepgramSocket = 'wss://api.deepgram.com/v1/listen?model=nova-3';
+const assemblyAIModel = 'assemblyai/assemblyai-stt-3-7-realtime';
+const assemblyAISocket = 'wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&speech_model=assemblyai-stt-3-7-realtime';
 const file = { name: 'interview.wav', mimeType: 'audio/wav', buffer: Buffer.from('audio fixture') };
 const start = (page: Page) => page.getByRole('button', { name: 'Real-time', exact: true });
 const stop = (page: Page) => page.getByRole('button', { name: 'Stop Real-time', exact: true });
@@ -63,7 +67,7 @@ const composerModel = 'openai/gpt-transcribe';
 const composerCatalog = [
   { id: 'openai/gpt-6.1-terra', type: 'language' },
   { id: 'openai/gpt-image-2.6-sunburst', type: 'image' },
-  { id: 'openai/gemini-omni-1.2-flash', type: 'video' },
+  { id: 'google/gemini-omni-1.2-flash', type: 'video' },
 ];
 const chatComposer = (page: Page) => page.getByRole('form', { name: 'Message composer' });
 const dictateButton = (composer: Locator) => composer.getByRole('button', { name: 'Dictate', exact: true });
@@ -231,8 +235,43 @@ test('composer prefers a configured realtime model, reports failures without ret
   expect(recorded).toBe(0);
 });
 
+test('composer dictation can use Deepgram live audio and appends the final result after Stop', async ({ page }) => {
+  await mockAudio(page);
+  await page.route(`**/gateway/api/realtime/token/${deepgramModel}`, route => route.fulfill({ json: {
+    url: deepgramSocket, token: 'temporary-deepgram-token', expiresAt: Math.floor(Date.now() / 1000) + 30,
+  } }));
+  await page.routeWebSocket(/^wss:\/\/api\.deepgram\.com\/v1\/listen\?/, socket => {
+    let sent = false;
+    const result = (transcript: string, is_final: boolean) => socket.send(JSON.stringify({
+      type: 'Results', is_final, start: 0, duration: 1, channel: { alternatives: [{ transcript }] },
+    }));
+    socket.onMessage(raw => {
+      if (typeof raw !== 'string' && !sent) { sent = true; result('Live preview', false); }
+      if (typeof raw === 'string' && JSON.parse(raw).type === 'CloseStream') {
+        result('Confirmed text.', true);
+        socket.send(JSON.stringify({ type: 'Metadata', duration: 1 }));
+      }
+    });
+  });
+  await connectFixture(page, 'Deepgram', [...composerCatalog, { id: deepgramModel, type: 'transcription', tags: ['realtime'] }]);
+  await page.getByRole('button', { name: 'Agents', exact: true }).click();
+  await page.getByRole('article', { name: 'TranscriptionAgent', exact: true }).getByRole('button', { name: 'Edit', exact: true }).click();
+  const editor = page.getByRole('dialog', { name: 'Edit agent', exact: true });
+  await editor.getByRole('button', { name: 'Add model', exact: true }).click();
+  await editor.getByRole('option', { name: /nova-3/ }).click();
+  await editor.getByRole('button', { name: 'Save agent', exact: true }).click();
+  await page.getByRole('button', { name: 'New chat', exact: true }).click();
+  const composer = chatComposer(page), input = composer.getByRole('textbox');
+  await input.fill('Draft');
+  await dictateButton(composer).click();
+  await expect(input).toHaveValue('Draft Live preview');
+  await stopDictate(composer).click();
+  await expect(input).toHaveValue('Draft Confirmed text.');
+  await expect(input).toBeEditable();
+});
+
 test('Real-time follows the transcription picker and explains tagged models without a live adapter', async ({ page }) => {
-  const unsupported = 'deepgram/nova-3';
+  const unsupported = 'assemblyai/unsupported';
   await openTranscriptions(page, 'OpenAI', [
     { id: batchModel, type: 'transcription' },
     { id: googleModel, type: 'transcription', tags: ['real-time'] },
@@ -258,7 +297,7 @@ test('Real-time follows the transcription picker and explains tagged models with
   await expect(page.getByRole('option')).toHaveCount(3);
   await expect(page.getByRole('option', { name: 'gemini-3.5-transcribe-live', exact: true })).toBeVisible();
   await expect(page.getByRole('option', { name: 'gpt-4o-transcribe', exact: true })).toBeVisible();
-  await page.getByRole('option', { name: 'nova-3', exact: true }).click();
+  await page.getByRole('option', { name: 'unsupported', exact: true }).click();
   await expect(start(page)).toBeDisabled();
   await expect(start(page)).toHaveAccessibleDescription('This app cannot start a live session for the selected model.');
   await chooseModel(page, googleModel);
@@ -272,6 +311,106 @@ test('Real-time follows the transcription picker and explains tagged models with
   await chooseModel(page, batchModel);
   await expect(send).toBeEnabled();
   await expect(start(page)).toBeDisabled();
+});
+
+test('Deepgram microphone drains confirmed audio after Stop and reports a disconnect without saving interim text', async ({ page }) => {
+  await mockAudio(page);
+  await page.route(`**/gateway/api/realtime/token/${deepgramModel}`, async route => {
+    expect(await route.request().headerValue('x-deepgram-key')).toBe('fixture-provider-key');
+    expect(route.request().postDataJSON()).toEqual({});
+    await route.fulfill({ json: { url: deepgramSocket, token: 'temporary-deepgram-token', expiresAt: Math.floor(Date.now() / 1000) + 30 } });
+  });
+  let socket: WebSocketRoute | undefined, bytes = 0, end = '';
+  const result = (transcript: string, is_final: boolean, start = 0) => JSON.stringify({
+    type: 'Results', is_final, start, duration: 1, channel: { alternatives: [{ transcript }] },
+  });
+  await page.routeWebSocket(/^wss:\/\/api\.deepgram\.com\/v1\/listen\?/, ws => {
+    socket = ws;
+    bytes = 0;
+    const query = new URL(ws.url()).searchParams;
+    expect(query.get('encoding')).toBe('linear16');
+    expect(query.get('sample_rate')).toBe('16000');
+    expect(query.get('interim_results')).toBe('true');
+    expect(query.has('token')).toBe(false);
+    ws.onMessage(raw => { if (typeof raw === 'string') end = JSON.parse(raw).type; else bytes += raw.length; });
+  });
+  await openTranscriptions(page, 'Deepgram', [{ id: deepgramModel, type: 'transcription', tags: ['realtime'] }]);
+  await chooseModel(page, deepgramModel);
+  await start(page).click();
+  await expect.poll(() => bytes).toBeGreaterThan(0);
+  socket!.send(result('Unconfirmed draft', false));
+  await expect(preview(page)).toContainText('Unconfirmed draft');
+  socket!.send(result('First result.', true));
+  await expect(preview(page)).not.toContainText('Unconfirmed draft');
+  await stop(page).click();
+  await expect.poll(() => end).toBe('CloseStream');
+  await expect(page.locator('html')).toHaveAttribute('data-track', 'stopped');
+  socket!.send(result('Final result.', true, 1));
+  socket!.send(JSON.stringify({ type: 'Metadata', duration: 2 }));
+  await expect(start(page)).toBeEnabled();
+  await page.getByRole('tab', { name: 'Finished', exact: true }).click();
+  await expect(page.getByRole('article').filter({ hasText: 'First result. Final result.' })).toHaveCount(1);
+
+  const previous = socket;
+  await start(page).click();
+  await expect.poll(() => socket !== previous && bytes > 0).toBe(true);
+  socket!.send(result('Lost connection draft', false));
+  await expect(preview(page)).toContainText('Lost connection draft');
+  await socket!.close({ code: 1011 });
+  await expect(page.getByRole('alert')).toContainText('Deepgram microphone transcription disconnected');
+  await expect(page.locator('html')).toHaveAttribute('data-track', 'stopped');
+  await page.getByRole('tab', { name: 'Finished', exact: true }).click();
+  await expect(page.getByRole('article').filter({ hasText: 'Lost connection draft' })).toHaveCount(0);
+});
+
+test('AssemblyAI waits for Begin, accepts formatted turns through Termination, and cancels setup', async ({ page }) => {
+  await mockAudio(page);
+  await page.route(`**/gateway/api/realtime/token/${assemblyAIModel}`, async route => {
+    expect(await route.request().headerValue('x-assemblyai-key')).toBe('fixture-provider-key');
+    await route.fulfill({ json: { url: assemblyAISocket, token: 'temporary-assemblyai-token', expiresAt: Math.floor(Date.now() / 1000) + 60 } });
+  });
+  let socket: WebSocketRoute | undefined, frames = 0, ended = false, closed = false;
+  const turn = (transcript: string, extra = {}) => JSON.stringify({ type: 'Turn', turn_order: 0, transcript, ...extra });
+  await page.routeWebSocket(/^wss:\/\/streaming\.assemblyai\.com\/v3\/ws\?/, ws => {
+    expect(new URL(ws.url()).searchParams.get('token')).toBe('temporary-assemblyai-token');
+    socket = ws;
+    closed = false;
+    ws.onClose(() => { closed = true; });
+    ws.onMessage(raw => {
+      if (typeof raw === 'string') ended = JSON.parse(raw).type === 'Terminate';
+      else { expect(raw.length).toBeGreaterThanOrEqual(640); frames++; }
+    });
+  });
+  await openTranscriptions(page, 'AssemblyAI', [{ id: assemblyAIModel, type: 'transcription', tags: ['realtime'] }]);
+  await chooseModel(page, assemblyAIModel);
+  await start(page).click();
+  await expect.poll(() => !!socket).toBe(true);
+  await expect(page.getByText('Connecting microphone…', { exact: true })).toBeVisible();
+  expect(frames).toBe(0);
+  socket!.send(JSON.stringify({ type: 'Begin', id: 'fixture-session' }));
+  await expect.poll(() => frames).toBeGreaterThan(0);
+  socket!.send(turn('AssemblyAI draft'));
+  await expect(preview(page)).toContainText('AssemblyAI draft');
+  socket!.send(turn('assemblyai final', { end_of_turn: true }));
+  await stop(page).click();
+  await expect.poll(() => ended).toBe(true);
+  await expect(page.locator('html')).toHaveAttribute('data-track', 'stopped');
+  socket!.send(turn('AssemblyAI final.', { end_of_turn: true, turn_is_formatted: true, words: [{ start: 100, end: 800 }] }));
+  socket!.send(JSON.stringify({ type: 'Termination', audio_duration_seconds: 1 }));
+  await expect(start(page)).toBeEnabled();
+  await page.getByRole('tab', { name: 'Finished', exact: true }).click();
+  await expect(page.getByRole('article').filter({ hasText: 'AssemblyAI final.' })).toHaveCount(1);
+  await expect(page.getByRole('article').filter({ hasText: 'assemblyai final AssemblyAI final.' })).toHaveCount(0);
+
+  const previous = socket;
+  await start(page).click();
+  await expect.poll(() => socket !== previous).toBe(true);
+  await expect(page.getByText('Connecting microphone…', { exact: true })).toBeVisible();
+  await stop(page).click();
+  await expect(page.locator('html')).toHaveAttribute('data-track', 'stopped');
+  await expect.poll(() => closed).toBe(true);
+  await expect(start(page)).toBeEnabled();
+  await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
 test('all file routes, drag and drop, interrupted SSE, and scoped finished cards', async ({ page }) => {

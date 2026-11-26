@@ -4,11 +4,15 @@ import { appendDictation, selectDictationTarget } from '../packages/chat/src/com
 
 const recorded = 'openai/gpt-transcribe';
 const realtime = 'openai/gpt-live-transcribe';
-const taggedWithoutAdapter = 'deepgram/nova-3';
+const deepgram = 'deepgram/nova-3';
+const assemblyai = 'assemblyai/assemblyai-stt-3-7-realtime';
+const taggedWithoutAdapter = 'assemblyai/unsupported';
 const fileOnly = 'openai/whisper-1';
 const models = [
   { id: recorded, type: 'transcription', tags: [] },
   { id: realtime, type: 'transcription', tags: ['realtime'] },
+  { id: deepgram, type: 'transcription', tags: ['realtime'] },
+  { id: assemblyai, type: 'transcription', tags: ['realtime'] },
   { id: taggedWithoutAdapter, type: 'transcription', tags: ['realtime'] },
   { id: fileOnly, type: 'transcription', tags: [] },
 ];
@@ -20,7 +24,11 @@ test('dictation requires a configured, available transcription model and a compa
   assert.equal(selectDictationTarget([{ ...models[1], type: 'audio' }], [realtime], capture), undefined);
   assert.deepEqual(selectDictationTarget(models, [recorded, realtime], capture), { mode: 'realtime', model: realtime });
   assert.deepEqual(selectDictationTarget(models, [recorded, realtime], { ...capture, socket: false }), { mode: 'recorded', model: recorded });
-  assert.deepEqual(selectDictationTarget(models, [taggedWithoutAdapter, recorded], capture), { mode: 'recorded', model: taggedWithoutAdapter });
+  assert.deepEqual(selectDictationTarget(models, [taggedWithoutAdapter, recorded], capture), { mode: 'recorded', model: recorded });
+  assert.deepEqual(selectDictationTarget(models, [deepgram, recorded], capture), { mode: 'realtime', model: deepgram });
+  assert.deepEqual(selectDictationTarget(models, [deepgram, recorded], { ...capture, socket: false }), { mode: 'recorded', model: deepgram });
+  assert.deepEqual(selectDictationTarget(models, [assemblyai], capture), { mode: 'realtime', model: assemblyai });
+  assert.equal(selectDictationTarget(models, [assemblyai], { ...capture, socket: false }), undefined);
   assert.deepEqual(selectDictationTarget([models[0], { ...models[1], tags: [] }], [realtime, recorded], capture), { mode: 'recorded', model: recorded });
 });
 
