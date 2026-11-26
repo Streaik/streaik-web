@@ -60,7 +60,7 @@ test('the catalog discloses exact IDs and metadata, and the tools reveal content
   assert.deepEqual(activeChatTools(route, [], false, [], true).map(({ definition }) => definition.name), ['activate_skill', 'read_skill_resource']);
   assert.deepEqual(activeChatTools({ mode: 'direct', endpoint: '/v1/responses' }, [], false, [], true), []);
   const completion = [{ id: 'm', role: 'assistant', parts: [{ type: 'dynamic-tool', toolName: 'activate_skill', toolCallId: 'a',
-    state: 'output-available', input: { skill_id: id }, output: active }] }];
+    state: 'output-available', input: { skill_id: id }, output: active, approval: { id: 'review', approved: true } }] }];
   assert.deepEqual(filterLocalToolReplay(completion, skillTools, true, new Set([id])), completion);
   assert.deepEqual(filterLocalToolReplay(completion, skillTools, true, new Set()), []);
 });

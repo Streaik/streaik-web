@@ -105,12 +105,13 @@ test('chat tool configuration sends namespaced options and defaults leave the to
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   await composer.fill('Send configured tools'); await composer.press('Enter');
   await expect(page.getByText('Tool configuration reply 1')).toBeVisible();
-  expect(requests[0]).toMatchObject({ clientToolResultApproval: true, providerMetadata: { openai: { tools: [
+  expect(requests[0]).toMatchObject({ providerMetadata: { openai: { tools: [
     { type: 'namespace', name: 'local', tools: expect.arrayContaining([
       expect.objectContaining({ name: 'local_ai_models_search', allowed_callers: ['programmatic'], defer_loading: true }),
       expect.objectContaining({ name: 'local_ai_providers_list', allowed_callers: ['programmatic'] }),
     ]) },
   ] } } });
+  expect(requests[0]).not.toHaveProperty('clientToolResultApproval');
   expect(requests[0]).not.toHaveProperty('tools');
   await open(); await tab();
   await settings.getByRole('button', { name: 'Defaults', exact: true }).click();
@@ -372,7 +373,7 @@ test('local Skills tabs persist versions and chat progressively discloses approv
     expect(system).toEqual({ systemInformation: { appName: expect.any(String), timezone: expect.any(String) } });
     expect(user).toEqual({ preferredLanguage: 'en', darkMode: expect.any(Boolean) });
     expect(body.tools.map((tool: { name: string }) => tool.name)).toEqual(['activate_skill', 'read_skill_resource']);
-    expect(body.clientToolResultApproval).toBe(true);
+    expect(body).not.toHaveProperty('clientToolResultApproval');
     const number = requests.length;
     if (number === 1) expect(JSON.stringify(body)).not.toContain(marker);
     if (number === 2) {
@@ -539,7 +540,7 @@ test('chat settings list and remember remote skills without downloading until th
     const catalog = JSON.parse(body.messages[0].parts[0].text).availableSkills;
     expect(catalog.skills).toMatchObject([{ skill_id: id, name, description }]);
     expect(body.tools.map((tool: { name: string }) => tool.name)).toEqual(['activate_skill', 'read_skill_resource']);
-    expect(body.clientToolResultApproval).toBe(true);
+    expect(body).not.toHaveProperty('clientToolResultApproval');
     const serialized = JSON.stringify(body);
     expect(downloads).toBe(number === 1 ? 0 : 1);
     if (number === 1) expect(serialized).not.toContain(instructions);
@@ -1383,7 +1384,7 @@ for (const approved of [true, false]) test(`MCP composer discovers resources and
     const headers = { 'x-vercel-ai-ui-message-stream': 'v1', 'content-type': 'text/event-stream' };
     if (requests === 1) {
       expect(body.tools.map((tool: { name: string }) => tool.name)).toContain('read_resource');
-      expect(body.clientToolResultApproval).toBe(true);
+      expect(body).not.toHaveProperty('clientToolResultApproval');
       expect(wire).toContain(promptText);
       expect(wire).toContain(templateText);
       expect(wire).not.toContain(privateText);
@@ -1650,10 +1651,10 @@ test('OpenAI chat settings pair fields when wide and persist the encrypted reaso
   expect(requests[0].providerMetadata).toEqual({ openai: { include: [] } });
 });
 
-test('Gateway chat settings share context and replay catalog and approved text-only history tools once', async ({ page }) => {
+test('Gateway chat shares context, keeps composer reasoning through approval, and replays approved results once', async ({ page }) => {
   await mockModels(page);
   const requests: { messages: { role: string; parts: { text?: string; toolCallId?: string; output?: unknown }[] }[];
-    tools?: { name: string }[]; clientToolResultApproval?: boolean; providerMetadata?: unknown }[] = [];
+    tools?: { name: string }[]; reasoning?: string; providerMetadata?: unknown }[] = [];
   const privateText = 'An archived juniper garden';
   const catalogTool = 'local_ai_models_search';
   const historyTool = 'local_conversations_search_text';
@@ -1684,18 +1685,29 @@ test('Gateway chat settings share context and replay catalog and approved text-o
   await expect(page.getByText('Chat reply 1', { exact: true })).toBeVisible();
   expect(requests[0].tools).toBeUndefined();
   expect(requests[0].providerMetadata).toBeUndefined();
+  expect(requests[0]).not.toHaveProperty('reasoning');
   await page.getByRole('button', { name: 'New chat', exact: true }).click();
   await expect(page.getByText('Chat reply 1', { exact: true })).toHaveCount(0);
 
   const settingsButton = page.getByRole('button', { name: 'Chat settings', exact: true });
   const settings = page.getByRole('dialog', { name: 'Chat settings', exact: true });
   const contextButton = page.getByRole('button', { name: 'View context', exact: true });
+  const reasoning = page.getByRole('combobox', { name: 'Reasoning', exact: true });
+  const chooseReasoning = async (label: string) => {
+    if (await reasoning.evaluate(el => el.tagName === 'SELECT')) await reasoning.selectOption({ label });
+    else {
+      await reasoning.click();
+      await page.getByRole('option', { name: label, exact: true }).click();
+    }
+  };
   await expect(settingsButton).toHaveText('');
   await expect(contextButton).toHaveText('');
   const sendButton = page.getByRole('button', { name: 'Send', exact: true });
   await expect(sendButton).toBeVisible();
   const contextBox = (await contextButton.boundingBox())!;
+  const reasoningBox = (await reasoning.boundingBox())!;
   const sendBox = (await sendButton.boundingBox())!;
+  expect(reasoningBox.x + reasoningBox.width).toBeLessThanOrEqual(contextBox.x);
   expect(sendBox.x - contextBox.x - contextBox.width).toBeLessThan(12);
   expect(sendBox.x).toBeGreaterThan(contextBox.x);
   await settingsButton.click();
@@ -1753,6 +1765,7 @@ test('Gateway chat settings share context and replay catalog and approved text-o
   await catalogCard.getByRole('button', { name: 'Expand all' }).click();
   await expect(catalogCard.getByRole('tree', { name: 'JSON' })).toContainText('query');
   await context.getByRole('button', { name: 'Close' }).click();
+  await chooseReasoning('Medium');
   await send('Find earlier conversations and current models.');
   const review = page.getByRole('dialog', { name: 'Review tool result' });
   await expect(review.getByRole('tab', { name: 'Structured' })).toHaveAttribute('aria-selected', 'true');
@@ -1761,7 +1774,8 @@ test('Gateway chat settings share context and replay catalog and approved text-o
   await structuredResult.getByRole('button', { name: 'Expand all' }).click();
   await expect(structuredResult).toContainText('imagerouter/a/b');
   expect(requests.length).toBe(2);
-  expect(requests[1].clientToolResultApproval).toBe(true);
+  expect(requests[1]).not.toHaveProperty('clientToolResultApproval');
+  expect(requests[1].reasoning).toBe('medium');
   expect(JSON.stringify(requests[1])).not.toContain(privateText);
   expect(requests[1].messages.filter(message => message.role === 'system')).toHaveLength(1);
   expect(requests[1].messages[0].parts.map(part => JSON.parse(part.text!))).toEqual(contextParts);
@@ -1775,6 +1789,7 @@ test('Gateway chat settings share context and replay catalog and approved text-o
   await review.getByRole('button', { name: 'Approve and share' }).click();
   await expect(page.getByText('Chat reply 3', { exact: true })).toBeVisible();
   expect(requests).toHaveLength(3);
+  expect(requests[2].reasoning).toBe('medium');
   expect(betaHeaders).toEqual([null, 'responses_multi_agent=v1', 'responses_multi_agent=v1']);
   for (const request of requests.slice(1)) expect(request.providerMetadata).toEqual({ openai: {
     service_tier: 'flex', reasoning: { effort: 'xhigh', context: 'all_turns', summary: 'auto', mode: 'standard' },
@@ -1811,9 +1826,11 @@ test('Gateway chat settings share context and replay catalog and approved text-o
   await settings.getByRole('tab', { name: 'Tools' }).click();
   await history.uncheck();
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  await chooseReasoning('None');
   await send('Continue without the history plugin.');
   await expect(page.getByText('Chat reply 4', { exact: true })).toBeVisible();
   expect(requests[3].tools).toHaveLength(5);
+  expect(requests[3]).not.toHaveProperty('reasoning');
   expect(JSON.stringify(requests[3])).not.toContain(privateText);
   expect(JSON.stringify(requests[3])).not.toContain('history-call');
   expect(requests[3].messages.filter(message => message.role === 'system')).toHaveLength(1);

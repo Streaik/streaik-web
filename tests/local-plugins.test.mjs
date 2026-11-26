@@ -93,12 +93,12 @@ test('context is request-only and disabled local results do not leak through rep
   const requested = withRequestContext(filterLocalToolReplay(messages, tools.map(tool => tool.definition)), context);
   assert.equal(requested[0].role, 'system');
   assert.deepEqual(requested[0].parts.map(part => JSON.parse(part.text)), [context.system, context.user]);
-  assert.deepEqual(requested[1].parts, [mcpPart, localPart]);
+  assert.equal(requested.length, 1);
   const directDefinitions = activeChatTools(direct, selected, true, []).map(tool => tool.definition);
   assert.deepEqual(filterLocalToolReplay(messages, directDefinitions, false)[0].parts, [mcpPart, localPart]);
   assert.deepEqual(filterLocalToolReplay(messages, [], false)[0].parts, [mcpPart]);
   const filtered = filterLocalToolReplay(messages, []);
-  assert.deepEqual(filtered[0].parts, [mcpPart]);
+  assert.deepEqual(filtered, []);
   assert.equal(messages[0].parts.length, 3);
 });
 
@@ -110,10 +110,11 @@ test('approved and declined client results replay with signatures only on API ch
   const abandoned = { ...base, toolCallId: 'three', state: 'approval-requested', approval: { id: 'third', signature: 'signed-third' } };
   const legacyProviderApproval = { ...base, toolCallId: 'old-provider', providerExecuted: true, state: 'approval-responded',
     approval: { id: 'old', signature: 'signed-old', approved: true } };
-  const messages = [{ id: 'assistant', role: 'assistant', parts: [approved, declined, abandoned, legacyProviderApproval] }];
-  assert.deepEqual(filterLocalToolReplay(messages, [])[0].parts, [approved, declined]);
+  const serverResult = { ...base, toolCallId: 'hosted', providerExecuted: true, state: 'output-available', output: 'provider result' };
+  const messages = [{ id: 'assistant', role: 'assistant', parts: [approved, declined, abandoned, legacyProviderApproval, serverResult] }];
+  assert.deepEqual(filterLocalToolReplay(messages, [])[0].parts, [approved, declined, serverResult]);
   const native = filterLocalToolReplay(messages, [], false)[0].parts;
-  assert.deepEqual(native.map(part => part.state), ['output-available', 'output-available']);
-  assert.deepEqual(native.map(part => part.output), [{ result: 'approved' }, 'The user declined to share this tool result.']);
+  assert.deepEqual(native.map(part => part.state), ['output-available', 'output-available', 'output-available']);
+  assert.deepEqual(native.map(part => part.output), [{ result: 'approved' }, 'The user declined to share this tool result.', 'provider result']);
   assert.doesNotMatch(JSON.stringify(native), /signed-|three|old-provider/);
 });

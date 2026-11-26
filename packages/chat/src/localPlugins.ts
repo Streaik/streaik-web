@@ -219,10 +219,10 @@ export function filterLocalToolReplay(messages: ChatMessage[], definitions: read
     const parts = message.parts.flatMap((part): ChatMessage['parts'] => {
       const name = toolPartName(part);
       if (!name || !('toolCallId' in part)) return [part];
-      const complete = part.state === 'output-available' || part.state === 'output-error' ||
-        (part.state === 'approval-responded' && part.approval.approved === false);
-      const unapproved = apiChat && !part.providerExecuted && (!part.approval?.id ||
-        part.approval.approved !== (part.state !== 'approval-responded'));
+      const declined = part.state === 'approval-responded' && part.approval?.approved === false;
+      const complete = part.state === 'output-available' || part.state === 'output-error' || declined;
+      const reviewed = part.approval?.id?.trim() && (declined || part.approval.approved === true);
+      const unapproved = apiChat && !part.providerExecuted && !reviewed;
       const skillCall = name === activateSkill || name === readSkillResource;
       const skillId = skillCall && part.input && typeof part.input === 'object' && 'skill_id' in part.input ? part.input.skill_id : undefined;
       const sharesSkill = skillCall && part.state === 'output-available' &&

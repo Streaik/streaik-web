@@ -106,7 +106,7 @@ test('agent tool configuration preserves portable fields and auto-attaches only 
 
   await page.route('**/gateway/api/chat', route => {
     const body = route.request().postDataJSON();
-    expect(body.clientToolResultApproval).toBe(true);
+    expect(body).not.toHaveProperty('clientToolResultApproval');
     expect(body.providerMetadata.openai.tools).toMatchObject([{ type: 'namespace', name: 'inventory', tools: [
       { name: expect.stringMatching(/lookup$/), allowed_callers: ['direct'] },
     ] }]);

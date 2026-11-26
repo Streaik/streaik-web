@@ -92,7 +92,7 @@ async function exerciseChat(page: Page, approve: boolean, manual = false, reject
     const sent = route.request().postDataJSON();
     const tool = sent.tools.map((tool: { name: string }) => tool.name).find((name: string) => name.endsWith('_OpenAIImages_CreateImage'));
     expect(sent.model).toBe(routed ? candidate : model);
-    expect(sent.clientToolResultApproval).toBe(true);
+    expect(sent).not.toHaveProperty('clientToolResultApproval');
     expect(tool).toMatch(manual ? /^mcp_[\w-]+_OpenAIImages_CreateImage$/ : /^mcp_openai_images_OpenAIImages_CreateImage$/);
     expect(sent.tools.map((tool: { name: string }) => tool.name).filter((name: string) => name.startsWith('mcp_'))).toHaveLength(3);
     const headers = { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' };
