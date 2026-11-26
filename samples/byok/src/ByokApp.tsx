@@ -32,7 +32,7 @@ export function ByokApp({ appName, base, agentBase, mcpConfig, enableKeylessEcho
   const [busy, setBusy] = useState(false);
   const [gateway] = useState(() => createGateway(base, (request) => {
     const headers = providerHeaders(keys.current, request);
-    if ((request.kind === 'chat' || request.kind === 'image' || request.kind === 'video' || request.kind === 'transcription' || request.kind === 'realtime') && request.provider !== 'echo' && ![...headers].length) throw new GatewayError('Set or unlock the provider key for this model.');
+    if ((request.kind === 'chat' || request.kind === 'image' || request.kind === 'video' || request.kind === 'transcription' || request.kind === 'speech' || request.kind === 'realtime') && request.provider !== 'echo' && ![...headers].length) throw new GatewayError('Set or unlock the provider key for this model.');
     return headers;
   }));
   const [direct] = useState(() => createDirectChat(providerDirectory.providers, (provider) =>

@@ -93,6 +93,8 @@ import { useImageRoute } from './imageRoute';
 import type { ImageRouteSetting } from './imageRoute';
 import { useTranscriptionRoute } from './transcriptionPreferences';
 import type { TranscriptionRouteSetting } from './transcriptionPreferences';
+import { useSpeechRoute } from './speechPreferences';
+import type { SpeechRouteSetting } from './speechPreferences';
 import { useVideoJobs } from './useVideoJobs';
 export { BrowserRouter as ChatRouter } from 'react-router';
 export { localizationReady, useAppTranslation } from './i18n';
@@ -104,6 +106,7 @@ const AssistantMarkdown = lazy(() => import('./AssistantMarkdown'));
 const ImagesView = lazy(() => import('./ImagesView'));
 const VideosView = lazy(() => import('./VideosView'));
 const TranscriptionsView = lazy(() => import('./TranscriptionsView'));
+const SpeechView = lazy(() => import('./SpeechView'));
 
 type Connection = {
   ready: boolean;
@@ -204,6 +207,7 @@ export function ChatApp({ appName = 'Streaik', gateway, connection, agents }: { 
   const decisions = useDecisionRoute(scope);
   const images = useImageRoute(scope);
   const transcriptions = useTranscriptionRoute(scope);
+  const speech = useSpeechRoute(scope);
   const models = useModels(route.mode === 'direct' ? connection.direct : gateway, connection.ready, connection.modelRevision ?? 0, scope);
   // Reload preferences on profile changes without remounting the user settings dialog.
   let preferences = profile.preferences;
@@ -219,7 +223,7 @@ export function ChatApp({ appName = 'Streaik', gateway, connection, agents }: { 
     <AgentsProvider config={agents} scope={scope}>
       <McpElicitationProvider key={JSON.stringify([scope, mcpSession])} enabled={preferences.mcp.formElicitation}>
         <HistoryChat appName={appName} gateway={gateway} connection={connection} scope={scope} models={models} mcpSession={mcpSession}
-          route={route} onRoute={setRoute} decisions={decisions} images={images} transcriptions={transcriptions} onSettings={() => settings.current?.showModal()}
+          route={route} onRoute={setRoute} decisions={decisions} images={images} transcriptions={transcriptions} speech={speech} onSettings={() => settings.current?.showModal()}
           preferences={preferences} onPreferences={updatePreferences} />
       </McpElicitationProvider>
       <SettingsDialog dialog={settings} apiKeySettings={connection.apiKeySettings} accountSettings={connection.settings}
@@ -228,13 +232,14 @@ export function ChatApp({ appName = 'Streaik', gateway, connection, agents }: { 
   </ThemeRoot>;
 }
 
-function HistoryChat({ appName, gateway, connection, scope, models, route, onRoute, decisions, images, transcriptions, onSettings, preferences, onPreferences, mcpSession }: {
+function HistoryChat({ appName, gateway, connection, scope, models, route, onRoute, decisions, images, transcriptions, speech, onSettings, preferences, onPreferences, mcpSession }: {
   appName: string; gateway: Gateway; connection: Connection; scope?: string; models: ReturnType<typeof useModels>; onSettings: () => void;
   mcpSession: boolean;
   route: ChatRoute; onRoute: (route: ChatRoute) => void;
   decisions: ReturnType<typeof useDecisionRoute>;
   images: ImageRouteSetting;
   transcriptions: TranscriptionRouteSetting;
+  speech: SpeechRouteSetting;
   preferences: ChatPreferences; onPreferences: (preferences: ChatPreferences) => void;
 }) {
   const { t } = useAppTranslation();
@@ -398,7 +403,7 @@ function HistoryChat({ appName, gateway, connection, scope, models, route, onRou
       if (target.kind !== 'conversation' || target.id !== item.id) void navigate(conversationPath(item.id));
       if (window.matchMedia('(max-width: 42rem)').matches) setNav(false);
     }} onPin={togglePin} onDelete={remove}
-    models={models} route={route} onRoute={onRoute} decisions={decisions} images={images} videos={videos} transcriptions={transcriptions} scope={scope} onSettings={onSettings}
+    models={models} route={route} onRoute={onRoute} decisions={decisions} images={images} videos={videos} transcriptions={transcriptions} speech={speech} scope={scope} onSettings={onSettings}
     preferences={preferences} onPreferences={onPreferences}
     localSkills={localSkills} remoteSkills={remoteSkills} mcpServers={mcpServers} readHistory={scope ? () => latestHistory.current : undefined} />;
 }
@@ -413,7 +418,7 @@ type Turn = { model: string; route: ChatRoute; tools: ChatTool[]; context?: Requ
   toolPolicy: ChatToolPolicy; toolChoice?: ChatToolChoice; toolProgress: ToolProgress; resolved: Set<string> };
 const isApiChat = (route: ChatRoute | undefined) => !route || (route.mode === 'gateway' && route.endpoint === '/api/chat');
 
-function ChatSession({ appName, gateway, connection, conversation, history, searchHistory, searchConversationText, storageIssue, locationIssue, nav, view, onView, toggleNav, onPersist, onNew, onSwitch, onPin, onDelete, models, route, onRoute, decisions, images, videos, transcriptions, scope, onSettings, preferences, onPreferences, localSkills, remoteSkills, mcpServers, readHistory }: {
+function ChatSession({ appName, gateway, connection, conversation, history, searchHistory, searchConversationText, storageIssue, locationIssue, nav, view, onView, toggleNav, onPersist, onNew, onSwitch, onPin, onDelete, models, route, onRoute, decisions, images, videos, transcriptions, speech, scope, onSettings, preferences, onPreferences, localSkills, remoteSkills, mcpServers, readHistory }: {
   appName: string; gateway: Gateway; connection: Connection; conversation: Conversation; history: Conversation[]; storageIssue: string;
   searchHistory: SearchHistory;
   searchConversationText?: SearchConversationText;
@@ -427,6 +432,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   images: ImageRouteSetting;
   videos: ReturnType<typeof useVideoJobs>;
   transcriptions: TranscriptionRouteSetting;
+  speech: SpeechRouteSetting;
   scope?: string;
   preferences: ChatPreferences; onPreferences: (preferences: ChatPreferences) => void;
   localSkills: LocalSkills;
@@ -475,9 +481,9 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const fallbackSource = runRoute.mode !== route.mode ? runRoute.mode === 'direct' ? direct : gateway : undefined;
   const fallbackModels = useModels(fallbackSource, connection.ready && agentMode && !hostedRoute, revision, scope);
   // Agents and media use the gateway catalog even when chat is routed directly.
-  const mediaView = view === 'images' || view === 'videos' || view === 'transcriptions';
+  const mediaView = view === 'images' || view === 'videos' || view === 'transcriptions' || view === 'speech';
   const dictateChat = preferences.dictate && view === 'chat' && !locationIssue;
-  const dictateView = dictateChat || preferences.dictate && (view === 'images' || view === 'videos');
+  const dictateView = dictateChat || preferences.dictate && (view === 'images' || view === 'videos' || view === 'speech');
   const transcriptionModelIds = dictateView ? defaultAgentModelIds(assignedAgent(agents, 'transcription')) : [];
   const fetchGatewayModels = route.mode === 'direct' && (view === 'agents' ||
     gateway.historyScope !== 'direct' && (mediaView || transcriptionModelIds.length > 0));
@@ -852,7 +858,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       peer: typeof RTCPeerConnection !== 'undefined', recorder: !!dictationFormat(),
     });
   const dictation: ComposerDictation = dictateView ? dictationTarget ? { ...dictationTarget, gateway } : null : undefined;
-  const imageRouter = view === 'images' && mediaModels ? modelDecisionRouter(agents, mediaModels.catalog, decisions.selected) : undefined;
+  const mediaRouter = (view === 'images' || view === 'speech') && mediaModels ? modelDecisionRouter(agents, mediaModels.catalog, decisions.selected) : undefined;
   const mediaStatus = !hasGateway ? t('No gateway is configured.') : !connection.ready ? connection.emptyMessage
     : !mediaModels ? t('Loading models…') : mediaModels.error;
   const agentModelStatus = !connection.ready ? t('Connect to the gateway to browse models. You can still edit this agent.')
@@ -1052,6 +1058,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     decisions: connection.account && hasDecisions ? decisions : undefined,
     images: hasGateway ? images : undefined,
     transcriptions: hasGateway ? transcriptions : undefined,
+    speech: hasGateway ? speech : undefined,
   });
   const modelStatus = !connection.ready ? connection.emptyMessage : agentMode
     ? agentChat.checking ? t('Connecting to the agent backend…')
@@ -1154,10 +1161,13 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
        <footer className="chat-disclaimer" hidden={view !== 'chat' || !!locationIssue}>{t('{{appName}} can make mistakes. Check important information.', { appName })}</footer>
       {view === 'images' ? <Suspense fallback={<main className="catalog-main"><p role="status">{t('Loading images…')}</p></main>}>
         <ImagesView gateway={gateway} scope={scope} route={images.selected} toolbar={mediaToolbar} catalog={mediaModels?.catalog}
-          loading={hasGateway && connection.ready && !mediaModels} router={imageRouter} status={mediaStatus} dictation={dictation} />
+          loading={hasGateway && connection.ready && !mediaModels} router={mediaRouter} status={mediaStatus} dictation={dictation} />
       </Suspense> : view === 'videos' ? <Suspense fallback={<main className="catalog-main"><p role="status">{t('Loading videos…')}</p></main>}>
         <VideosView gateway={gateway} library={videos} toolbar={mediaToolbar} catalog={mediaModels?.catalog}
           loading={hasGateway && connection.ready && !mediaModels} ready={hasGateway && connection.ready} status={mediaStatus} dictation={dictation} />
+      </Suspense> : view === 'speech' ? <Suspense fallback={<main className="catalog-main"><p role="status">{t('Loading speech…')}</p></main>}>
+        <SpeechView key={scope} gateway={gateway} scope={scope} route={speech.selected} toolbar={mediaToolbar} catalog={mediaModels?.catalog}
+          loading={hasGateway && connection.ready && !mediaModels} router={mediaRouter} status={mediaStatus} dictation={dictation} />
       </Suspense> : view === 'transcriptions' ? <Suspense fallback={<main className="catalog-main"><p role="status">{t('Loading transcriptions…')}</p></main>}>
         <TranscriptionsView gateway={gateway} scope={scope} route={transcriptions.selected} toolbar={mediaToolbar} catalog={mediaModels?.catalog}
           menuContainer={menuContainer} loading={hasGateway && connection.ready && !mediaModels} status={mediaStatus} splitting={preferences.transcriptionSplit} />

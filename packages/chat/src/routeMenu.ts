@@ -1,8 +1,9 @@
-import { gatewayChatEndpoints, gatewayDecisionEndpoints, gatewayImageEndpoints, gatewayTranscriptionEndpoints } from '@streaik/gateway';
+import { gatewayChatEndpoints, gatewayDecisionEndpoints, gatewayImageEndpoints, gatewaySpeechEndpoints, gatewayTranscriptionEndpoints } from '@streaik/gateway';
 import type { ChatRoute, NativeChatEndpoint } from '@streaik/gateway';
 import type { ChatView } from './ChatNavigation';
 import type { ImageRouteSetting } from './imageRoute';
 import type { TranscriptionRouteSetting } from './transcriptionPreferences';
+import type { SpeechRouteSetting } from './speechPreferences';
 import type { DecisionRoute } from './modelDecisions';
 import type { AgentChatRoute } from './agentChat';
 
@@ -20,13 +21,14 @@ function choices<T extends string>(id: string, selected: string, endpoints: read
   return { id, selected, submenu, options: endpoints.map(value => ({ value, label: label(value), onSelect: () => onSelect(value) })) };
 }
 
-export function pageRouteMenu(view: ChatView, { chat, agents, decisions, images, transcriptions }: {
+export function pageRouteMenu(view: ChatView, { chat, agents, decisions, images, transcriptions, speech }: {
   chat?: { selected: ChatRoute; direct?: readonly NativeChatEndpoint[]; disabled: boolean; onSelect: (route: ChatRoute) => void };
   agents?: { selected?: AgentChatRoute; hosted?: boolean; gateway: boolean; direct?: readonly NativeChatEndpoint[];
     disabled: boolean; onSelect: (route: AgentChatRoute) => void };
   decisions?: { selected: DecisionRoute; onSelect: (route: DecisionRoute) => void };
   images?: ImageRouteSetting;
   transcriptions?: TranscriptionRouteSetting;
+  speech?: SpeechRouteSetting;
 }): RouteMenu | undefined {
   const decisionGroup = decisions && choices('decisions', decisions.selected, ['off', ...gatewayDecisionEndpoints] as const,
     decisions.onSelect, { label: 'Decisions' }, endpoint => endpoint === 'off' ? 'Off' : endpoint);
@@ -61,5 +63,12 @@ export function pageRouteMenu(view: ChatView, { chat, agents, decisions, images,
     }
     case 'transcriptions':
       if (transcriptions) return { groups: [choices('transcriptions', transcriptions.selected, gatewayTranscriptionEndpoints, transcriptions.onSelect)] };
+      break;
+    case 'speech': {
+      if (!speech) return;
+      const groups = [choices('speech', speech.selected, gatewaySpeechEndpoints, speech.onSelect)];
+      if (decisionGroup) groups.push(decisionGroup);
+      return { groups };
+    }
   }
 }

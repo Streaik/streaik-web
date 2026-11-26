@@ -7,6 +7,8 @@ import { imageRequestBody, isImageEndpoint, readImageResponse } from './images.t
 import type { GatewayImageEndpoint, ImageRequest, ImageResponse } from './images.ts';
 import { readVideoOperation, readVideoStatus, videoOperationParts } from './videos.ts';
 import type { VideoRequest, VideoStatus } from './videos.ts';
+import { isSpeechEndpoint, readSpeech, speechRequestBody } from './speech.ts';
+import type { GatewaySpeechEndpoint, SpeechChunk, SpeechRequest } from './speech.ts';
 import { googleLiveTranscriptionSetup, isTranscriptionEndpoint, liveTranscriptionProvider, openAITranscriptionSession, readLiveTranscriptionCredential, readNativeTranscript, readTranscript, readTranscriptStream, supportsFileTranscription, transcriptionBody } from './transcriptions.ts';
 import type { GatewayTranscriptionEndpoint, LiveTranscriptionOptions, TranscriptionOptions } from './transcriptions.ts';
 export { deepgramTranscriptionSwitches, gatewayTranscriptionEndpoints, googleLiveTranscriptionSetup, isLiveTranscriptionModel, isTranscriptionEndpoint, openAITranscriptionFormats, openAITranscriptionSocket, supportsFileTranscription, transcriptionFileAccept, transcriptionMediaType, transcriptionUploadLimit, usesTranscriptionWebSocket } from './transcriptions.ts';
@@ -22,6 +24,8 @@ export type { DecisionChoice, GatewayDecisionEndpoint } from './decisionChoice.t
 export { gatewayImageEndpoints, imageBatchSizes, imageSource, isImageEndpoint, maxImageCount } from './images.ts';
 export type { GatewayImageEndpoint, ImageFileInput, ImageInput, ImageJsonObject, ImageOptions, ImageProviderOptions, ImageRequest, ImageResponse } from './images.ts';
 export type { VideoAsset, VideoRequest, VideoStatus } from './videos.ts';
+export { gatewaySpeechEndpoints, isSpeechEndpoint, speechFormats } from './speech.ts';
+export type { GatewaySpeechEndpoint, SpeechChunk, SpeechOptions, SpeechProviderConfig, SpeechRequest, SpeechResponse } from './speech.ts';
 export type { TokenRates } from './tokenPricing.ts';
 
 export const nativeChatEndpoints = ['/v1/responses', '/v1/messages', '/v1/chat/completions'] as const;
@@ -58,7 +62,7 @@ import type { RemoteSkill, RemoteSkillVersion, SkillPage, SkillPageOptions, Skil
 export type { RemoteSkill, RemoteSkillVersion, SkillPage, SkillPageOptions, SkillUploadTargets } from './skills.ts';
 export { maxSkillZipBytes } from './skills.ts';
 
-export type CredentialRequest = { kind: 'models' } | { kind: 'chat' | 'decision' | 'image' | 'video' | 'skill' | 'transcription' | 'realtime'; provider: string };
+export type CredentialRequest = { kind: 'models' } | { kind: 'chat' | 'decision' | 'image' | 'video' | 'skill' | 'transcription' | 'speech' | 'realtime'; provider: string };
 export type Credentials = (request: CredentialRequest) => HeadersInit | Promise<HeadersInit>;
 export type ChatModel = { id: string; name: string; provider: string };
 export type CatalogModel = ChatModel & {
@@ -345,6 +349,20 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
         throw new GatewayError('The gateway returned an unreadable image response.');
       }
       return readImageResponse(endpoint, data, image.model);
+    },
+    async generateSpeech(endpoint: GatewaySpeechEndpoint, speech: SpeechRequest, signal?: AbortSignal, onChunk?: SpeechChunk) {
+      if (!isSpeechEndpoint(endpoint)) throw new GatewayError('The selected speech route is unavailable.');
+      if (!root) throw new GatewayError('No gateway is configured.');
+      const match = /^([a-z0-9-]+)\/(\S+)$/.exec(speech.model);
+      if (!match) throw new GatewayError('Choose a valid speech model.');
+      if (!speech.text.trim()) throw new GatewayError('Enter text to generate speech.');
+      const body = speechRequestBody(endpoint, speech, match[1]);
+      const accept = endpoint === '/api/speech' ? 'application/json' : endpoint === '/api/speech/stream' || speech.streamFormat === 'sse'
+        ? 'text/event-stream, audio/*, application/octet-stream' : 'audio/*, application/octet-stream, application/zip';
+      const response = await request(new URL(endpoint.slice(1), root).href, { kind: 'speech', provider: match[1] }, {
+        method: 'POST', headers: { 'content-type': 'application/json', accept }, body: JSON.stringify(body), signal,
+      });
+      return readSpeech(endpoint, response, speech, signal, onChunk);
     },
     async startVideo({ model, prompt }: VideoRequest, signal?: AbortSignal): Promise<string> {
       const match = /^([a-z0-9-]+)\/(\S.*)$/.exec(model);

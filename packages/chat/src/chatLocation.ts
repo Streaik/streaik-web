@@ -8,6 +8,7 @@ export const pagePaths = {
   images: '/images',
   videos: '/videos',
   transcriptions: '/transcriptions',
+  speech: '/speech',
   agents: '/agents',
   skills: '/skills',
   mcp: '/mcp',

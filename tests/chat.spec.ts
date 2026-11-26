@@ -2819,6 +2819,147 @@ test('Images routes checked models through the shared agent and generates with t
   await expect(page.getByRole('menuitem', { name: 'Route', exact: true })).toHaveCount(0);
 });
 
+const geminiSpeech = 'google/gemini-3.8-flash-tts';
+const openaiSpeech = 'openai/gpt-4o-mini-tts';
+async function prepareSpeech(page: Page) {
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [
+    { id: model }, { id: 'openai/gpt-6-luna', type: 'decision' },
+    { id: geminiSpeech, type: 'speech' }, { id: openaiSpeech, type: 'speech' },
+  ] } }));
+  await page.route('**/gateway/v1/skills?*', route => route.fulfill({ json: { data: [], has_more: false } }));
+  await page.goto('/');
+  await showSettings(page);
+  await addKey(page);
+  await addKey(page, 'Google Gemini', 'test-google-key');
+  await closeSettings(page);
+  await page.getByRole('button', { name: 'Speech', exact: true }).click();
+  await expect(page).toHaveURL(/\/speech$/);
+  await expect(modelPicker(page)).toHaveText('gemini-3.8-flash-tts');
+}
+
+function speechWav() {
+  const wav = Buffer.alloc(44 + 1600);
+  wav.write('RIFF', 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8);
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(16000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34);
+  wav.write('data', 36); wav.writeUInt32LE(wav.length - 44, 40);
+  return wav;
+}
+
+test('Speech imports local text, routes via Decisions, and saves playable history', async ({ page }) => {
+  const wav = speechWav();
+  let calls = 0;
+  await page.route('**/gateway/v1/decisions', route => {
+    const { input, questions } = route.request().postDataJSON();
+    expect(JSON.parse(input)).toMatchObject({ text: 'Read this.\n\nFrom a file.', route: '/api/speech' });
+    expect(questions[0].choices.map(({ value }: { value: string }) => value)).toEqual([geminiSpeech, openaiSpeech]);
+    return route.fulfill({ json: { answers: [{ name: 'chat_model', type: 'choice', choice: openaiSpeech }] } });
+  });
+  await page.route('**/gateway/api/speech', async route => {
+    calls++;
+    expect(await route.request().headerValue('x-openai-key')).toBe(fakeKey);
+    expect(await route.request().headerValue('x-google-key')).toBeNull();
+    expect(route.request().postDataJSON()).toEqual({ model: openaiSpeech, text: 'Read this.\n\nFrom a file.', voice: 'cedar', outputFormat: 'wav' });
+    await route.fulfill({ json: { audio: { base64: wav.toString('base64'), format: 'wav', mediaType: 'audio/wav' } } });
+  });
+  await prepareSpeech(page);
+  await openRoute(page);
+  await expect(page.getByRole('menuitemradio', { name: '/api/speech', exact: true })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('menuitemradio', { name: '/api/speech/stream', exact: true })).toBeVisible();
+  await expect(page.getByRole('menuitemradio', { name: '/v1/audio/speech', exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await modelPicker(page).click();
+  await page.getByRole('option', { name: 'gpt-4o-mini-tts', exact: true }).click();
+  await page.keyboard.press('Escape');
+  const composer = page.getByRole('form', { name: 'Speech composer' });
+  const input = composer.getByRole('textbox', { name: 'Speech text' });
+  const settings = page.getByRole('dialog', { name: 'Speech settings' });
+  await composer.getByRole('button', { name: 'Speech settings' }).click();
+  await expect(settings.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'true');
+  await settings.getByRole('tab', { name: 'Google Gemini' }).click();
+  await settings.getByLabel('Temperature').fill('0.5');
+  await settings.getByRole('tab', { name: 'OpenAI', exact: true }).click();
+  const provider = settings.getByRole('tabpanel', { name: 'OpenAI', exact: true });
+  await provider.getByRole('combobox', { name: 'Voice', exact: true }).selectOption('cedar');
+  await provider.getByRole('combobox', { name: 'Output format', exact: true }).selectOption('wav');
+  await settings.getByRole('button', { name: 'Save', exact: true }).click();
+  await input.fill('Read this.');
+  await composer.locator('input[type=file]').setInputFiles({ name: 'script.txt', mimeType: 'text/plain', buffer: Buffer.from('From a file.') });
+  await expect(input).toHaveValue('Read this.\n\nFrom a file.');
+  expect(calls).toBe(0);
+  await composer.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Download' })).toHaveAttribute('download', 'Read this. From a file.wav');
+  await expect(input).toHaveValue('');
+  expect(calls).toBe(1);
+  await openRoute(page);
+  await page.getByRole('menuitemradio', { name: '/v1/audio/speech', exact: true }).click();
+  await composer.getByRole('button', { name: 'Speech settings' }).click();
+  const general = settings.getByRole('tabpanel', { name: 'General' });
+  await expect(general.getByRole('combobox', { name: 'Voice', exact: true })).toHaveValue('cedar');
+  await expect(general.getByRole('combobox', { name: 'Response format', exact: true })).toHaveValue('wav');
+  await expect(general.getByRole('combobox', { name: 'Stream format', exact: true })).toBeVisible();
+  await expect(settings.getByRole('tab', { name: 'OpenAI', exact: true })).toHaveCount(0);
+  await settings.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.reload();
+  await expect(page.getByRole('link', { name: 'Download' })).toBeVisible();
+  await openRoute(page);
+  await expect(page.getByRole('menuitemradio', { name: '/v1/audio/speech', exact: true })).toHaveAttribute('aria-checked', 'true');
+  await page.keyboard.press('Escape');
+  const saved = page.locator('.speech-clip audio');
+  await saved.evaluate(audio => (audio as HTMLAudioElement).play());
+  await expect.poll(() => saved.evaluate(audio => (audio as HTMLAudioElement).duration)).toBeGreaterThan(0);
+  await page.getByRole('button', { name: 'Delete Read this. From a file.' }).click();
+  await expect(saved).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole('link', { name: 'Download' })).toHaveCount(0);
+});
+
+test('Speech plays supported MP3 while streaming and falls back to saved WAV controls', async ({ page }) => {
+  // Consecutive silent MPEG-1 layer III frames, generated locally without a vendor call.
+  const frame = Buffer.alloc(417); frame.set([0xff, 0xfb, 0x90, 0x44]);
+  const mp3 = Buffer.concat(Array(100).fill(frame)).toString('base64');
+  await page.addInitScript(({ mp3, wav }) => {
+    const fetch = window.fetch;
+    window.fetch = (input, init) => {
+      if (!String(input).endsWith('/gateway/api/speech/stream')) return fetch(input, init);
+      const text = JSON.parse(String(init?.body)).text[0].text;
+      const type = text === 'WAV fallback' ? 'wav' : 'mp3';
+      const encode = (value: object) => new TextEncoder().encode(`data: ${JSON.stringify(value)}\n\n`);
+      const stream = new ReadableStream({ start(controller) {
+        controller.enqueue(encode({ type: 'audio', audio: type === 'wav' ? wav : mp3, audioFormat: { type } }));
+        if (type === 'wav') { controller.enqueue(encode({ type: 'finish' })); controller.close(); return; }
+        const finish = () => { controller.enqueue(encode({ type: 'finish' })); controller.close(); };
+        window.addEventListener('finish-speech-fixture', finish, { once: true, signal: init?.signal ?? undefined });
+      } });
+      return Promise.resolve(new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } }));
+    };
+  }, { mp3, wav: speechWav().toString('base64') });
+  await prepareSpeech(page);
+  test.skip(!await page.evaluate(() => typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported('audio/mpeg')), 'MP3 MediaSource is unavailable');
+  await openRoute(page);
+  await page.getByRole('menuitemradio', { name: '/api/speech/stream', exact: true }).click();
+  const composer = page.getByRole('form', { name: 'Speech composer' });
+  const text = composer.getByRole('textbox', { name: 'Speech text' });
+  const send = async (value: string) => { await text.fill(value); await composer.getByRole('button', { name: 'Send', exact: true }).click(); };
+  const live = page.locator('audio[aria-label="Live speech playback"]');
+  await send('Play before finish');
+  await expect(live).toBeVisible();
+  await expect.poll(() => live.evaluate(audio => (audio as HTMLAudioElement).currentTime)).toBeGreaterThan(0);
+  await expect(page.getByRole('link', { name: 'Download' })).toHaveCount(0);
+  await page.evaluate(() => window.dispatchEvent(new Event('finish-speech-fixture')));
+  await expect(page.getByRole('link', { name: 'Download' })).toHaveCount(1);
+  await send('Cancel before finish');
+  await expect(live).toBeVisible();
+  await composer.getByRole('button', { name: 'Stop', exact: true }).click();
+  await expect(live).toBeHidden();
+  await expect(live).not.toHaveAttribute('src', /.+/);
+  await expect(text).toHaveValue('Cancel before finish');
+  await expect(page.getByRole('link', { name: 'Download' })).toHaveCount(1);
+  await send('WAV fallback');
+  await expect(live).toBeHidden();
+  await expect(page.locator('.speech-clip audio')).toHaveCount(2);
+});
+
 test('edit masks stay visible for Google and warn instead of silently losing the mask', async ({ page }) => {
   const gemini = 'google/gemini-2.5-flash-image';
   await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: model }, { id: gemini, type: 'image' }] } }));

@@ -18,7 +18,7 @@ export type ChatAccount = {
   onLogout?: () => void;
 };
 
-export type ChatView = 'chat' | 'images' | 'videos' | 'transcriptions' | 'agents' | 'skills' | 'mcp' | PinnableView;
+export type ChatView = 'chat' | 'images' | 'videos' | 'transcriptions' | 'speech' | 'agents' | 'skills' | 'mcp' | PinnableView;
 
 const pinnableLabels = { models: 'Models', providers: 'Providers' } as const satisfies Record<PinnableView, string>;
 
@@ -198,10 +198,10 @@ export function ChatNavigation({ appName, expanded, history, searchHistory, acti
       <Tooltip content={t('New chat')}><button type="button" className="chat-rail-button" aria-label={t('New chat')} disabled={busy} onClick={onNew}>
         <ChatIcon name="compose" />
       </button></Tooltip>
-      {([['images', 'Images'], ['videos', 'Videos'], ['transcriptions', 'Transcriptions'], ['agents', 'Agents'], ['skills', 'Skills'], ['mcp', 'Model Context']] as const)
+      {([['images', 'Images'], ['videos', 'Videos'], ['transcriptions', 'Transcriptions'], ['speech', 'Speech'], ['agents', 'Agents'], ['skills', 'Skills'], ['mcp', 'Model Context']] as const)
         .filter(([key]) => key !== 'agents' || agentsEnabled).map(([key, label]) =>
         <Tooltip key={key} content={t(label)}><button type="button" className="chat-rail-button" aria-label={t(label)} aria-current={view === key ? 'page' : undefined}
-          onClick={() => onView(key)}><ChatIcon name={key === 'skills' ? 'docs' : key === 'transcriptions' ? 'mic' : key === 'mcp' ? 'tool' : key} /></button></Tooltip>)}
+          onClick={() => onView(key)}><ChatIcon name={key === 'skills' ? 'docs' : key === 'transcriptions' ? 'mic' : key === 'speech' ? 'audio' : key === 'mcp' ? 'tool' : key} /></button></Tooltip>)}
       <MorePagesMenu view={view} pinnedViews={pinnedViews} onView={onView} onToggleViewPin={onToggleViewPin} container={container} />
       {pinnableViews.filter(key => pinnedViews.includes(key)).map(key =>
         <Tooltip key={key} content={t(pinnableLabels[key])}><button type="button" className="chat-rail-button" aria-label={t(pinnableLabels[key])}
