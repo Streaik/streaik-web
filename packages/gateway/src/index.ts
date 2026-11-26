@@ -43,6 +43,11 @@ type GatewayMetrics = {
   source?: 'direct'; currency?: 'USD';
 };
 export type ChatMessage = UIMessage<ChatMessageMetadata>;
+export type ChatReasoning = 'low' | 'medium' | 'high';
+
+export function chatReasoning(value: unknown): ChatReasoning | undefined {
+  return value === 'low' || value === 'medium' || value === 'high' ? value : undefined;
+}
 import { maxSkillZipBytes, qualifiedSkill, readSkillZip, skillListPath, skillVersionPath, validSkillProvider } from './skills.ts';
 import type { RemoteSkill, RemoteSkillVersion, SkillPage, SkillPageOptions, SkillUploadTargets } from './skills.ts';
 export type { RemoteSkill, RemoteSkillVersion, SkillPage, SkillPageOptions, SkillUploadTargets } from './skills.ts';
@@ -380,7 +385,7 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
         prepareSendMessagesRequest: ({ messages, body }) => ({ body: {
           model: body?.model, messages, ...(Array.isArray(body?.tools) && body.tools.length ? { tools: body.tools } : {}),
           ...(body?.providerMetadata && { providerMetadata: body.providerMetadata }),
-          ...(body?.clientToolResultApproval === true && { clientToolResultApproval: true }),
+          reasoning: chatReasoning(body?.reasoning),
         } }),
         fetch: async (input, init) => {
           if (input !== (chatUrl ?? '/api/chat') || init?.method !== 'POST' || typeof init.body !== 'string') {

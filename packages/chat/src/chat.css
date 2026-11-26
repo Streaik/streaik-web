@@ -106,6 +106,7 @@ body { margin: 0; }
 .chat-composer-actions { display: flex; align-items: center; gap: .4rem; margin-top: .4rem; }
 .chat-composer-submit { display: flex; align-items: center; gap: inherit; }
 .chat-composer-settings { margin-inline-end: auto; }
+.chat-composer-reasoning { flex: 0 1 auto; }
 .chat-composer :is(.chat-send, .chat-composer-icon).ui-button { display: inline-grid; place-items: center; width: 2.375rem; height: 2.375rem; padding: 0; }
 .chat-composer, .chat-attachment-actions { position: relative; min-width: 0; }
 .chat-composer[data-file-drag] { outline: 2px dashed var(--focus); outline-offset: .25rem; border-radius: .75rem; }

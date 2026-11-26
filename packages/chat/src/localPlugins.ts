@@ -221,13 +221,15 @@ export function filterLocalToolReplay(messages: ChatMessage[], definitions: read
       if (!name || !('toolCallId' in part)) return [part];
       const complete = part.state === 'output-available' || part.state === 'output-error' ||
         (part.state === 'approval-responded' && part.approval.approved === false);
+      const unapproved = apiChat && !part.providerExecuted && (!part.approval?.id ||
+        part.approval.approved !== (part.state !== 'approval-responded'));
       const skillCall = name === activateSkill || name === readSkillResource;
       const skillId = skillCall && part.input && typeof part.input === 'object' && 'skill_id' in part.input ? part.input.skill_id : undefined;
       const sharesSkill = skillCall && part.state === 'output-available' &&
         !(part.output && typeof part.output === 'object' && 'isError' in part.output && part.output.isError === true);
       const sourceId = name === readResourceTool.name && part.input && typeof part.input === 'object' && 'serverId' in part.input ? part.input.serverId : undefined;
       const disconnectedResource = name === readResourceTool.name && typeof sourceId === 'string' && !enabledMcpResourceServers?.has(sourceId);
-      if ((sharesSkill && (typeof skillId !== 'string' || !enabledSkillIds?.has(skillId))) || disconnectedResource || (!complete && !part.providerExecuted) || part.state === 'approval-requested' ||
+      if ((sharesSkill && (typeof skillId !== 'string' || !enabledSkillIds?.has(skillId))) || disconnectedResource || unapproved || (!complete && !part.providerExecuted) || part.state === 'approval-requested' ||
         (part.providerExecuted && part.approval) || (registeredNames.has(name) && !allowed.has(name))) {
         changed = true;
         return [];

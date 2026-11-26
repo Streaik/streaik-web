@@ -1,4 +1,6 @@
-import { Button, Textarea, Tooltip } from '@streaik/themes';
+import { chatReasoning } from '@streaik/gateway';
+import type { ChatReasoning } from '@streaik/gateway';
+import { Button, Select, Textarea, Tooltip } from '@streaik/themes';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent, ReactNode } from 'react';
 import { ChatIcon } from './ChatIcon';
@@ -28,7 +30,8 @@ type ComposerMcp = { count: number; disabled: boolean; open: () => void; servers
   connect: (record: McpServerRecord) => McpServer | undefined };
 type ComposerProps = { busy: boolean; canSend: boolean; dictation?: ComposerDictation } & (
   { image?: undefined; video?: undefined; convert: boolean; onSend: (parts: AttachmentPart[]) => void; onChatSettings: () => void; onViewContext: () => void;
-    mcp?: ComposerMcp; badges?: readonly ComposerBadge[]; onStop: () => void } |
+    mcp?: ComposerMcp; badges?: readonly ComposerBadge[]; onStop: () => void;
+    reasoning?: { value?: ChatReasoning; onChange: (value: ChatReasoning | undefined) => void } } |
   { image: { draft: ImageDraft; onChange: (value: ImageDraft) => void; onSend: () => void; onSettings: () => void }; video?: undefined; onStop: () => void } |
   { image?: undefined; video: { prompt: string; onChange: (prompt: string) => void; onSend: () => void }; onStop?: undefined }
 );
@@ -262,6 +265,11 @@ export function ChatComposer(props: ComposerProps) {
           title={t('Image settings')} aria-haspopup="dialog" disabled={busy} onClick={image.onSettings}><ChatIcon name="settings" /></Button> : !video && <>
           <span className="chat-composer-settings"><Button className="chat-composer-icon" type="button" variant="subtle" aria-label={t('Chat settings')}
             title={t('Chat settings')} aria-haspopup="dialog" onClick={props.onChatSettings}><ChatIcon name="settings" /></Button></span>
+          {props.reasoning && <Select label={t('Reasoning')} className="chat-composer-reasoning" value={props.reasoning.value ?? 'none'}
+            disabled={busy || preparing}
+            options={[{ value: 'none', label: t('None') }, { value: 'low', label: t('Low') },
+              { value: 'medium', label: t('Medium') }, { value: 'high', label: t('High') }]}
+            onValueChange={value => props.reasoning?.onChange(chatReasoning(value))} />}
           <Button className="chat-composer-icon" type="button" variant="subtle" aria-label={t('View context')}
             title={t('View context')} aria-haspopup="dialog" onClick={props.onViewContext}><ChatIcon name="info" /></Button>
         </>}

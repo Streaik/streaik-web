@@ -1,7 +1,7 @@
 import { useChat } from '@ai-sdk/react';
 import { GatewayError, gatewayChatEndpoints, nativeChatEndpoints, pickChatCatalogModels } from '@streaik/gateway';
 import type { AgentBackend, ChatRoute, DirectChat, GatewayChatEndpoint, HostedAgentSelection } from '@streaik/gateway';
-import type { CatalogModel, ChatMessage, Gateway } from '@streaik/gateway';
+import type { CatalogModel, ChatMessage, ChatReasoning, Gateway } from '@streaik/gateway';
 import { Button, ThemeRoot, useColorScheme } from '@streaik/themes';
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -391,7 +391,7 @@ type HostedTurn = { endpoint: GatewayChatEndpoint; selection: HostedAgentSelecti
 type Turn = { model: string; route: ChatRoute; tools: ChatTool[]; context?: RequestContext; hosted?: HostedTurn;
   requestTools: ChatRequestTool[];
   catalog: readonly CatalogModel[]; skills: readonly LocalSkill[]; remoteSkills?: TurnRemoteSkills;
-  providerSettings?: ProviderChatSettings;
+  providerSettings?: ProviderChatSettings; reasoning?: ChatReasoning;
   seen: Set<string>; resolved: Set<string>; automatic: { calls: number } };
 const isApiChat = (route: ChatRoute | undefined) => !route || (route.mode === 'gateway' && route.endpoint === '/api/chat');
 const toolComplete = (part: Invocation) => part.state === 'output-available' || part.state === 'output-error' || part.state === 'approval-responded';
@@ -428,6 +428,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const [pendingModel, setPendingModel] = useState<string>();
   const [deciding, setDeciding] = useState(false);
   const [turn, setTurn] = useState<Turn>();
+  const [reasoning, setReasoning] = useState<ChatReasoning>();
   const chatSettings = useRef<HTMLDialogElement>(null);
   const [contextOpen, setContextOpen] = useState(false);
   const [menuContainer, setMenuContainer] = useState<HTMLDivElement | null>(null);
@@ -464,7 +465,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         const previous = request.trigger === 'submit-message' && last?.role === 'assistant' ? last : undefined;
         const { route, decision, context, providerSettings, hosted, ...body } = (request.body ?? {}) as {
           model?: string; route?: ChatRoute; decision?: ModelDecision; context?: RequestContext; tools?: ChatRequestTool[];
-          providerSettings?: ProviderChatSettings; hosted?: HostedTurn;
+          providerSettings?: ProviderChatSettings; hosted?: HostedTurn; reasoning?: ChatReasoning;
         };
         if (hosted) {
           if (!connection.agentBackend) throw new GatewayError('The agent backend is not configured.');
@@ -507,8 +508,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           const headers = new Headers(request.headers);
           for (const [key, value] of Object.entries(provider?.headers ?? {})) headers.set(key, value);
           const stream = await apiChat.sendMessages({ ...request, headers, body: { ...request.body,
-            tools, ...(metadata && { providerMetadata: metadata }),
-            ...(body.tools?.length && { clientToolResultApproval: true }) },
+            tools, ...(metadata && { providerMetadata: metadata }) },
             messages: withRequestContext(request.messages, context) });
           return withReplyMetadata(stream, model, previous);
         }
@@ -605,7 +605,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
 
   function requestBody(turn: Turn) {
     return { model: turn.model, route: turn.route, context: turn.context, providerSettings: turn.providerSettings, hosted: turn.hosted,
-      tools: turn.requestTools };
+      tools: turn.requestTools, ...(turn.reasoning && { reasoning: turn.reasoning }) };
   }
 
   // When Gateway review is required, stage results outside the SDK transcript until approved.
@@ -727,6 +727,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       requestTools: chatRequestTools(configuredTools),
       hosted: hostedRoute && hostedSelection ? { endpoint: hostedRoute.endpoint, selection: hostedSelection } : undefined,
       providerSettings: !hostedRoute && isApiChat(runRoute) ? turnProviderSettings : undefined,
+      reasoning: !hostedRoute && isApiChat(runRoute) ? reasoning : undefined,
       remoteSkills: enabledRemoteSkills.length ? { skills: enabledRemoteSkills, download: gateway.downloadSkill, bundles: new Map() } : undefined };
     setTurn(next);
     return { ...requestBody(next), ...(decision && { decision }) };
@@ -899,6 +900,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
             mcp={view === 'chat' && !hostedRoute && mcpServers.available ? { count: new Set([...mcpSelection.entries, ...agentMcp.entries].map(entry => entry.record.id)).size,
               disabled: routesLocked, open: () => setModelContextOpen(true), servers: connectedMcp, connect: mcpServers.connection } : undefined}
             onChatSettings={() => chatSettings.current?.showModal()} onViewContext={() => setContextOpen(true)}
+            reasoning={!hostedRoute && isApiChat(runRoute) ? { value: reasoning, onChange: setReasoning } : undefined}
             onSend={(parts) => {
               if (!modelId || !canSend) return;
               if (!messages.length && !agentMode) prepareName();
