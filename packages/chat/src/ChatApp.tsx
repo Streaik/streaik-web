@@ -923,8 +923,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     (!agentMode || (!!agentRoute && !agentChat.checking && !agentChat.loadingDefinition)) &&
     !missingMcp.some(({ server }) => server.required === true) && (!voiceProtocol || canUseVoice);
 
-  function publishVoice(message: ChatMessage) {
-    const withMetadata = { ...message, metadata: { timestamp: new Date().toISOString() } };
+  function publishVoice(message: ChatMessage, model: string) {
+    const withMetadata = { ...message, metadata: { timestamp: new Date().toISOString(), ...(message.role === 'assistant' && { model }) } };
     setMessages(current => {
       const previous = current.find(row => row.id === message.id);
       return previous ? current.map(row => row.id === message.id ? { ...withMetadata, metadata: previous.metadata } : row) : [...current, withMetadata];
@@ -981,7 +981,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     };
     try {
       const events: VoiceCallbacks = {
-          publish: message => { if (current()) publishVoice(message); },
+          publish: message => { if (current()) publishVoice(message, modelId); },
           tools: (message, calls) => {
             if (!current()) return;
             pendingVoiceTools = message.id;
@@ -989,7 +989,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
               resolved: new Set(), toolProgress: { seen: new Set(), completed: 0 } });
             publishVoice({ ...message, parts: [...message.parts, ...calls.map(({ id, name, input }): Invocation => ({
               type: 'dynamic-tool', toolName: name, toolCallId: id, state: 'input-available', input,
-            }))] });
+            }))] }, modelId);
           },
           cancelTools,
           delegate: id => {

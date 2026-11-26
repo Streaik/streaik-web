@@ -221,6 +221,7 @@ test('OpenAI voice uses the existing model picker, composer slot, and conversati
 test('Gemini Live and Grok Voice switch in the same composer and save portable turns', async ({ page }) => {
   const google = 'google/gemini-2.5-flash-native-audio-preview';
   const xai = 'xai/grok-voice-latest';
+  const xaiFavicon = /^https:\/\/t0\.gstatic\.com\/faviconV2\?.*&url=https%3A%2F%2Fx\.ai%2F&size=128$/;
   const googleUrl = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained';
   const xaiUrl = 'wss://api.x.ai/v1/realtime?model=grok-voice-latest';
   const received = { googleAudio: false, xaiAudio: false, geminiHistoryInGrok: false };
@@ -318,7 +319,9 @@ test('Gemini Live and Grok Voice switch in the same composer and save portable t
   await dialog.getByRole('combobox', { name: 'Voice', exact: true }).selectOption('Puck');
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   await start.click(); await expect(stop).toBeVisible();
-  await expect(page.getByText('Gemini answer', { exact: true })).toBeVisible();
+  const geminiReply = page.locator('.chat-message[data-role="assistant"]').filter({ has: page.getByText('Gemini answer', { exact: true }) });
+  await expect(geminiReply.locator('.chat-speaker')).toHaveText('gemini-2.5-flash-native-audio-preview');
+  await expect(geminiReply.locator('.chat-provider-logo')).toBeVisible();
   await stop.click(); await expect(start).toBeVisible();
   await chooseModel(page, 'grok-voice-latest');
   await settings();
@@ -328,7 +331,9 @@ test('Gemini Live and Grok Voice switch in the same composer and save portable t
   await dialog.getByRole('spinbutton', { name: 'Token TTL seconds', exact: true }).fill('60');
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   await start.click(); await expect(stop).toBeVisible();
-  await expect(page.getByText('Grok answer', { exact: true })).toBeVisible();
+  const grokReply = page.locator('.chat-message[data-role="assistant"]').filter({ has: page.getByText('Grok answer', { exact: true }) });
+  await expect(grokReply.locator('.chat-speaker')).toHaveText('grok-voice-latest');
+  await expect(grokReply.locator('.chat-provider-logo')).toHaveAttribute('src', xaiFavicon);
   await stop.click(); await expect(start).toBeVisible();
   expect(received).toEqual({ googleAudio: true, xaiAudio: true, geminiHistoryInGrok: true });
   await chooseChatModel(page);
@@ -340,9 +345,12 @@ test('Gemini Live and Grok Voice switch in the same composer and save portable t
   const message = page.getByRole('textbox', { name: 'Message', exact: true });
   await message.fill('Continue in text'); await message.press('Enter');
   await expect(page.getByText('Text continuation', { exact: true }).first()).toBeVisible();
+  await page.route(xaiFavicon, route => route.abort());
   await page.reload();
   await expect(page.getByText('Gemini question', { exact: true })).toBeVisible();
-  await expect(page.getByText('Grok answer', { exact: true })).toBeVisible();
+  await expect(geminiReply.locator('.chat-speaker')).toHaveText('gemini-2.5-flash-native-audio-preview');
+  await expect(grokReply.locator('.chat-speaker')).toHaveText(xai);
+  await expect(grokReply.locator('.chat-provider-logo')).toHaveCount(0);
 });
 
 for (const action of ['accept', 'decline', 'cancel'] as const) {
