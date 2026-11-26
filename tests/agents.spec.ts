@@ -99,9 +99,9 @@ test('agent tool configuration preserves portable fields and auto-attaches only 
   await context.getByRole('tab', { name: 'Installed', exact: true }).click();
   await context.getByRole('button', { name: 'Add by URL' }).click();
   const install = page.getByRole('dialog', { name: 'Add MCP server' });
-  await install.getByLabel('Server name').fill('Authorized Inventory');
-  await install.getByLabel('Server URL').fill(url);
-  await install.getByRole('button', { name: 'Save server' }).click();
+  await install.getByLabel('Name', { exact: true }).fill('Authorized Inventory');
+  await install.getByLabel('URL', { exact: true }).fill(url);
+  await install.getByRole('button', { name: 'Save', exact: true }).click();
   await context.getByRole('button', { name: 'Close', exact: true }).click();
 
   await page.route('**/gateway/api/chat', route => {

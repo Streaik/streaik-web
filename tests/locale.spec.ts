@@ -73,7 +73,16 @@ test('localizes the MCP overview tabs and uses matching cards for registry and i
   await expect(add.locator('svg')).toBeVisible();
   await add.press('Enter');
   const editor = page.getByRole('dialog', { name: 'MCP-server toevoegen' });
-  await expect(editor.getByLabel('Server-URL')).toBeVisible();
+  await expect(editor.getByLabel('Naam', { exact: true })).toBeVisible();
+  await expect(editor.getByLabel('URL', { exact: true })).toBeVisible();
+  const headers = editor.getByRole('group', { name: 'Headers', exact: true });
+  await expect(headers.getByText(/Headerwaarden worden/)).toHaveCount(0);
+  const addHeader = headers.getByRole('button', { name: 'Header toevoegen', exact: true });
+  await expect(addHeader).toHaveCSS('align-items', 'center');
+  await addHeader.click();
+  await expect(headers.getByLabel('Headernaam')).toBeVisible();
+  await expect(headers.getByLabel('Headerwaarde')).toBeVisible();
+  await expect(editor.getByRole('button', { name: 'Opslaan', exact: true })).toBeVisible();
   await editor.getByRole('button', { name: 'Annuleren' }).click();
 
   await installedTab.press('ArrowRight');
@@ -120,7 +129,11 @@ test('localizes the MCP overview tabs and uses matching cards for registry and i
   await expect(card.getByRole('status')).toHaveText('Gekopieerd');
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(alternate);
   await install.press('Enter');
-  await expect(card.getByText('Geïnstalleerd', { exact: true })).toBeVisible();
+  const remove = card.getByRole('button', { name: 'Fixture Tools verwijderen', exact: true });
+  await expect(remove).toBeEnabled();
+  await expect(remove).toHaveText('');
+  await expect(remove.locator('svg')).toBeVisible();
+  await expect(card.getByText('Geïnstalleerd', { exact: true })).toHaveCount(0);
   await expect(copy).toBeVisible();
 
   await installedTab.click();
@@ -129,14 +142,21 @@ test('localizes the MCP overview tabs and uses matching cards for registry and i
   await expect(installedCard.getByText(alternate, { exact: true })).toBeVisible();
   await installedCard.getByRole('button', { name: 'Fixture Tools configureren' }).click();
   const edit = page.getByRole('dialog', { name: 'Model Context Server', exact: true });
-  await expect(edit.getByLabel('Server-URL')).toHaveValue(alternate);
+  await expect(edit.getByLabel('URL', { exact: true })).toHaveValue(alternate);
   await expect(edit.getByText(/Headers worden alleen naar/)).toHaveCount(0);
   await edit.getByRole('button', { name: 'Annuleren' }).click();
-  await installedCard.getByRole('button', { name: 'Fixture Tools verwijderen' }).click();
-  await expect(empty).toBeVisible();
-  await registryTab.click();
-  await expect(install).toBeVisible();
 
+  await page.setViewportSize({ width: 390, height: 844 });
+  await registryTab.click();
+  await urls.selectOption(endpoint);
+  await expect(install).toBeEnabled();
+  await urls.selectOption(alternate);
+  await remove.click();
+  await expect(install).toBeVisible();
+  await installedTab.click();
+  await expect(empty).toBeVisible();
+
+  await page.setViewportSize({ width: 1280, height: 720 });
   await page.getByRole('button', { name: 'Nieuw gesprek', exact: true }).click();
   await page.getByRole('button', { name: /^(Bijlagen toevoegen|Aan bericht toevoegen)$/ }).click();
   await page.getByRole('menuitem', { name: 'Model Context', exact: true }).click();
@@ -150,6 +170,20 @@ test('localizes the MCP overview tabs and uses matching cards for registry and i
   await pickerCopy.click();
   await expect(pickerCard.getByRole('status')).toHaveText('Gekopieerd');
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(endpoint);
+
+  const pickerInstall = pickerCard.getByRole('button', { name: 'Fixture Tools installeren', exact: true });
+  const pickerRemove = pickerCard.getByRole('button', { name: 'Fixture Tools verwijderen', exact: true });
+  const pickerInstalledTab = picker.getByRole('tab', { name: 'Geïnstalleerd', exact: true });
+  await pickerInstall.click();
+  await expect(pickerRemove).toBeEnabled();
+  await pickerInstalledTab.click();
+  await expect(picker.getByRole('switch', { name: 'Fixture Tools', exact: true })).toBeVisible();
+  await expect(picker.getByText(/Schakel alleen servers in die u vertrouwt/)).toHaveCount(0);
+  await picker.getByRole('tab', { name: 'Register', exact: true }).click();
+  await pickerRemove.click();
+  await expect(pickerInstall).toBeEnabled();
+  await pickerInstalledTab.click();
+  await expect(picker.getByText('Er zijn nog geen MCP-servers geïnstalleerd.')).toBeVisible();
 });
 
 test('uses Dutch single-word chat settings headings and composer menu labels', async ({ page }) => {

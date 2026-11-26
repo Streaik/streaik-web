@@ -783,6 +783,35 @@ test('tooltips follow the theme without changing trigger names or modal layering
   }
 });
 
+test('shadcn restores modal trigger focus without reopening its tooltip', async ({ page }) => {
+  await page.goto('/');
+  const trigger = page.getByRole('button', { name: 'Chat settings', exact: true });
+  const hint = page.getByRole('tooltip', { name: 'Chat settings', exact: true });
+  const dialog = page.getByRole('dialog', { name: 'Chat settings', exact: true });
+
+  await trigger.hover();
+  await expect(hint).toBeVisible();
+  await trigger.click();
+  await dialog.getByRole('button', { name: 'Close chat settings', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await expect(hint).toBeHidden();
+
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Shift+Tab');
+  await expect(trigger).toBeFocused();
+  await expect(hint).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await expect(hint).toBeHidden();
+
+  await trigger.hover();
+  await expect(hint).toBeVisible();
+});
+
 test('composer attaches picked files, dropped files and links, with opt-in local conversion and replay', async ({ page }) => {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   const requests: { messages: { role: string; parts: Record<string, unknown>[] }[] }[] = [];
@@ -1135,9 +1164,9 @@ test('MCP Tool output preferences filter approved requests and replay without ch
   await context.getByRole('tab', { name: 'Installed', exact: true }).click();
   await context.getByRole('button', { name: 'Add by URL' }).click();
   const editor = page.getByRole('dialog', { name: 'Add MCP server' });
-  await editor.getByLabel('Server name').fill('Output fixture');
-  await editor.getByLabel('Server URL').fill(new URL('/mcp-output-fixture', page.url()).href);
-  await editor.getByRole('button', { name: 'Save server' }).click();
+  await editor.getByLabel('Name', { exact: true }).fill('Output fixture');
+  await editor.getByLabel('URL', { exact: true }).fill(new URL('/mcp-output-fixture', page.url()).href);
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
   await context.getByRole('switch', { name: 'Output fixture' }).check();
   await expect(context.getByRole('status')).toHaveText('1 tools available');
   await context.getByRole('button', { name: 'Close', exact: true }).click();
@@ -1299,9 +1328,9 @@ test('MCP elicitation queues forms and resumes the tool before its separate resu
   await context.getByRole('tab', { name: 'Installed', exact: true }).click();
   await context.getByRole('button', { name: 'Add by URL' }).click();
   const editor = page.getByRole('dialog', { name: 'Add MCP server' });
-  await editor.getByLabel('Server name').fill('Elicitation fixture');
-  await editor.getByLabel('Server URL').fill(new URL('/mcp-elicitation-fixture', page.url()).href);
-  await editor.getByRole('button', { name: 'Save server' }).click();
+  await editor.getByLabel('Name', { exact: true }).fill('Elicitation fixture');
+  await editor.getByLabel('URL', { exact: true }).fill(new URL('/mcp-elicitation-fixture', page.url()).href);
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
   await context.getByRole('switch', { name: 'Elicitation fixture' }).check();
   await expect(context.getByRole('status')).toHaveText('1 tools available');
   await context.getByRole('button', { name: 'Close', exact: true }).click();
@@ -1428,12 +1457,12 @@ for (const approved of [true, false]) test(`MCP composer discovers resources and
   await context.getByRole('tab', { name: 'Installed', exact: true }).click();
   await context.getByRole('button', { name: 'Add by URL' }).click();
   const editor = page.getByRole('dialog', { name: 'Add MCP server' });
-  await editor.getByLabel('Server name').fill(serverName);
-  await editor.getByLabel('Server URL').fill(new URL('/mcp-context-fixture', page.url()).href);
+  await editor.getByLabel('Name', { exact: true }).fill(serverName);
+  await editor.getByLabel('URL', { exact: true }).fill(new URL('/mcp-context-fixture', page.url()).href);
   await editor.getByRole('button', { name: 'Add header' }).click();
   await editor.getByLabel('Header name').fill('Authorization');
   await editor.getByLabel('Header value').fill('Bearer test-mcp-composer');
-  await editor.getByRole('button', { name: 'Save server' }).click();
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
   await context.getByRole('switch', { name: serverName }).check();
   await expect(context.getByText('Connected', { exact: true })).toBeVisible();
   await context.getByRole('button', { name: 'Close', exact: true }).click();
@@ -1533,9 +1562,9 @@ test('MCP argument completions are optional, contextual, and debounced for promp
   await context.getByRole('tab', { name: 'Installed', exact: true }).click();
   await context.getByRole('button', { name: 'Add by URL' }).click();
   const editor = page.getByRole('dialog', { name: 'Add MCP server' });
-  await editor.getByLabel('Server name').fill(serverName);
-  await editor.getByLabel('Server URL').fill(new URL('/mcp-suggestions-fixture', page.url()).href);
-  await editor.getByRole('button', { name: 'Save server' }).click();
+  await editor.getByLabel('Name', { exact: true }).fill(serverName);
+  await editor.getByLabel('URL', { exact: true }).fill(new URL('/mcp-suggestions-fixture', page.url()).href);
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
   await context.getByRole('switch', { name: serverName }).check();
   await expect(context.getByText('Connected', { exact: true })).toBeVisible();
   await context.getByRole('button', { name: 'Close', exact: true }).click();
@@ -2694,9 +2723,9 @@ for (const endpoint of directToolRoutes) test(`Direct ${endpoint} runs browser t
     await context.getByRole('tab', { name: 'Installed', exact: true }).click();
     await context.getByRole('button', { name: 'Add by URL' }).click();
     const editor = page.getByRole('dialog', { name: 'Add MCP server' });
-    await editor.getByLabel('Server name').fill('Direct fixture');
-    await editor.getByLabel('Server URL').fill(new URL('/mcp-direct-fixture', page.url()).href);
-    await editor.getByRole('button', { name: 'Save server' }).click();
+    await editor.getByLabel('Name', { exact: true }).fill('Direct fixture');
+    await editor.getByLabel('URL', { exact: true }).fill(new URL('/mcp-direct-fixture', page.url()).href);
+    await editor.getByRole('button', { name: 'Save', exact: true }).click();
     await context.getByRole('switch', { name: 'Direct fixture' }).check();
     await expect(context.getByRole('status')).toHaveText('1 tools available');
     await context.getByRole('button', { name: 'Close', exact: true }).click();

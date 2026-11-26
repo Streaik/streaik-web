@@ -31,12 +31,12 @@ async function addManualServer(page: Page, title: string, url: string, authoriza
   await page.getByRole('button', { name: 'MCP Servers', exact: true }).click();
   await page.getByRole('button', { name: 'Add by URL' }).click();
   const editor = page.getByRole('dialog', { name: 'Add MCP server' });
-  await editor.getByLabel('Server name').fill(title);
-  await editor.getByLabel('Server URL').fill(url);
+  await editor.getByLabel('Name', { exact: true }).fill(title);
+  await editor.getByLabel('URL', { exact: true }).fill(url);
   await editor.getByRole('button', { name: 'Add header' }).click();
   await editor.getByLabel('Header name').fill('Authorization');
   await editor.getByLabel('Header value').fill(authorization);
-  await editor.getByRole('button', { name: 'Save server' }).click();
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(editor).toHaveCount(0);
 }
 
@@ -391,7 +391,7 @@ test('manual headers are not persisted, and the disabled toggle has a separate c
   const editor = page.getByRole('dialog', { name: 'Model Context Server' });
   await expect(editor.getByLabel('Header value')).toHaveValue('');
   await editor.getByLabel('Header value').fill(auth.openai.Authorization);
-  await editor.getByRole('button', { name: 'Save server' }).click();
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(toggle).toBeEnabled();
   await expect(toggle).not.toBeChecked();
 });

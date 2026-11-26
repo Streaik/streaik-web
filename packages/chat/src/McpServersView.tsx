@@ -73,15 +73,14 @@ export function McpServerEditor({ target, options, store, close }: { target: Mcp
 
   return <McpDialog title={t(installing ? 'Install MCP server' : record ? 'Model Context Server' : 'Add MCP server')} close={close}>{closeDialog =>
     <form className="chat-settings-section mcp-form" onSubmit={event => submit(event, closeDialog)} autoComplete="off">
-      <label>{t('Server name')}<input value={title} onChange={event => setTitle(event.target.value)} maxLength={160} /></label>
-      <label>{t('Server URL')}<input type="url" required value={url} readOnly={!!record} onChange={event => setUrl(event.target.value)} maxLength={2048} /></label>
+      <label>{t('Name')}<input value={title} onChange={event => setTitle(event.target.value)} maxLength={160} /></label>
+      <label>{t('URL')}<input type="url" required value={url} readOnly={!!record} onChange={event => setUrl(event.target.value)} maxLength={2048} /></label>
       {(appAuth || auth === 'app') && <label>{t('Authentication')}<select value={auth} onChange={event => setAuth(event.target.value === 'app' ? 'app' : 'manual')}>
         <option value="app">{t('Use app credentials')}</option><option value="manual">{t('Enter headers manually')}</option>
       </select></label>}
       {auth === 'app' && !appAuth?.ready && <p role="status">{t('App credentials are unavailable for this server.')}</p>}
       {auth === 'manual' && <fieldset className="mcp-fields">
-        <legend>{t('Request headers')}</legend>
-        <p>{t('Header values are kept in memory only. Re-enter them after reloading or signing out.')}</p>
+        <legend>{t('Headers')}</legend>
         {mcpHeaderFields(declarations, fields).map(field => <label key={field.id}>
           {field.label}{field.description && <small>{field.description}</small>}
           {field.choices && !field.fixed ? <select value={field.value} required={field.isRequired} onChange={event => setFields(new Map(fields).set(field.id, event.target.value))}>
@@ -98,13 +97,13 @@ export function McpServerEditor({ target, options, store, close }: { target: Mcp
           <Button type="button" variant="subtle" aria-label={t('Remove header {{index, number}}', { index: index + 1 })}
             onClick={() => setRows(rows.filter((_, rowIndex) => rowIndex !== index))}><ChatIcon name="trash" /></Button>
         </div>)}
-        <Button variant="subtle" type="button" disabled={rows.length >= 24} onClick={() => setRows([...rows, { name: '', value: '' }])}>
-          <ChatIcon name="add" /> {t('Add header')}
+        <Button className="mcp-add-header" variant="subtle" type="button" disabled={rows.length >= 24} onClick={() => setRows([...rows, { name: '', value: '' }])}>
+          <ChatIcon name="add" />{t('Add header')}
         </Button>
       </fieldset>}
       {error && <p role="alert" className="chat-error">{t(error)}</p>}
       <div className="mcp-actions"><Button type="button" onClick={closeDialog}>{t('Cancel')}</Button>
-        <Button type="submit" variant="primary" disabled={auth === 'app' && !appAuth?.ready}>{t(installing ? 'Install server' : 'Save server')}</Button>
+        <Button type="submit" variant="primary" disabled={auth === 'app' && !appAuth?.ready}>{t(installing ? 'Install server' : 'Save')}</Button>
       </div>
     </form>}
   </McpDialog>;
@@ -197,7 +196,6 @@ function InstalledServers({ store, selection, locked, onEdit, active, byEndpoint
     </div>}
     {!selection && <div className="catalog-filters"><input type="search" aria-label={t('Search MCP servers')} placeholder={t('Search MCP servers')}
       value={query} onChange={event => setQuery(event.currentTarget.value)} /></div>}
-    {selection && servers.length > 0 && <p>{t('Only enable servers you trust. Tool inputs are sent to the server. On Direct routes, results are shared with the chat model without review.')}</p>}
     {error && <p role="alert" className="chat-error">{t('Could not remove this MCP server.')}</p>}
     {servers.length === 0 ? <p role="status">{t(searchMessage ?? (query.trim() ? 'No matching MCP servers.' : 'No MCP servers installed yet.'))}</p>
       : selection ? <ul className="mcp-list">{servers}</ul> : <div className="catalog-grid">{servers}</div>}
@@ -217,19 +215,20 @@ function CopyServerUrl({ endpoint }: { endpoint: string }) {
   </>;
 }
 
-function CatalogCard({ item, installed, disabled, options, install, inDialog }: { item: McpCatalogServer; installed: ReadonlySet<string>; disabled: boolean; options?: McpOptions;
-  install: (item: McpCatalogServer, remote: McpCatalogServer['remotes'][number]) => void; inDialog: boolean }) {
+function CatalogCard({ item, installed, disabled, options, install, remove, inDialog }: { item: McpCatalogServer; installed: ReadonlyMap<string, string>; disabled: boolean; options?: McpOptions;
+  install: (item: McpCatalogServer, remote: McpCatalogServer['remotes'][number]) => void; remove: (id: string) => void; inDialog: boolean }) {
   const { t } = useAppTranslation();
   const [selected, setSelected] = useState('');
   const remote = item.remotes.find(choice => choice.endpoint === selected) ?? preferredMcpRemote(item.remotes, options);
-  const isInstalled = remote && installed.has(remote.endpoint);
-  const installLabel = t('Install {{name}}', { name: item.title });
+  const installedId = remote && installed.get(remote.endpoint);
+  const actionLabel = t(installedId ? 'Remove {{name}}' : 'Install {{name}}', { name: item.title });
   const endpoint = item.remotes.length > 1 ? <label className="mcp-endpoint">{t('Server URL')} <select value={remote?.endpoint} onChange={event => setSelected(event.target.value)}>
       {item.remotes.map(choice => <option key={choice.endpoint}>{choice.endpoint}</option>)}
     </select></label> : undefined;
-  const actions = !remote ? <small>{t('No compatible Streamable HTTP endpoint')}</small> : isInstalled ? <small>{t('Installed')}</small>
-    : <Tooltip content={installLabel}><Button type="button" variant="subtle" className="chat-composer-icon" aria-label={installLabel}
-      disabled={disabled} onClick={() => install(item, remote)}><ChatIcon name="download" /></Button></Tooltip>;
+  const actions = !remote ? <small>{t('No compatible Streamable HTTP endpoint')}</small>
+    : <Tooltip content={actionLabel}><Button type="button" variant="subtle" className="chat-composer-icon" aria-label={actionLabel}
+      disabled={disabled} onClick={() => installedId ? remove(installedId) : install(item, remote)}>
+      <ChatIcon name={installedId ? 'trash' : 'download'} /></Button></Tooltip>;
   return <McpServerCard title={item.title} name={item.name} version={item.version} registryEntry={item}
     endpoint={endpoint} actions={<>{remote && <CopyServerUrl key={remote.endpoint} endpoint={remote.endpoint} />}{actions}</>} inDialog={inDialog} />;
 }
@@ -241,7 +240,7 @@ function McpRegistry({ store, options, locked, onEdit, inDialog, active, registr
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const registryUrl = options?.registryUrl;
-  const installed = new Set(store.records.map(record => record.endpoint));
+  const installed = new Map(store.records.map(record => [record.endpoint, record.id]));
   const { results, message: searchMessage } = useCatalogSearch(registry.servers, active && registryUrl ? query : '', registrySearchDocument);
   const disabled = locked || !store.available;
   const refreshLabel = t('Refresh registry');
@@ -259,6 +258,12 @@ function McpRegistry({ store, options, locked, onEdit, inDialog, active, registr
     } catch (error) { setError(error instanceof Error ? error.message : 'Could not install this MCP server.'); }
   }
 
+  function remove(id: string) {
+    setError('');
+    try { store.remove(id); }
+    catch { setError('Could not remove this MCP server.'); }
+  }
+
   const refresh = registryUrl && <Tooltip content={refreshLabel}>
     <Button type="button" variant="subtle" className="chat-composer-icon" aria-label={refreshLabel}
       disabled={registry.loading} onClick={registry.refresh}><ChatIcon name="refresh" /></Button>
@@ -272,7 +277,7 @@ function McpRegistry({ store, options, locked, onEdit, inDialog, active, registr
         {registry.loading && <p role="status">{t('Loading MCP servers…')}</p>}
         {registry.error && <p role="alert" className="chat-error">{t('Could not load the MCP registry.')}</p>}
         {results.length ? <div className="catalog-grid">{results.map(item => <CatalogCard key={item.name} item={item} installed={installed}
-          disabled={disabled} options={options} install={install} inDialog={inDialog} />)}</div>
+          disabled={disabled} options={options} install={install} remove={remove} inDialog={inDialog} />)}</div>
           : !registry.loading && !registry.error && <p role="status">{t(searchMessage ?? (query.trim() ? 'No matching MCP servers.' : 'No MCP servers found in the registry.'))}</p>}
         {registry.hasMore && <Button type="button" className="catalog-more" disabled={registry.loading} onClick={registry.loadMore}>{t('Load more servers')}</Button>}
       </>}

@@ -71,9 +71,9 @@ test('the Installed overview finds registry descriptions and logos on later page
   async function addServer(title: string, url: string) {
     await page.getByRole('button', { name: 'Add by URL', exact: true }).click();
     const editor = page.getByRole('dialog', { name: 'Add MCP server', exact: true });
-    await editor.getByLabel('Server name').fill(title);
-    await editor.getByLabel('Server URL').fill(url);
-    await editor.getByRole('button', { name: 'Save server' }).click();
+    await editor.getByLabel('Name', { exact: true }).fill(title);
+    await editor.getByLabel('URL', { exact: true }).fill(url);
+    await editor.getByRole('button', { name: 'Save', exact: true }).click();
   }
 
   const installed = page.getByRole('tabpanel', { name: 'Installed', exact: true });
