@@ -287,6 +287,9 @@ body { margin: 0; }
 .chat-activity-body :is(p, pre) { margin-block: .25rem; }
 .chat-tool-card summary { cursor: pointer; }
 .chat-tool-card input[type=range] { width: 100%; margin: 0; }
+.chat-tool-policy-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: .65rem; align-items: end; }
+.chat-tool-policy-field { display: grid; gap: .35rem; min-width: 0; }
+.chat-tool-policy-field input[type=number] { width: 100%; min-width: 0; box-sizing: border-box; padding: .5rem; border: 1px solid var(--border); border-radius: var(--radius); color: inherit; background: var(--surface); font: inherit; }
 .chat-tool-switches { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); gap: .5rem; }
 .chat-preference-cards { display: grid; gap: .9rem; }
 .chat-preference-cards .chat-tool-switches { grid-template-columns: minmax(0, 1fr); gap: .1rem; }

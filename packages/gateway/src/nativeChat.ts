@@ -2,7 +2,7 @@ import { convertToModelMessages, jsonSchema, streamText, tool } from 'ai';
 import type { ChatTransport, JSONSchema7, ToolSet } from 'ai';
 import { asRecord, createDirectMetrics } from './directMetrics.ts';
 import type { DirectMetricsOptions } from './directMetrics.ts';
-import { GatewayError } from './index.ts';
+import { chatToolChoice, GatewayError } from './index.ts';
 import type { ChatMessage, ChatMessageMetadata, NativeChatEndpoint } from './index.ts';
 import { extendNativeTools } from './nativeToolOptions.ts';
 
@@ -42,7 +42,7 @@ function nativeAttachmentMessages(messages: ChatMessage[], endpoint: NativeChatE
 export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (model: string) => NativeTarget): ChatTransport<ChatMessage> {
   return {
     async sendMessages({ messages, body, abortSignal }) {
-      const { model, tools: definitions, instructions: gatewayInstructions, mcpInstructions } = asRecord(body) ?? {};
+      const { model, tools: definitions, toolChoice, instructions: gatewayInstructions, mcpInstructions } = asRecord(body) ?? {};
       if (typeof model !== 'string') throw new GatewayError('Choose a model for this route.');
       const target = resolve(model);
       const inputInstructions = target.gateway ? gatewayInstructions : mcpInstructions;
@@ -72,7 +72,8 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
       let gateway: ChatMessageMetadata['gateway'];
       const result = streamText({
         model: adapter, messages: await convertToModelMessages(nativeAttachmentMessages(messages, endpoint), { tools, ignoreIncompleteToolCalls: true }),
-        instructions, tools, abortSignal, maxRetries: 0, includeRawChunks: target.gateway || !!direct,
+        instructions, tools, toolChoice: Object.keys(tools).length ? chatToolChoice(toolChoice) : undefined,
+        abortSignal, maxRetries: 0, includeRawChunks: target.gateway || !!direct,
         ...(endpoint === '/v1/responses' ? { providerOptions: { openai: { store: false, passThroughUnsupportedFiles: true } } }
           : endpoint === '/v1/chat/completions' && (target.gateway || model.startsWith('openai/'))
           ? { providerOptions: { openai: { store: false } } } : {}),

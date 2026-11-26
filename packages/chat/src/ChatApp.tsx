@@ -1,7 +1,7 @@
 import { useChat } from '@ai-sdk/react';
 import { GatewayError, gatewayChatEndpoints, nativeChatEndpoints, pickChatCatalogModels } from '@streaik/gateway';
 import type { AgentBackend, ChatRoute, DirectChat, GatewayChatEndpoint, HostedAgentSelection } from '@streaik/gateway';
-import type { CatalogModel, ChatMessage, ChatReasoning, Gateway } from '@streaik/gateway';
+import type { CatalogModel, ChatMessage, ChatReasoning, ChatToolChoice, Gateway } from '@streaik/gateway';
 import { Button, ThemeRoot, useColorScheme } from '@streaik/themes';
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -47,6 +47,8 @@ import type { ChatTool } from './localPlugins';
 import { agentMcpAllows, agentMcpServers } from './agentTools';
 import { apiChatTools, chatRequestTools, chatToolCapabilities, configureChatTools } from './chatToolRequest';
 import type { ChatRequestTool } from './chatToolRequest';
+import { continueToolPolicy, toolComplete, toolPolicyForTurn } from './chatToolPolicy';
+import type { ChatToolPolicy, ToolProgress } from './chatToolPolicy';
 import { resolveSkillTool } from './skillTools';
 import type { TurnRemoteSkills } from './skillTools';
 import type { LocalSkill } from './skillBundles';
@@ -400,9 +402,8 @@ type Turn = { model: string; route: ChatRoute; tools: ChatTool[]; context?: Requ
   requestTools: ChatRequestTool[];
   catalog: readonly CatalogModel[]; skills: readonly LocalSkill[]; remoteSkills?: TurnRemoteSkills;
   providerSettings?: ProviderChatSettings; reasoning?: ChatReasoning;
-  seen: Set<string>; resolved: Set<string>; automatic: { calls: number } };
+  toolPolicy: ChatToolPolicy; toolChoice?: ChatToolChoice; toolProgress: ToolProgress; resolved: Set<string> };
 const isApiChat = (route: ChatRoute | undefined) => !route || (route.mode === 'gateway' && route.endpoint === '/api/chat');
-const toolComplete = (part: Invocation) => part.state === 'output-available' || part.state === 'output-error' || part.state === 'approval-responded';
 
 function ChatSession({ appName, gateway, connection, conversation, history, searchHistory, searchConversationText, storageIssue, locationIssue, nav, view, onView, toggleNav, onPersist, onNew, onSwitch, onPin, onDelete, models, route, onRoute, decisions, images, videos, transcriptions, scope, onSettings, preferences, onPreferences, localSkills, remoteSkills, mcpServers, readHistory }: {
   appName: string; gateway: Gateway; connection: Connection; conversation: Conversation; history: Conversation[]; storageIssue: string;
@@ -473,7 +474,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         const previous = request.trigger === 'submit-message' && last?.role === 'assistant' ? last : undefined;
         const { route, decision, context, providerSettings, hosted, ...body } = (request.body ?? {}) as {
           model?: string; route?: ChatRoute; decision?: ModelDecision; context?: RequestContext; tools?: ChatRequestTool[];
-          providerSettings?: ProviderChatSettings; hosted?: HostedTurn; reasoning?: ChatReasoning;
+          providerSettings?: ProviderChatSettings; hosted?: HostedTurn; reasoning?: ChatReasoning; toolChoice?: ChatToolChoice;
         };
         if (hosted) {
           if (!connection.agentBackend) throw new GatewayError('The agent backend is not configured.');
@@ -521,8 +522,10 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           const metadata = namespaces.length ? { ...providerMetadata, openai: { ...openai, tools: [...existing, ...namespaces] } } : providerMetadata;
           const headers = new Headers(request.headers);
           for (const [key, value] of Object.entries(provider?.headers ?? {})) headers.set(key, value);
+          const hasTools = tools.length || Object.values(metadata ?? {}).some(options => Array.isArray(options?.tools) && options.tools.length > 0);
+          const toolChoice = body.toolChoice === 'required' && !hasTools ? undefined : body.toolChoice;
           const stream = await apiChat.sendMessages({ ...request, headers, body: { ...request.body,
-            tools, ...(metadata && { providerMetadata: metadata }) },
+            tools, toolChoice, ...(metadata && { providerMetadata: metadata }) },
             messages: withRequestContext(request.messages, context) });
           return withReplyMetadata(stream, model, previous);
         }
@@ -609,7 +612,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const last = messages.at(-1);
   const parts = last?.role === 'assistant' ? last.parts : [];
   const toolParts = parts.flatMap(part => {
-    if (!('toolCallId' in part) || !turn || turn.hosted || part.providerExecuted || turn.seen.has(part.toolCallId)) return [];
+    if (!('toolCallId' in part) || !turn || turn.hosted || turn.toolChoice === 'none' || part.providerExecuted || turn.toolProgress.seen.has(part.toolCallId)) return [];
     const name = toolPartName(part);
     if (isApiChat(turn.route) && turn.model === echoInputModel && isEchoInputCall(part)) return [{ part, tool: undefined }];
     const tool = turn.tools.find(tool => tool.definition.name === name);
@@ -621,7 +624,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
 
   function requestBody(turn: Turn) {
     return { model: turn.model, route: turn.route, context: turn.context, providerSettings: turn.providerSettings, hosted: turn.hosted,
-      tools: turn.requestTools, ...(turn.reasoning && { reasoning: turn.reasoning }) };
+      tools: turn.requestTools, toolChoice: turn.toolChoice, ...(turn.reasoning && { reasoning: turn.reasoning }) };
   }
 
   // When Gateway review is required, stage results outside the SDK transcript until approved.
@@ -631,8 +634,6 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     if (pending && isApiChat(turn.route)) {
       const { part, tool } = pending;
       if (turn.model === echoInputModel && isEchoInputCall(part) && part.state === 'approval-requested') {
-        if (turn.automatic.calls >= 8) { setTurn(undefined); return; }
-        turn.automatic.calls++;
         void answerProviderForm(part);
         return;
       }
@@ -640,13 +641,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         setToolNotice('The gateway did not return an approval for this client tool.');
         setTurn(undefined);
       } else if (!stagedResult) {
-        if (turn.automatic.calls >= 8) {
-          setToolNotice('Local tool limit reached for this turn.');
-          setTurn(undefined);
-        } else {
-          turn.automatic.calls++;
-          void completeTool(part, tool, 'stage');
-        }
+        void completeTool(part, tool, 'stage');
       }
       return;
     }
@@ -655,18 +650,12 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       const gatewayTool = turn.route.mode === 'gateway';
       if (gatewayTool && tool.source === 'local' && tool.plugin.approval) return;
       if (stagedResult) return;
-      if (turn.automatic.calls >= 8) {
-        setToolNotice('Local tool limit reached for this turn.');
-        setTurn(undefined);
-      } else {
-        turn.automatic.calls++;
-        const reviewResult = gatewayTool && (tool.source === 'mcp' || tool.source === 'mcp-resource');
-        void completeTool(part, tool, reviewResult ? 'stage' : 'run');
-      }
+      const reviewResult = gatewayTool && (tool.source === 'mcp' || tool.source === 'mcp-resource');
+      void completeTool(part, tool, reviewResult ? 'stage' : 'run');
       return;
     }
     if (toolParts.every(({ part }) => toolComplete(part))) {
-      toolParts.forEach(({ part }) => turn.seen.add(part.toolCallId));
+      turn.toolChoice = continueToolPolicy(turn.toolPolicy, parts, turn.toolProgress);
       void sendMessage(undefined, { body: requestBody(turn) });
     }
   });
@@ -768,7 +757,9 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     setToolNotice('');
     setPendingModel(decision ? undefined : model);
     const seen = new Set(messages.flatMap(message => message.parts.flatMap(part => 'toolCallId' in part ? [part.toolCallId] : [])));
-    const next: Turn = { model, route: runRoute, tools: enabledTools, context, catalog: runCatalog, skills: localSkills.skills, seen, resolved: new Set(), automatic: { calls: 0 },
+    const toolPolicy = toolPolicyForTurn(preferences.toolPolicy, new Set(enabledTools.map(tool => tool.definition.name)));
+    const next: Turn = { model, route: runRoute, tools: enabledTools, context, catalog: runCatalog, skills: localSkills.skills,
+      toolPolicy, toolChoice: hostedRoute ? undefined : toolPolicy.toolChoice, toolProgress: { seen, completed: 0 }, resolved: new Set(),
       requestTools: chatRequestTools(configuredTools),
       hosted: hostedRoute && hostedSelection ? { endpoint: hostedRoute.endpoint, selection: hostedSelection } : undefined,
       providerSettings: !hostedRoute && isApiChat(runRoute) ? turnProviderSettings : undefined,
@@ -955,7 +946,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         </div>
       </main>
       <ChatSettingsDialog dialog={chatSettings} value={preferences} onChange={onPreferences} gateway={gatewayRoute}
-        localPluginsSupported={!hostedRoute} hasHistory={hasHistory} locked={routesLocked} localSkills={localSkills} remoteSkills={remoteSkills}
+        browserToolsSupported={!hostedRoute} hasHistory={hasHistory} locked={routesLocked} localSkills={localSkills} remoteSkills={remoteSkills}
         providerModels={!agentMode && isApiChat(route) ? selected : []} namespaceSupported={toolCapabilities.namespaces} toolOptionsSupported={toolCapabilities.options}
         toolRows={configuredTools.map(({ tool, source, options, namespace }) => ({ key: tool.definition.name, label: tool.definition.name, source,
           options, namespace: toolCapabilities.namespaces ? namespace?.name : undefined }))} />

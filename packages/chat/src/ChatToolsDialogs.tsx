@@ -1,4 +1,4 @@
-import { Button } from '@streaik/themes';
+import { Button, Select } from '@streaik/themes';
 import type { ChatModel } from '@streaik/gateway';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
@@ -8,6 +8,8 @@ import { ToolDetails, ToolValue } from './ToolDetails';
 import { describeToolOutput } from './toolOutputContent';
 import { composerToolDefaults, toolConfigurationDefaults } from './chatPreferences';
 import type { ChatPreferences } from './chatPreferences';
+import { normalizeToolPolicy, toolPolicyForTurn } from './chatToolPolicy';
+import type { ChatToolPolicy } from './chatToolPolicy';
 import type { RequestContext } from './chatContext';
 import { localPlugins } from './localPlugins';
 import type { ChatTool } from './localPlugins';
@@ -24,9 +26,47 @@ import type { ToolConfigurationRow } from './ToolConfigurationEditor';
 type DialogRef = RefObject<HTMLDialogElement | null>;
 type ChatSettingsTab = 'general' | 'tools' | 'tool-configuration' | 'skills' | ChatProviderId;
 
-export function ChatSettingsDialog({ dialog, value, onChange, gateway, localPluginsSupported, hasHistory, locked, localSkills, remoteSkills, providerModels, toolRows, namespaceSupported, toolOptionsSupported }: {
+function ToolPolicyFields({ value, onChange, rows, disabled }: {
+  value: ChatToolPolicy; onChange: (policy: ChatToolPolicy) => void; rows: readonly ToolConfigurationRow[]; disabled: boolean;
+}) {
+  const { t } = useAppTranslation();
+  const id = useId();
+  const active = new Map(rows.map(({ key, label }) => [key, label]));
+  const effective = toolPolicyForTurn(value, new Set(active.keys()));
+  const canRequire = effective.maxToolCalls !== undefined || effective.stopTools.length > 0;
+  const update = (patch: Partial<ChatToolPolicy>) => onChange(normalizeToolPolicy({ ...value, ...patch }));
+  const options = [...active].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
+  for (const name of value.stopTools) {
+    if (!active.has(name)) options.push({ value: name, label: t('{{tool}} (unavailable)', { tool: name }) });
+  }
+  return <section className="chat-tool-card">
+    <h3>{t('Tools')}</h3>
+    <div className="chat-tool-policy-fields">
+      <div className="chat-tool-policy-field">
+        <label htmlFor={`${id}-choice`}>{t('Tool choice')}</label>
+        <Select id={`${id}-choice`} label={t('Tool choice')} value={effective.toolChoice ?? 'auto'} disabled={disabled}
+          options={[{ value: 'auto', label: t('Automatic') }, { value: 'none', label: t('None') },
+            ...(canRequire ? [{ value: 'required', label: t('Required') }] : [])]}
+          onValueChange={toolChoice => update({ toolChoice: toolChoice === 'none' || toolChoice === 'required' ? toolChoice : undefined })} />
+      </div>
+      <label className="chat-tool-policy-field"><span>{t('Maximum tool calls')}</span>
+        <input type="number" min={1} step={1} value={value.maxToolCalls ?? ''} placeholder={t('Unlimited')} disabled={disabled}
+          onChange={event => update({ maxToolCalls: event.currentTarget.valueAsNumber })} />
+      </label>
+    </div>
+    <div className="chat-tool-policy-field">
+      <label htmlFor={`${id}-stop`}>{t('Tools that end the turn')}</label>
+      <Select multiple id={`${id}-stop`} label={t('Tools that end the turn')} value={value.stopTools} options={options}
+        disabled={disabled || !options.length} placeholder={t(options.length ? 'Select tools' : 'No tools enabled.')}
+        search={{ label: t('Search tools'), placeholder: t('Search tools'), emptyMessage: t('No matching tools.') }}
+        onValueChange={stopTools => update({ stopTools })} />
+    </div>
+  </section>;
+}
+
+export function ChatSettingsDialog({ dialog, value, onChange, gateway, browserToolsSupported, hasHistory, locked, localSkills, remoteSkills, providerModels, toolRows, namespaceSupported, toolOptionsSupported }: {
   dialog: DialogRef; value: ChatPreferences; onChange: (preferences: ChatPreferences) => void;
-  gateway: boolean; localPluginsSupported: boolean; hasHistory: boolean; locked: boolean; localSkills: LocalSkills; remoteSkills: RemoteSkills;
+  gateway: boolean; browserToolsSupported: boolean; hasHistory: boolean; locked: boolean; localSkills: LocalSkills; remoteSkills: RemoteSkills;
   providerModels: readonly ChatModel[];
   toolRows: readonly ToolConfigurationRow[]; namespaceSupported: boolean; toolOptionsSupported: boolean;
 }) {
@@ -55,12 +95,16 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, localPlug
     </header>
     <DialogTabs id={id} label={t('Chat settings sections')} tabs={tabs} value={tab} onChange={setTab} />
     <div id={`${id}-general-panel`} role="tabpanel" aria-labelledby={`${id}-general-tab`} hidden={tab !== 'general'}>
-      <section className="chat-tool-card">
-        <h3>{t('Chat')}</h3>
-        <label htmlFor={`${id}-delay`}>{t('Delay ({{delay, number}} ms)', { delay: value.delay })}</label>
-        <input id={`${id}-delay`} type="range" min={0} max={1000} step={10} value={value.delay}
-          onChange={event => onChange({ ...value, delay: event.currentTarget.valueAsNumber })} />
-      </section>
+      <div className="chat-preference-cards">
+        <section className="chat-tool-card">
+          <h3>{t('Chat')}</h3>
+          <label htmlFor={`${id}-delay`}>{t('Delay ({{delay, number}} ms)', { delay: value.delay })}</label>
+          <input id={`${id}-delay`} type="range" min={0} max={1000} step={10} value={value.delay}
+            onChange={event => onChange({ ...value, delay: event.currentTarget.valueAsNumber })} />
+        </section>
+        {browserToolsSupported && <ToolPolicyFields value={value.toolPolicy} rows={toolRows} disabled={locked}
+          onChange={toolPolicy => onChange({ ...value, toolPolicy })} />}
+      </div>
     </div>
     <div id={`${id}-tools-panel`} role="tabpanel" aria-labelledby={`${id}-tools-tab`} hidden={tab !== 'tools'}>
       <section className="chat-tool-card">
@@ -68,13 +112,13 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, localPlug
         <div className="chat-tool-switches">
           {localPlugins.map(plugin => <label key={plugin.id}>
             <input type="checkbox" role="switch" checked={value.plugins.includes(plugin.id)}
-              disabled={locked || !localPluginsSupported || (plugin.requiresHistory && !hasHistory)}
+              disabled={locked || !browserToolsSupported || (plugin.requiresHistory && !hasHistory)}
               onChange={event => onChange({ ...value, plugins: event.currentTarget.checked ? [...value.plugins, plugin.id]
                 : value.plugins.filter(id => id !== plugin.id) })} />
             <span>{t(plugin.label)}</span>
           </label>)}
         </div>
-        {localPluginsSupported && !hasHistory && <p>{t('Chat History requires a local history profile.')}</p>}
+        {browserToolsSupported && !hasHistory && <p>{t('Chat History requires a local history profile.')}</p>}
       </section>
     </div>
     <div id={`${id}-tool-configuration-panel`} role="tabpanel" aria-labelledby={`${id}-tool-configuration-tab`} hidden={tab !== 'tool-configuration'}>
