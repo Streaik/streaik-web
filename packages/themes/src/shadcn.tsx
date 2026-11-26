@@ -56,7 +56,10 @@ function Tooltip({ children, content, side }: TooltipProps) {
   }, []);
   return <RadixTooltip.Provider delayDuration={350}>
     <RadixTooltip.Root open={!!content && open} onOpenChange={(value) => setOpen(!!content && value)}>
-      <RadixTooltip.Trigger asChild ref={attach}>{children}</RadixTooltip.Trigger>
+      <RadixTooltip.Trigger asChild ref={attach} onFocus={event => {
+        // Native dialogs remove `open` before returning focus. Skip Radix's focus hint, not focus itself.
+        if (event.relatedTarget instanceof Element && event.relatedTarget.closest('dialog:not([open])')) event.preventDefault();
+      }}>{children}</RadixTooltip.Trigger>
       {container && <RadixTooltip.Portal container={container}>
         <RadixTooltip.Content className="shadcn-tooltip" side={side} sideOffset={5}>{content}</RadixTooltip.Content>
       </RadixTooltip.Portal>}
