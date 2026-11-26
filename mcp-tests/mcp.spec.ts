@@ -28,7 +28,7 @@ async function setOpenAiKey(page: Page) {
 }
 
 async function addManualServer(page: Page, title: string, url: string, authorization = auth.openai.Authorization) {
-  await page.getByRole('button', { name: 'MCP Servers', exact: true }).click();
+  await page.getByRole('button', { name: 'Model Context', exact: true }).click();
   await page.getByRole('button', { name: 'Add by URL' }).click();
   const editor = page.getByRole('dialog', { name: 'Add MCP server' });
   await editor.getByLabel('Name', { exact: true }).fill(title);
@@ -129,7 +129,7 @@ async function exerciseChat(page: Page, approve: boolean, manual = false, reject
   await setOpenAiKey(page);
   if (manual) await addManualServer(page, 'Manual images', endpoint, authorization);
   else {
-    await page.getByRole('button', { name: 'MCP Servers', exact: true }).click();
+    await page.getByRole('button', { name: 'Model Context', exact: true }).click();
     await page.getByRole('tab', { name: 'Registry', exact: true }).click();
     await page.getByRole('button', { name: 'Install OpenAI Images' }).click();
     await page.getByRole('tab', { name: 'Installed', exact: true }).click();
@@ -321,7 +321,7 @@ test('approved REST Countries structured data reaches the next chat request', as
   });
   await page.goto('/');
   await setOpenAiKey(page);
-  await page.getByRole('button', { name: 'MCP Servers', exact: true }).click();
+  await page.getByRole('button', { name: 'Model Context', exact: true }).click();
   await page.getByRole('tab', { name: 'Registry', exact: true }).click();
   await page.getByRole('button', { name: 'Install GitHub RESTCountries.NET', exact: true }).click();
   await page.getByRole('button', { name: 'New chat', exact: true }).click();

@@ -12,6 +12,9 @@ test('MCP search stays within the current tab and indexes loaded registry pages'
     return route.fulfill({ json: { servers: [{ server }], metadata: cursor ? {} : { nextCursor: 'page-2' } } });
   });
   await page.goto('http://localhost:15175/mcp');
+  await expect(page.getByRole('heading', { name: 'Model Context', level: 1, exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Model Context', exact: true }).hover();
+  await expect(page.getByRole('tooltip', { name: 'Model Context', exact: true })).toBeVisible();
   const installedTab = page.getByRole('tab', { name: 'Installed', exact: true });
   const registryTab = page.getByRole('tab', { name: 'Registry', exact: true });
   const search = page.getByRole('searchbox', { name: 'Search MCP servers', exact: true });
@@ -83,7 +86,8 @@ test('the Installed overview finds registry descriptions and logos on later page
   try {
     await expect.poll(() => cursors).toEqual([null, 'page-2']);
     await expect(matched.locator('.catalog-mark svg')).toBeVisible();
-    await expect(matched.getByText(endpoint, { exact: true })).toBeVisible();
+    await expect(matched.getByText(endpoint, { exact: true })).toHaveCount(0);
+    await expect(matched.getByRole('button', { name: 'Copy server URL', exact: true })).toBeVisible();
   } finally {
     releaseSecondPage.resolve();
   }

@@ -49,7 +49,7 @@ test('localizes the MCP overview tabs and uses matching cards for registry and i
       { server: { name: 'example/tools', title: 'Fixture Tools', version: '1.2.3', description,
         remotes: [endpoint, alternate].map(url => ({ type: 'streamable-http', url })) } },
       { server: { name: 'example/single', title: 'Single Endpoint', remotes: [{ type: 'streamable-http', url: singleUrl }] } },
-      { server: { name: 'example/unsupported', title: 'Unsupported Server' } },
+      { server: { name: 'example/unsupported' } },
     ] } });
   });
   await page.goto('http://localhost:15175/mcp');
@@ -93,6 +93,7 @@ test('localizes the MCP overview tabs and uses matching cards for registry and i
   const search = registry.getByRole('searchbox', { name: 'MCP-servers zoeken' });
   const card = registry.getByRole('article').filter({ has: page.getByRole('heading', { name: 'Fixture Tools' }) });
   await expect(card).toHaveClass(/\bcatalog-card\b/);
+  await expect(card.getByText('example/tools', { exact: true })).toHaveCount(0);
   await expect(card.getByText(description, { exact: true })).toBeVisible();
   await expect(card.getByRole('img', { name: 'Versie 1.2.3', exact: true })).toHaveText('v1.2.3');
   const copyLabel = 'Server-URL kopiëren';
@@ -101,8 +102,9 @@ test('localizes the MCP overview tabs and uses matching cards for registry and i
   await expect(singleCard.getByRole('img')).toHaveCount(0);
   await expect(singleCard.getByText(singleUrl, { exact: true })).toHaveCount(0);
   await expect(singleCard.getByRole('button', { name: copyLabel, exact: true })).toBeVisible();
-  const unsupportedCard = registry.getByRole('article').filter({ has: page.getByRole('heading', { name: 'Unsupported Server' }) });
+  const unsupportedCard = registry.getByRole('article').filter({ has: page.getByRole('heading', { name: 'example/unsupported', exact: true }) });
   await expect(unsupportedCard).toBeVisible();
+  await expect(unsupportedCard.getByText('example/unsupported', { exact: true })).toHaveCount(1);
   await expect(unsupportedCard.getByRole('button', { name: copyLabel, exact: true })).toHaveCount(0);
   const refresh = registry.getByRole('button', { name: 'Register vernieuwen' });
   const install = card.getByRole('button', { name: 'Fixture Tools installeren' });
@@ -114,6 +116,8 @@ test('localizes the MCP overview tabs and uses matching cards for registry and i
   await refresh.press('Enter');
   await expect.poll(() => requests).toBeGreaterThan(beforeRefresh);
   await expect(refresh).toBeEnabled();
+  await search.fill('example/tools');
+  await expect(card).toBeVisible();
   await search.fill('Fixture');
   const urls = card.getByRole('combobox', { name: 'Server-URL' });
   await expect(urls).toHaveValue(endpoint);
@@ -139,7 +143,14 @@ test('localizes the MCP overview tabs and uses matching cards for registry and i
   await installedTab.click();
   const installedCard = installed.getByRole('article').filter({ has: page.getByRole('heading', { name: 'Fixture Tools' }) });
   await expect(installedCard).toHaveClass(/\bcatalog-card\b/);
-  await expect(installedCard.getByText(alternate, { exact: true })).toBeVisible();
+  await expect(installedCard.getByText(alternate, { exact: true })).toHaveCount(0);
+  await page.evaluate(url => navigator.clipboard.writeText(url), endpoint);
+  const installedCopy = installedCard.getByRole('button', { name: copyLabel, exact: true });
+  await installedCopy.hover();
+  await expect(page.getByRole('tooltip', { name: alternate, exact: true })).toBeVisible();
+  await installedCopy.click();
+  await expect(installedCard.getByRole('status')).toHaveText('Gekopieerd');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(alternate);
   await installedCard.getByRole('button', { name: 'Fixture Tools configureren' }).click();
   const edit = page.getByRole('dialog', { name: 'Model Context Server', exact: true });
   await expect(edit.getByLabel('URL', { exact: true })).toHaveValue(alternate);
@@ -297,9 +308,10 @@ test('detects Dutch, switches to Spanish without losing drafts, and remembers th
   await page.getByRole('menuitem', { name: 'Proveedores', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Proveedores' })).toBeVisible();
   await expect(page.getByRole('link', { name: /^sitio web de / }).first()).toBeVisible();
-  await page.getByRole('button', { name: 'Servidores MCP', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Servidores MCP', exact: true })).toBeVisible();
-  await expect(page.getByText(/^Instala servidores del registro/)).toBeVisible();
+  await page.getByRole('button', { name: 'Contexto del modelo', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Contexto del modelo', level: 1, exact: true })).toBeVisible();
+  const tabs = page.getByRole('tablist', { name: 'Contexto del modelo', exact: true });
+  await expect(tabs.getByRole('tab')).toHaveText(['Instalados', 'Registro']);
 });
 
 test('uses English when the browser language is unsupported', async ({ browser, baseURL }) => {
