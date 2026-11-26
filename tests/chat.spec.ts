@@ -1751,8 +1751,8 @@ test('Gateway chat shares context, keeps composer reasoning through approval, an
 
   await contextButton.click();
   const context = page.getByRole('dialog', { name: 'Context', exact: true });
-  const contextParts = requests[0].messages[0].parts.map(part => JSON.parse(part.text!));
-  const [system, user] = contextParts;
+  const contextParts = requests[0].messages[0].parts.map(part => part.text ?? '');
+  const [system, user] = contextParts.filter(text => text.startsWith('{')).map(text => JSON.parse(text));
   const systemPanel = context.getByRole('tabpanel', { name: 'System' });
   await systemPanel.getByRole('button', { name: 'Expand all' }).click();
   await expect(systemPanel.getByRole('tree', { name: 'JSON' })).toContainText(system.systemInformation.timezone);
@@ -1780,7 +1780,7 @@ test('Gateway chat shares context, keeps composer reasoning through approval, an
   expect(requests[1].reasoning).toBe('medium');
   expect(JSON.stringify(requests[1])).not.toContain(privateText);
   expect(requests[1].messages.filter(message => message.role === 'system')).toHaveLength(1);
-  expect(requests[1].messages[0].parts.map(part => JSON.parse(part.text!))).toEqual(contextParts);
+  expect(requests[1].messages[0].parts.map(part => part.text)).toEqual(contextParts);
   await review.getByRole('button', { name: 'Approve and share' }).click();
   await expect(review).toContainText(historyTool);
   await structuredResult.getByRole('button', { name: 'Expand all' }).click();
