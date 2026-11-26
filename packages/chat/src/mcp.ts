@@ -107,7 +107,7 @@ export async function fetchMcpCatalog(registryUrl: URL, signal: AbortSignal, cur
       }
     }
     names.add(name);
-    servers.push({ name, title: (typeof title === 'string' && title.trim() || name.split('/').at(-1) || name).slice(0, 160),
+    servers.push({ name, title: (typeof title === 'string' && title.trim() || name.trim()).slice(0, 160),
       description: typeof description === 'string' ? description.slice(0, 1600) : undefined,
       websiteUrl: typeof websiteUrl === 'string' ? websiteUrl : undefined, icons: catalogIcons(icons),
       version: typeof version === 'string' ? version.slice(0, 80) : undefined, remotes: choices });

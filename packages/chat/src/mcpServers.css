@@ -22,13 +22,13 @@
 .mcp-toggle input:disabled { opacity: .5; cursor: not-allowed; }
 .mcp-toggle input:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
 .mcp-toggle span, .mcp-endpoint { min-width: 0; overflow-wrap: anywhere; }
-.mcp-card .catalog-card-title :is(h2, h3) { font-size: 1.06rem; line-height: 1.25; margin: 0; }
+.mcp-card .catalog-card-title :is(h2, h3) { font-size: 1.06rem; line-height: 1.25; margin: 0; overflow-wrap: anywhere; }
 .mcp-card-title-details { display: grid; justify-items: start; gap: .2rem; min-width: 0; }
 .mcp-card p { margin: 0; }
 .mcp-card small, .mcp-form small { color: var(--muted); }
 .mcp-card-footer { display: grid; gap: .75rem; margin-block-start: auto; }
 .mcp-card .mcp-actions { min-block-size: 2.25rem; }
-.mcp-card .mcp-actions [role=status] { margin-inline-end: auto; }
+.mcp-card .mcp-actions [role=status]:first-child { margin-inline-end: auto; }
 .mcp-endpoint select { max-width: 100%; }
 .mcp-fields { min-width: 0; margin: 0; border: 1px solid var(--border); border-radius: .5rem; padding: .75rem; }
 .mcp-add-header { display: inline-flex; align-items: center; justify-self: start; gap: .35rem; }

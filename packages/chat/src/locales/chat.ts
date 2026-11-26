@@ -342,7 +342,6 @@ export const chatMessages = {
   'The reply was interrupted. You can retry or send another message.': ['Het antwoord is onderbroken. Probeer het opnieuw of stuur een ander bericht.', 'Se interrumpió la respuesta. Puedes reintentar o enviar otro mensaje.'],
   'Retry': ['Opnieuw proberen', 'Reintentar'],
   'MCP tools': ['MCP-tools', 'Herramientas MCP'],
-  'MCP Servers': ['Model Context', 'Servidores MCP'],
   'Model Context': ['Model Context', 'Contexto del modelo'],
   'Client': ['Client', 'Cliente'],
   'Extensions': ['Extensies', 'Extensiones'],

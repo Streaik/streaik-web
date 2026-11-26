@@ -126,8 +126,8 @@ function registrySearchDocument({ title, name, description, remotes }: McpCatalo
   return { title, text: [name, description, ...remotes.map(remote => remote.endpoint)].join('\n') };
 }
 
-function McpServerCard({ title, name, version, registryEntry, endpoint, actions, inDialog }: {
-  title: string; name?: string; version?: string; registryEntry?: McpCatalogServer;
+function McpServerCard({ title, version, registryEntry, endpoint, actions, inDialog }: {
+  title: string; version?: string; registryEntry?: McpCatalogServer;
   endpoint?: ReactNode; actions: ReactNode; inDialog?: boolean;
 }) {
   const scheme = useColorScheme();
@@ -140,7 +140,7 @@ function McpServerCard({ title, name, version, registryEntry, endpoint, actions,
   return <article className="catalog-card mcp-card">
     <div className="catalog-card-title"><CatalogMark name={title} icons={icons} fallback={<ChatIcon name="tool" />} />
       <div className="mcp-card-title-details"><Heading>{title}</Heading>
-        {version && <VersionBadge version={version} />}{name && <small>{name}</small>}
+        {version && <VersionBadge version={version} />}
       </div></div>
     {description && <p>{description}</p>}
     <div className="mcp-card-footer">
@@ -176,16 +176,15 @@ function InstalledServers({ store, selection, locked, onEdit, active, byEndpoint
           try { store.remove(record.id); } catch { setError(true); }
         }}><ChatIcon name="trash" /></Button></Tooltip>
     </>;
-    const endpoint = <small className="mcp-endpoint">{record.endpoint}</small>;
     const statusId = `${id}-${record.id}`;
     const statusText = status && <small id={statusId} role="status">{status}</small>;
     if (!selection) return <McpServerCard key={record.id} title={record.title} registryEntry={byEndpoint.get(record.endpoint)}
-      endpoint={endpoint} actions={<>{statusText}{actions}</>} />;
+      actions={<>{statusText}<CopyServerUrl key={record.endpoint} endpoint={record.endpoint} />{actions}</>} />;
     return <li className="mcp-row" key={record.id}>
       <label className="mcp-toggle"><input type="checkbox" role="switch" checked={!!entry} aria-describedby={status ? statusId : undefined}
         disabled={!ready || disabled} onChange={event => selection.set(record, event.target.checked)} /><span>{record.title}</span></label>
       <div className="mcp-actions">{actions}</div>
-      {endpoint}
+      <small className="mcp-endpoint">{record.endpoint}</small>
       {statusText}
     </li>;
   });
@@ -229,7 +228,7 @@ function CatalogCard({ item, installed, disabled, options, install, remove, inDi
     : <Tooltip content={actionLabel}><Button type="button" variant="subtle" className="chat-composer-icon" aria-label={actionLabel}
       disabled={disabled} onClick={() => installedId ? remove(installedId) : install(item, remote)}>
       <ChatIcon name={installedId ? 'trash' : 'download'} /></Button></Tooltip>;
-  return <McpServerCard title={item.title} name={item.name} version={item.version} registryEntry={item}
+  return <McpServerCard title={item.title} version={item.version} registryEntry={item}
     endpoint={endpoint} actions={<>{remote && <CopyServerUrl key={remote.endpoint} endpoint={remote.endpoint} />}{actions}</>} inDialog={inDialog} />;
 }
 
@@ -291,7 +290,7 @@ function McpServerTabs({ selection, ...props }: ServerSectionsProps & { selectio
   const [registryOpened, setRegistryOpened] = useState(tab === 'registry');
   const registry = useMcpRegistry(props.options, registryOpened, !selection && tab === 'installed' ? props.store.records : undefined);
   return <>
-    <DialogTabs id={id} label={t('MCP Servers')} tabs={[[ 'installed', t('Installed') ], [ 'registry', t('Registry') ]]} value={tab}
+    <DialogTabs id={id} label={t('Model Context')} tabs={[[ 'installed', t('Installed') ], [ 'registry', t('Registry') ]]} value={tab}
       className={selection ? undefined : 'catalog-tabs'}
       onChange={next => { setTab(next); if (next === 'registry') setRegistryOpened(true); }} />
     <div id={`${id}-installed-panel`} aria-labelledby={`${id}-installed-tab`} role="tabpanel" tabIndex={0} hidden={tab !== 'installed'}>
@@ -315,7 +314,7 @@ export function McpServersView({ toolbar, ...props }: ServerSectionsProps & { to
     {toolbar && createPortal(<Button className="agent-create" type="button" variant="primary" aria-label={addLabel} title={addLabel}
       aria-haspopup="dialog" disabled={props.locked || !props.store.available} onClick={() => props.onEdit({})}><ChatIcon name="add" /></Button>, toolbar)}
     <header className="catalog-overview-header">
-      <h1>{t('MCP Servers')}</h1><ProtocolLinks protocol="mcp" />
+      <h1>{t('Model Context')}</h1><ProtocolLinks protocol="mcp" />
     </header>
     {!props.store.available && <p role="status">{t('Sign in or unlock this profile to manage MCP servers.')}</p>}
     <McpServerTabs {...props} />
