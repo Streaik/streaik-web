@@ -5,7 +5,6 @@ import { array, BooleanChoice, cacheTtls, edit, JsonField, object, OptionalCard,
 import { useAppTranslation } from '../../i18n';
 
 const versions = {
-  bash: ['bash_20250124'],
   web_search: ['web_search_20260318', 'web_search_20260209', 'web_search_20250305'],
   web_fetch: ['web_fetch_20260318', 'web_fetch_20260309', 'web_fetch_20260209', 'web_fetch_20250910'],
   code_execution: ['code_execution_20260521', 'code_execution_20260120', 'code_execution_20250825'],
@@ -17,7 +16,7 @@ const versions = {
 } as const;
 
 const titles: Record<keyof typeof versions, string> = {
-  bash: 'Bash', web_search: 'Web search', web_fetch: 'Web fetch', code_execution: 'Code execution', text_editor: 'Text editor',
+  web_search: 'Web search', web_fetch: 'Web fetch', code_execution: 'Code execution', text_editor: 'Text editor',
   memory: 'Memory', advisor: 'Advisor', tool_search_tool_bm25: 'Tool search (BM25)', tool_search_tool_regex: 'Tool search (regex)',
 };
 
@@ -116,7 +115,7 @@ export function AnthropicToolCards(editor: OptionsEditor) {
           <BooleanChoice label="Strict validation" value={tool.strict} onChange={edit(toolEditor, 'strict')} />
         </FieldGrid>
         <ToolCache editor={toolEditor} field="cache_control" label="Tool cache control" />
-        {(id === 'bash' || id === 'memory' || id === 'text_editor') &&
+        {(id === 'memory' || id === 'text_editor') &&
           <JsonField label="Input examples" value={tool.input_examples} shape="array" onChange={edit(toolEditor, 'input_examples')} />}
         {id === 'text_editor' && tool.type === 'text_editor_20250728' &&
           <Integer label="Maximum characters" min={1} value={tool.max_characters} onChange={edit(toolEditor, 'max_characters')} />}

@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Card, Choice, FieldGrid, Integer, ListField, Text, Toggle } from '../fields';
 import type { OptionsEditor, ProviderFormProps } from '../fields';
-import { nativeObject } from '../settings';
 import type { NativeOptions } from '../settings';
 import { anthropicBetas, anthropicChatHeaders, anthropicDefaults } from './options';
 import { array, CacheFields, edit, JsonField, object, OptionalCard, section } from './fields';
@@ -120,7 +119,6 @@ function Headers(editor: OptionsEditor) {
     <Card title="Provider headers">
       <Choice label="Anthropic API version" choices={['2026-10-21', '2023-06-01']}
         value={value['anthropic-version'] ?? anthropicDefaults['anthropic-version']} onChange={edit(editor, 'anthropic-version')} />
-      <Text label="Custom Anthropic API version" value={value['anthropic-version']} onChange={edit(editor, 'anthropic-version')} />
     </Card>
     <Card title="Anthropic beta headers">
       <div className="chat-tool-switches">
@@ -128,8 +126,6 @@ function Headers(editor: OptionsEditor) {
           disabled={required.includes(beta) || (beta === anthropicBetas.compaction && array(object(value.context_management).edits).length > 0)}
           onChange={enabled => toggleBeta(beta, enabled)} />)}
       </div>
-      <ListField label="Additional beta headers" value={selected.filter(beta => !managed.has(beta))}
-        onChange={betas => edit(editor, 'anthropic-beta')([...selected.filter(beta => managed.has(beta)), ...(betas ?? [])].join(',') || undefined)} />
     </Card>
   </>;
 }
@@ -138,7 +134,7 @@ export function AnthropicChatConfigForm({ value, onChange }: ProviderFormProps) 
   const editor = { value, onChange };
   const compaction = object(value.compaction);
   const contextEdits = array(object(value.context_management).edits);
-  const { 'anthropic-version': version, 'anthropic-beta': betas, ...body } = value;
+  const betas = value['anthropic-beta'];
   return <>
     <Integer label="Maximum output tokens" value={value.max_tokens ?? anthropicDefaults.max_tokens} min={1} max={2147483647}
       onChange={edit(editor, 'max_tokens')} />
@@ -155,7 +151,7 @@ export function AnthropicChatConfigForm({ value, onChange }: ProviderFormProps) 
     <AnthropicToolCards {...editor} />
     <AnthropicContextManagement {...editor} />
     <SessionBudget {...editor} />
-    <Card title="Other Anthropic options">
+    <Card title="Other">
       <FieldGrid>
         <Choice label="Speed" choices={{ standard: 'Standard', fast: 'Fast' }} value={value.speed} onChange={edit(editor, 'speed')} />
         <Choice label="Service tier" choices={{ auto: 'Automatic', standard_only: 'Standard only' }}
@@ -165,10 +161,5 @@ export function AnthropicChatConfigForm({ value, onChange }: ProviderFormProps) 
       </FieldGrid>
     </Card>
     <Headers {...editor} />
-    <Card title="Advanced Anthropic options">
-      <JsonField label="Native Messages body options (JSON)" shape="object" value={Object.keys(body).length ? body : undefined}
-        onChange={next => onChange({ ...nativeObject(next), ...(version !== undefined && { 'anthropic-version': version }),
-          ...(betas !== undefined && { 'anthropic-beta': betas }) })} />
-    </Card>
   </>;
 }

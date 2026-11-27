@@ -3281,19 +3281,29 @@ test('Anthropic chat settings send native fields and headers, persist edits, and
   };
   const limit = settings.getByRole('spinbutton', { name: 'Maximum output tokens', exact: true });
   const version = settings.getByLabel('Anthropic API version', { exact: true });
+  const beta = 'cache-diagnosis-2026-04-07';
+  const betaSwitch = settings.getByRole('switch', { name: beta, exact: true });
   const save = settings.getByRole('button', { name: 'Save', exact: true });
   await open();
+  await expect(settings.getByRole('heading', { name: 'Other', exact: true })).toBeVisible();
+  for (const name of ['Speed', 'Service tier', 'Inference geography']) {
+    await expect(settings.getByRole('combobox', { name, exact: true })).toBeVisible();
+  }
+  await expect(settings.getByLabel('Custom Anthropic API version', { exact: true })).toHaveCount(0);
+  await expect(settings.getByLabel('Additional beta headers', { exact: true })).toHaveCount(0);
+  await expect(settings.getByRole('heading', { name: 'Advanced Anthropic options', exact: true })).toHaveCount(0);
+  await expect(settings.getByRole('heading', { name: 'Bash', exact: true })).toHaveCount(0);
   await expect(limit).toHaveValue('128000');
   await limit.fill('2048');
   await version.selectOption('2023-06-01');
   await settings.getByRole('switch', { name: 'Enable Cache', exact: true }).check();
   await settings.getByLabel('Cache duration', { exact: true }).selectOption('1h');
   await settings.getByRole('switch', { name: 'Enable Web fetch', exact: true }).check();
-  await settings.getByLabel('Additional beta headers', { exact: true }).fill('fixture-beta');
+  await betaSwitch.check();
   await save.click();
   await send(2);
   expect(requests[1].headers['anthropic-version']).toBe('2023-06-01');
-  expect(requests[1].headers['anthropic-beta']).toBe('fixture-beta');
+  expect(requests[1].headers['anthropic-beta']).toBe(beta);
   expect(requests[1].metadata).toEqual({ anthropic: { max_tokens: 2048, cache_control: { type: 'ephemeral', ttl: '1h' },
     tools: [{ type: 'web_fetch_20260318', name: 'web_fetch', max_uses: 5, allowed_callers: ['direct'], citations: { enabled: true } }] } });
 
@@ -3303,9 +3313,11 @@ test('Anthropic chat settings send native fields and headers, persist edits, and
   await open();
   await expect(limit).toHaveValue('2048');
   await expect(version).toHaveValue('2023-06-01');
+  await expect(betaSwitch).toBeChecked();
   await settings.getByRole('button', { name: 'Reset provider settings', exact: true }).click();
   await expect(limit).toHaveValue('128000');
   await expect(version).toHaveValue('2026-10-21');
+  await expect(betaSwitch).not.toBeChecked();
   await save.click();
   await send(3);
   expect(requests[2].headers['anthropic-version']).toBe('2026-10-21');
