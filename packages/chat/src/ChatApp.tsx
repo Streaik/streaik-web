@@ -21,7 +21,7 @@ import { chatLocation, conversationPath, pagePaths } from './chatLocation';
 import { ModelsView, ProvidersView } from './CatalogViews';
 import { ModelPicker } from './ModelPicker';
 import { AgentChatPicker, ChatModeButtons } from './AgentChatPicker';
-import { browserAgentModel } from './agentChat';
+import { browserAgentModel, browserGatewayAgentModels } from './agentChat';
 import { useAgentChat } from './useAgentChat';
 import { defaultAgentModelIds, resolveModelSelection } from './modelSelection';
 import { selectDictationTarget } from './composerDictation';
@@ -68,7 +68,7 @@ import { assignedAgent } from './agentCatalog';
 import type { AgentsConfig } from './agentCatalog';
 import { browserChatSkills } from './agentChatSkills';
 import { agentModels as configuredAgentModels } from './agentDefinition';
-import { agentProviderOptions, agentProviderRequest } from './agentProviderSettings';
+import { agentChatProviderSettings, agentProviderOptions, agentProviderRequest } from './agentProviderSettings';
 import { conversationOpeningText, deleteConversation, listConversations, newConversation, newestFirst, saveConversation } from './conversations';
 import type { Conversation } from './conversations';
 import type { createConversationSearch, SearchConversationText, SearchHistory } from './conversationSearch';
@@ -83,8 +83,8 @@ import { useMcpSelection, useMcpServers } from './useMcpServers';
 import type { McpServers } from './useMcpServers';
 export type { McpAppAuth, McpOptions, McpRemoteHeader } from './mcp';
 export { isMcpRuntime } from './mcp';
-import { chatDecisionInput, chatModelDecision, modelDecisionRouter, selectModelRoleId, useDecisionRoute } from './modelDecisions';
-import type { ModelDecision } from './modelDecisions';
+import { agentModelDecisionInstructions, chatDecisionInput, chatModelDecision, modelDecisionRouter, selectModelRoleId, useDecisionRoute } from './modelDecisions';
+import type { DecisionAgentContext, ModelDecision } from './modelDecisions';
 import { conversationNameRoleId, runTextAppAgent, toolSearchRoleId, welcomeRoleId } from './textAppAgents';
 import type { TextAppRequest } from './textAppAgents';
 import { WelcomeHeading } from './WelcomeHeading';
@@ -421,6 +421,8 @@ function HistoryChat({ appName, gateway, connection, scope, models, route, onRou
 
 type HostedTurn = { endpoint: GatewayChatEndpoint; selection: HostedAgentSelection };
 type VoiceRun = { controller: AbortController; session?: VoiceSession };
+type TurnDecision = { choice: ModelDecision; agent?: { context: DecisionAgentContext;
+  settings: ReadonlyMap<string, ProviderChatSettings | undefined> } };
 type Turn = { model: string; route: ChatRoute; tools: ChatTool[]; context?: RequestContext; hosted?: HostedTurn;
   requestTools: ChatRequestTool[];
   voiceMessage?: string; liveClient?: { id: string; lastId?: string; finished: boolean };
@@ -506,8 +508,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       async sendMessages(request) {
         const last = request.messages.at(-1);
         const previous = request.trigger === 'submit-message' && last?.role === 'assistant' ? last : undefined;
-        const { route, decision, context, providerSettings, clientToolSearch, hosted, ...body } = (request.body ?? {}) as {
-          model?: string; route?: ChatRoute; decision?: ModelDecision; context?: RequestContext; tools?: ChatRequestTool[];
+        const { route, decision, context, providerSettings: initialSettings, clientToolSearch, hosted, ...body } = (request.body ?? {}) as {
+          model?: string; route?: ChatRoute; decision?: TurnDecision; context?: RequestContext; tools?: ChatRequestTool[];
           providerSettings?: ProviderChatSettings; hosted?: HostedTurn; reasoning?: ChatReasoning; toolChoice?: ChatToolChoice;
           clientToolSearch?: boolean;
         };
@@ -522,25 +524,33 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           return withReplyMetadata(stream, body.model, previous);
         }
         let model = body.model;
+        let providerSettings = initialSettings;
         const enabledSkillIds = new Set(context?.skills?.skills.map(({ skill_id }) => skill_id));
         const resourceServers = new Set(context?.mcp?.mcpResourceCatalog.servers.map(({ serverId }) => serverId));
         const replay = filterLocalToolReplay(request.messages, body.tools ?? [], isApiChat(route), enabledSkillIds, resourceServers);
         request = { ...request, body, messages: filterToolOutputContent(replay, preferences.toolOutput) };
         if (route?.mode === 'gateway' && decision) {
-          const { endpoint, ...choice } = decision;
-          const input = chatDecisionInput(request.messages);
-          if (!input.length) setPendingModel(body.model);
-          else {
-            setDeciding(true);
+          const { endpoint, ...choice } = decision.choice;
+          const input = chatDecisionInput(request.messages, decision.agent?.context);
+          setDeciding(true);
+          try {
+            let winner: string | undefined;
             try {
-              const winner = await gateway.decideChoice(endpoint, { ...choice, input }, request.abortSignal);
-              request.abortSignal?.throwIfAborted();
+              winner = await gateway.decideChoice(endpoint, { ...choice, input }, request.abortSignal);
+            } catch (error) {
+              // Like the hosted runtime, browser agents can still answer with
+              // their first candidate when routing is unavailable or invalid.
+              if (!decision.agent) throw error;
+            }
+            request.abortSignal?.throwIfAborted();
+            if (winner) {
               model = winner;
-              setPendingModel(winner);
-              setTurn((current) => current && { ...current, model: winner });
+              if (decision.agent) providerSettings = decision.agent.settings.get(winner);
+              setTurn((current) => current && { ...current, model: winner, providerSettings });
               request = { ...request, body: { ...body, model: winner } };
-            } finally { setDeciding(false); }
-          }
+            }
+            setPendingModel(model);
+          } finally { setDeciding(false); }
         }
         // A provider form is a continuation, not a historical tool result that can go to another model.
         request = { ...request, messages: request.messages.flatMap((message, index, history) => {
@@ -927,11 +937,14 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const runCatalog = runResult?.catalog ?? [];
   const runCompatible = runRoute.mode === 'direct' ? runCatalog.filter(item => direct?.supports(item.provider, runRoute.endpoint))
     : pickChatCatalogModels(runCatalog);
-  const browserModel = agentMode && !hostedRoute ? browserAgentModel(chatAgent, runCompatible, selected.find(model => !isVoiceCatalogModel(model))) : undefined;
-  const provider = browserModel && chatProviderForModel(browserModel.id);
-  const agentModelOptions = browserModel && configuredAgentModels(chatAgent).find(({ id }) => id === browserModel.id);
-  const options = agentModelOptions && agentProviderOptions(agentModelOptions);
-  const turnProviderSettings = agentMode ? provider && options ? { [provider]: options } : undefined : preferences.providerSettings;
+  const preferred = selected.find(model => !isVoiceCatalogModel(model));
+  const gatewayAgent = agentMode && agentRoute?.mode === 'gateway'
+    ? browserGatewayAgentModels(chatAgent, runCatalog, runCompatible, preferred) : undefined;
+  const browserModel = gatewayAgent ? gatewayAgent.answers[0]?.model
+    : agentMode && !hostedRoute ? browserAgentModel(chatAgent, runCompatible, preferred) : undefined;
+  const agentModelOptions = gatewayAgent ? gatewayAgent.answers[0]?.configuration
+    : browserModel && configuredAgentModels(chatAgent).find(({ id }) => id === browserModel.id);
+  const turnProviderSettings = agentMode ? agentChatProviderSettings(agentModelOptions) : preferences.providerSettings;
   const hostedDefinition = hostedRoute && chatAgent && (configuredAgentModels(chatAgent).length ? chatAgent
     : selected.find(model => !isVoiceCatalogModel(model)) ? { ...chatAgent, model: { id: selected.find(model => !isVoiceCatalogModel(model))!.id } } : undefined);
   const hostedSelection: HostedAgentSelection | undefined = hostedRoute && agentChat.option && (agentChat.remoteId || hostedDefinition)
@@ -975,8 +988,15 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     onPersist({ ...conversation, messages: messages.filter(message => message.parts.length),
       metadata: { ...conversation.metadata, model: pendingModel ?? modelId, updatedAt: new Date().toISOString() } }, nameRequest.current);
   }, [messages, status, conversation, pendingModel, modelId, onPersist]);
-  const hasDecisions = agents?.config.roles?.some(({ id }) => id === selectModelRoleId);
-  const decision = voiceProtocol ? undefined : chatModelDecision(router, selected);
+  const agentRouter = gatewayAgent && gatewayAgent.answers.length > 1 ? gatewayAgent.router : undefined;
+  const hasDecisions = view === 'chat' && agentMode ? !!agentRouter : agents?.config.roles?.some(({ id }) => id === selectModelRoleId);
+  const agentChoice = gatewayAgent && agentRouter && decisions.selected !== 'off'
+    ? chatModelDecision({ endpoint: decisions.selected, model: agentRouter.id, instructions: agentModelDecisionInstructions },
+      gatewayAgent.answers.map(({ model }) => model)) : undefined;
+  const modelChoice = voiceProtocol ? undefined : chatModelDecision(router, selected);
+  const decision: TurnDecision | undefined = agentChoice && gatewayAgent && chatAgent ? { choice: agentChoice, agent: { context: chatAgent,
+    settings: new Map(gatewayAgent.answers.map(({ model, configuration }) => [model.id, agentChatProviderSettings(configuration)])) } }
+    : modelChoice && { choice: modelChoice };
   const routesLocked = busy || !!voicePhase || toolBusy || (status === 'ready' && toolParts.length > 0);
   const toolCapabilities = chatToolCapabilities(runRoute, modelId);
   const canSend = connection.ready && !!modelId && !routesLocked && !restoringSkills && !connectingMcp &&

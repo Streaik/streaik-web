@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createAgentBackend, gatewayChatEndpoints } from '../packages/gateway/src/index.ts';
-import { browserAgentModel, resolveAgentChatRoute } from '../packages/chat/src/agentChat.ts';
+import { createAgentBackend, gatewayChatEndpoints, pickChatCatalogModels, readModelCatalog } from '../packages/gateway/src/index.ts';
+import { browserAgentModel, browserGatewayAgentModels, resolveAgentChatRoute } from '../packages/chat/src/agentChat.ts';
 import { agentProviderHeaders } from '../samples/byok/src/providerKeys.ts';
 
 const base = new URL('https://agent.example.invalid/tenant/');
@@ -28,6 +28,32 @@ test('browser fallback chooses a compatible agent model without replacing explic
   assert.equal(browserAgentModel(definition, compatible), undefined);
   assert.equal(browserAgentModel({ ...definition, models: [definition.model, { id: compatible[0].id }] }, compatible), compatible[0]);
   assert.equal(browserAgentModel({ ...definition, model: undefined }, compatible), compatible[0]);
+});
+
+test('browser Gateway agent keeps an inferred decision ID eligible to answer, in agent order', () => {
+  const alternate = { id: 'anthropic/claude-example', type: 'language' };
+  const answer = { id: modelId, type: 'language', providerMetadata: { service_tier: 'flex' } };
+  const configured = { ...definition, models: [answer, { id: 'openai/missing', type: 'language' }, alternate, answer] };
+  const data = [alternate, { id: modelId, type: 'decision' }, answer];
+  for (const rows of [data, [...data].reverse()]) {
+    const catalog = readModelCatalog({ data: rows });
+    const { answers, router } = browserGatewayAgentModels(configured, catalog, pickChatCatalogModels(catalog));
+    assert.equal(router, answer);
+    assert.deepEqual(answers.map(({ model }) => [model.id, model.type]), [[modelId, 'language'], [alternate.id, 'language']]);
+    assert.deepEqual(answers.map(({ configuration }) => configuration), [answer, alternate]);
+  }
+});
+
+test('an explicit browser Gateway router takes precedence and never supplies answer settings', () => {
+  const explicit = { id: modelId, type: 'decision', providerMetadata: { service_tier: 'default' } };
+  const answer = { id: modelId, type: 'language', providerMetadata: { service_tier: 'flex' } };
+  const untyped = { id: 'anthropic/claude-legacy' };
+  const decisionOnly = { id: 'google/decision-only', type: 'decision' };
+  const catalog = readModelCatalog({ data: [answer, explicit, { ...untyped, type: 'language' }, { ...untyped, type: 'decision' }, decisionOnly] });
+  const { answers, router } = browserGatewayAgentModels({ ...definition,
+    models: [untyped, explicit, answer, { id: decisionOnly.id }] }, catalog, pickChatCatalogModels(catalog));
+  assert.equal(router, explicit);
+  assert.deepEqual(answers.map(({ configuration }) => configuration), [untyped, answer]);
 });
 
 test('hosted catalog and API Chat scope credentials and serialize only the selected definition and transcript', async () => {

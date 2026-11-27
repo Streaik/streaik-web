@@ -19,9 +19,9 @@ const chatMode = (page: Page, name: 'Model' | 'Agent') => page.getByRole('group'
   .getByRole('button', { name: `${name} chat`, exact: true });
 const agentPicker = (page: Page) => page.getByRole('button', { name: 'Agent', exact: true });
 
-async function start(page: Page) {
+async function start(page: Page, data: { id: string; type?: string; name?: string }[] = [{ id: model }]) {
   await page.route(faviconEndpoint, route => route.fulfill(iconResponse));
-  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: model }] } }));
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data } }));
   await page.goto(app);
   await expect(chatMode(page, 'Model')).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: 'Account menu' }).click();
@@ -91,7 +91,9 @@ test('agent mode prefers hosted API Chat and offers four hosted routes', async (
 });
 
 test('agent mode falls back to browser-run Gateway when the configured agent backend is offline', async ({ page }) => {
+  let decisions = 0;
   await page.route('**/test-agents/v1/models', route => route.abort());
+  await page.route('**/gateway/*/decisions', route => { decisions++; return route.abort(); });
   await page.route('**/gateway/api/chat', async route => {
     const body = route.request().postDataJSON();
     if (!JSON.stringify(body.messages).includes('Run the browser agent')) return route.fulfill(stream('Welcome'));
@@ -100,7 +102,7 @@ test('agent mode falls back to browser-run Gateway when the configured agent bac
     expect(body.messages).toEqual(expect.arrayContaining([expect.objectContaining({ role: 'system' })]));
     await route.fulfill(stream('Browser reply'));
   });
-  await start(page);
+  await start(page, [{ id: model, type: 'language' }, { id: model, type: 'decision' }]);
   await expect(page.getByText('Agent backend unavailable. Using a browser route.')).toBeVisible();
   await pickChatAgent(page);
   await routeGroup(page, 'Gateway');
@@ -109,6 +111,100 @@ test('agent mode falls back to browser-run Gateway when the configured agent bac
   await page.getByRole('menuitemradio', { name: '/api/chat', exact: true }).click();
   await send(page, 'Run the browser agent');
   await expect(page.getByText('Browser reply', { exact: true })).toBeVisible();
+  expect(decisions).toBe(0);
+});
+
+test('browser Gateway agents route dual-use IDs once per turn and keep the winning model settings', async ({ page }) => {
+  const alternate = 'openai/gpt-5-mini';
+  const agent = { name: 'Routing agent', description: 'Selects an answer model.', instructions: 'Answer concisely.', models: [
+    { id: model, type: 'language', providerMetadata: { service_tier: 'flex' } },
+    { id: alternate, type: 'language', providerMetadata: { service_tier: 'priority' } },
+  ] };
+  await page.addInitScript(definition => {
+    const scope = JSON.stringify([new URL('/gateway/api/chat', location.href).href, 'byok']);
+    const key = `streaik.agents.v1:${scope}`;
+    if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify({ version: 1, assignments: {}, overrides: [],
+      local: [{ id: 'routing', definition }] }));
+  }, agent);
+  await page.route('**/test-agents/v1/models', route => route.abort());
+  const sequence: string[] = [];
+  await page.route('**/gateway/v1/decisions', route => {
+    sequence.push('v1 decision');
+    const body = route.request().postDataJSON();
+    expect(body.model).toBe(model);
+    expect(JSON.parse(body.input)).toEqual({ agent: { name: agent.name, description: agent.description, instructions: agent.instructions },
+      conversation: [{ role: 'user', text: 'Route this agent turn' }] });
+    expect(body.questions[0].choices.map(({ value }: { value: string }) => value)).toEqual([model, alternate]);
+    return route.fulfill({ json: { answers: [{ name: 'chat_model', type: 'choice', choice: alternate }] } });
+  });
+  await page.route('**/gateway/api/decisions', route => {
+    sequence.push('api decision');
+    const body = route.request().postDataJSON();
+    expect(Object.keys(body.questions.chat_model.criteria)).toEqual([model, alternate]);
+    return route.fulfill({ json: { answers: { chat_model: { type: 'choice', choice: 'openai/not-offered' } } } });
+  });
+  const toolName = 'local_conversations_list_all';
+  await page.route('**/gateway/api/chat', route => {
+    const body = route.request().postDataJSON();
+    const lastUser = body.messages.findLast(({ role }: { role: string }) => role === 'user');
+    const text = lastUser?.parts[0]?.text;
+    if (!['Route this agent turn', 'Use fallback', 'Skip routing'].includes(text)) return route.fulfill(stream('Welcome'));
+    expect(body.agent).toBeUndefined();
+    expect(body.decision).toBeUndefined();
+    if (text !== 'Route this agent turn') {
+      sequence.push(text);
+      expect(body).toMatchObject({ model, providerMetadata: { openai: { service_tier: 'flex' } } });
+      return route.fulfill(stream(text === 'Use fallback' ? 'Fallback reply' : 'Unrouted reply'));
+    }
+    expect(body).toMatchObject({ model: alternate, providerMetadata: { openai: { service_tier: 'priority' } } });
+    if (sequence.includes('chat')) {
+      sequence.push('continuation');
+      expect(JSON.stringify(body.messages)).toContain('output-available');
+      return route.fulfill(stream('Routed reply'));
+    }
+    sequence.push('chat');
+    expect(body.tools).toEqual(expect.arrayContaining([expect.objectContaining({ name: toolName })]));
+    const toolCallId = 'history-call';
+    const chunks = [{ type: 'start' }, { type: 'start-step' },
+      { type: 'tool-input-available', toolCallId, toolName, input: {}, dynamic: true },
+      { type: 'tool-approval-request', toolCallId, approvalId: 'review-history', signature: 'fixture-signature' },
+      { type: 'finish-step' }, { type: 'finish', finishReason: 'tool-calls' }];
+    return route.fulfill({ ...stream(''), body: chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n' });
+  });
+  await start(page, [{ id: model, name: 'Luna router', type: 'decision' }, { id: model, name: 'Luna answer', type: 'language' },
+    { id: alternate, name: 'Mini answer', type: 'language' }]);
+  await agentPicker(page).click();
+  await page.getByRole('option', { name: agent.name, exact: true }).click();
+  await page.getByRole('button', { name: 'Chat settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Chat settings', exact: true });
+  await settings.getByRole('tab', { name: 'Tools', exact: true }).click();
+  await settings.getByRole('switch', { name: 'Chat History', exact: true }).check();
+  await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  await send(page, 'Route this agent turn');
+  await page.getByRole('dialog', { name: 'Review tool result' }).getByRole('button', { name: 'Approve and share', exact: true }).click();
+  await expect(page.getByText('Routed reply', { exact: true })).toBeVisible();
+  expect(sequence).toEqual(['v1 decision', 'chat', 'continuation']);
+
+  await routeGroup(page, 'Decisions');
+  await page.getByRole('menuitemradio', { name: '/api/decisions', exact: true }).click();
+  await send(page, 'Use fallback');
+  await expect(page.getByText('Fallback reply', { exact: true })).toBeVisible();
+  await routeGroup(page, 'Decisions');
+  await page.getByRole('menuitemradio', { name: 'Off', exact: true }).click();
+  await send(page, 'Skip routing');
+  await expect(page.getByText('Unrouted reply', { exact: true })).toBeVisible();
+  expect(sequence).toEqual(['v1 decision', 'chat', 'continuation', 'api decision', 'Use fallback', 'Skip routing']);
+
+  await page.getByRole('button', { name: 'Agents', exact: true }).click();
+  await page.getByRole('article', { name: agent.name, exact: true }).getByRole('button', { name: 'Edit', exact: true }).click();
+  const editor = page.getByRole('dialog', { name: 'Edit agent', exact: true });
+  await editor.getByRole('button', { name: 'Add model', exact: true }).click();
+  await editor.getByRole('option', { name: `Luna router (${model})`, exact: true }).click();
+  await editor.getByRole('button', { name: 'Save agent', exact: true }).click();
+  await expect(editor).toBeHidden();
+  const { origins } = await page.context().storageState();
+  const saved = origins.flatMap(({ localStorage }) => localStorage).find(({ name }) => name.startsWith('streaik.agents.v1:'));
+  expect(saved && JSON.parse(saved.value).local[0].definition).toEqual({ ...agent, models: [...agent.models, { id: model, type: 'decision' }] });
 });
 
 for (const mode of ['Gateway', 'Direct', 'Agents'] as const) test(`saved agent skills use browser tools only on browser routes: ${mode}`, async ({ page }) => {

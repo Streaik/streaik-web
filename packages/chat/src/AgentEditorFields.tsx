@@ -5,6 +5,7 @@ import { useId, useRef, useState } from 'react';
 import type { ComponentPropsWithoutRef, ReactNode } from 'react';
 import { agentIconUrl } from './agentDraft';
 import type { AgentDraft, IconDraft } from './agentDraft';
+import { agentCatalogModel, agentModelKey } from './agentDefinition';
 import type { AgentModel } from './agentDefinition';
 import { useAppTranslation, useSelectSearch } from './i18n';
 
@@ -41,9 +42,15 @@ export function AgentGeneralFields({ draft, initial, patch, catalog, catalogStat
   const search = useSelectSearch();
   const models = catalog.filter(({ type, tags }) => type === 'transcription' ||
     (type === 'language' || type === 'decision') && !tags.includes('realtime'));
-  const available = modelOptions(models.filter(({ id }) => !draft.models.some((model) => model.id === id)), ({ type }) =>
+  const byKey = new Map(models.map(model => [agentModelKey(model), model]));
+  const selected = draft.models.map(model => agentCatalogModel(model, models));
+  const selectedKeys = new Set(draft.models.map((model, index) => agentModelKey(selected[index] ?? model)));
+  const groupFor = ({ type }: CatalogModel) =>
     type === 'transcription' ? { id: 'transcription', label: t('Transcription') } :
-      type === 'decision' ? { id: 'decision', label: t('Decision') } : { id: 'language', label: t('Language') });
+      type === 'decision' ? { id: 'decision', label: t('Decision') } : { id: 'language', label: t('Language') };
+  const available = [...byKey].filter(([key]) => !selectedKeys.has(key)).map(([value, model]) => ({
+    value, label: modelLabel(model), group: groupFor(model),
+  }));
 
   function move(index: number, target: number) {
     const next = [...draft.models];
@@ -59,9 +66,11 @@ export function AgentGeneralFields({ draft, initial, patch, catalog, catalogStat
     <Field label={t('Argument hint')} value={draft.argumentHint} onChange={(event) => patch({ argumentHint: event.currentTarget.value })} />
     <Group title={t('Models')}>
       {draft.models.length > 0 && <ol className="agent-rows">{draft.models.map((model, index) => {
-        const entry = models.find(({ id, type }) => id === model.id && (!model.type || type === model.type));
-        return <li key={`${model.id}:${index}`} className="agent-item">
-          <span>{entry ? modelLabel(entry) : model.id}{!entry && !catalogStatus && <small> · {t('Not in the catalog')}</small>}</span>
+        const entry = selected[index];
+        const ambiguous = entry && models.some(({ id, type }) => id === entry.id && type !== entry.type);
+        return <li key={`${agentModelKey(model)}:${index}`} className="agent-item">
+          <span>{entry ? modelLabel(entry) : model.id}{ambiguous && <small> · {groupFor(entry).label}</small>}
+            {!entry && !catalogStatus && <small> · {t('Not in the catalog')}</small>}</span>
           <div className="agent-item-actions">
             <Button aria-label={t('Move {{model}} up', { model: model.id })} disabled={index === 0} onClick={() => move(index, index - 1)}>↑</Button>
             <Button aria-label={t('Move {{model}} down', { model: model.id })} disabled={index === draft.models.length - 1} onClick={() => move(index, index + 1)}>↓</Button>
@@ -70,9 +79,10 @@ export function AgentGeneralFields({ draft, initial, patch, catalog, catalogStat
         </li>;
       })}</ol>}
       <Select search={search(t('Add model'))} label={t('Add model')} placeholder={t('Choose a model')} value="" options={available}
-        disabled={!available.length} onValueChange={(id) => {
-          const item = models.find((model) => model.id === id);
-          if (item) patch({ models: [...draft.models, initial.models.find((model) => model.id === id) ?? { id, type: item.type! }] });
+        disabled={!available.length} onValueChange={(key) => {
+          const item = byKey.get(key);
+          if (item?.type) patch({ models: [...draft.models, initial.models.find(model =>
+            agentModelKey(agentCatalogModel(model, models) ?? model) === key) ?? { id: item.id, type: item.type }] });
         }} />
       <CatalogStatus status={catalogStatus ?? (!models.length ? t('No models are available for this agent.') : undefined)} />
     </Group>

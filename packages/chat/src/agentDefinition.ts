@@ -1,3 +1,5 @@
+import type { CatalogModel } from '@streaik/gateway';
+
 export type JsonValue = null | boolean | number | string | readonly JsonValue[] | JsonObject;
 export type JsonObject = { readonly [key: string]: JsonValue };
 
@@ -35,6 +37,16 @@ export function isAgentDefinition(value: unknown): value is AgentDefinition {
 export function agentModels(agent?: AgentDefinition): readonly AgentModel[] {
   return agent?.models?.length ? agent.models : agent?.model ? [agent.model] : [];
 }
+
+export function agentCatalogModel(model: AgentModel, catalog: readonly CatalogModel[]) {
+  const { id, type } = model;
+  // Old definitions do not always record a type. Prefer the answer variant
+  // for display and editing when the same legacy ID serves both roles.
+  return catalog.find(item => item.id === id && item.type === (type ?? 'language'))
+    ?? (type == null ? catalog.find(item => item.id === id) : undefined);
+}
+
+export const agentModelKey = ({ id, type }: { id: string; type?: unknown }) => JSON.stringify([id, type]);
 
 // Use the first answer model, not the router, for the card's provider identity.
 export function primaryAgentModel(agent: AgentDefinition, isDecision = (model: AgentModel) => model.type === 'decision') {

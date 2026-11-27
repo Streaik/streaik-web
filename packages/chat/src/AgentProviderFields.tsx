@@ -1,5 +1,6 @@
 import type { CatalogModel, ChatModel } from '@streaik/gateway';
 import { useId, useState } from 'react';
+import { agentCatalogModel, agentModelKey } from './agentDefinition';
 import type { AgentModel } from './agentDefinition';
 import { agentProviderOptions } from './agentProviderSettings';
 import { useAppTranslation } from './i18n';
@@ -15,10 +16,11 @@ export function agentProviderGroups(models: readonly AgentModel[], catalog: read
   for (const [index, model] of models.entries()) {
     const provider = chatProviderForModel(model.id);
     if (!provider) continue;
-    const occurrence = occurrences.get(model.id) ?? 0;
-    occurrences.set(model.id, occurrence + 1);
-    const name = catalog.find(item => item.id === model.id)?.name ?? model.id;
-    const entry = { key: `${model.id}:${occurrence}`, index, model, info: { id: model.id, name, provider } };
+    const modelKey = agentModelKey(model);
+    const occurrence = occurrences.get(modelKey) ?? 0;
+    occurrences.set(modelKey, occurrence + 1);
+    const name = agentCatalogModel(model, catalog)?.name ?? model.id;
+    const entry = { key: `${modelKey}:${occurrence}`, index, model, info: { id: model.id, name, provider } };
     const group = groups.get(provider);
     if (group) group.push(entry);
     else groups.set(provider, [entry]);
@@ -37,8 +39,10 @@ export function AgentProviderFields({ provider, entries, onChange }: {
     {entries.length > 1 && <div className="chat-provider-select">
       <label htmlFor={id}>{t('Model')}</label>
       <select id={id} value={active} onChange={(event) => setSelected(event.currentTarget.value)}>
-        {entries.map(({ key, info }) => <option key={key} value={key}>
+        {entries.map(({ key, info, model }) => <option key={key} value={key}>
           {info.name === info.id ? info.id : `${info.name} (${info.id})`}
+          {entries.some(entry => entry.key !== key && entry.model.id === model.id && entry.model.type !== model.type) &&
+            (model.type === 'decision' ? ` · ${t('Decision')}` : ` · ${t('Language')}`)}
         </option>)}
       </select>
     </div>}

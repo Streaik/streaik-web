@@ -44,6 +44,7 @@ export function pageRouteMenu(view: ChatView, { chat, agents, decisions, images,
           endpoint => onSelect({ mode: 'gateway', endpoint }), { label: 'Gateway', disabled: !gateway })];
         if (direct) groups.push(choices('direct', selected?.mode === 'direct' ? selected.endpoint : '', direct,
           endpoint => onSelect({ mode: 'direct', endpoint }), { label: 'Direct', disabled: !direct.length }));
+        if (selected?.mode === 'gateway' && decisionGroup) groups.push(decisionGroup);
         return { groups, disabled };
       }
       if (!chat) return;

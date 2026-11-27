@@ -25,10 +25,15 @@ export function withAgentProviderOptions(model: AgentModel, options: NativeOptio
   return Object.keys(metadata).length ? { ...rest, providerMetadata: metadata } : rest;
 }
 
-export function agentProviderRequest(model: AgentModel) {
+export function agentChatProviderSettings(model?: AgentModel) {
+  if (!model) return;
   const provider = chatProviderForModel(model.id);
   const options = agentProviderOptions(model);
-  return chatProviderRequest(provider && options ? { [provider]: options } : undefined, model.id);
+  return provider && options ? { [provider]: options } : undefined;
+}
+
+export function agentProviderRequest(model: AgentModel) {
+  return chatProviderRequest(agentChatProviderSettings(model), model.id);
 }
 
 function persistentModel(model: AgentModel): AgentModel {
