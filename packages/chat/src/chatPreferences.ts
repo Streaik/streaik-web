@@ -33,6 +33,7 @@ export type ChatPreferences = {
   showMessageTokens: boolean;
   showProviderLogo: boolean;
   showMetrics: boolean;
+  showDecisions: boolean;
   toolOutput: ToolOutputPreferences;
   mcp: McpPreferences;
   transcriptionSplit: TranscriptionSplitPreferences;
@@ -50,7 +51,7 @@ export const composerToolDefaults: Pick<ChatPreferences, 'delay' | 'plugins' | '
   delay: 40, plugins: [], remoteSkillIds: [], toolPolicy: { stopTools: [] },
 };
 export const defaultChatPreferences: ChatPreferences = { ...composerToolDefaults, ...toolConfigurationDefaults, convertAttachmentsToText: false, pinnedViews: [],
-  dictate: true, showContextSize: true, showMessageTokens: true, showProviderLogo: true, showMetrics: false,
+  dictate: true, showContextSize: true, showMessageTokens: true, showProviderLogo: true, showMetrics: false, showDecisions: true,
   toolOutput: toolOutputDefaults, mcp: defaultMcpPreferences, transcriptionSplit: defaultTranscriptionSplit, providerSettings: {}, reasoning: 'medium' };
 
 type StoredPreferences = Partial<Omit<ChatPreferences, 'toolOutput' | 'mcp' | 'providerSettings'> & {
@@ -79,6 +80,7 @@ export function normalizeChatPreferences(value: StoredPreferences | null | undef
     showMessageTokens: booleanPreference(value?.showMessageTokens, defaultChatPreferences.showMessageTokens),
     showProviderLogo: booleanPreference(value?.showProviderLogo, defaultChatPreferences.showProviderLogo),
     showMetrics: booleanPreference(value?.showMetrics, defaultChatPreferences.showMetrics),
+    showDecisions: booleanPreference(value?.showDecisions, defaultChatPreferences.showDecisions),
     toolOutput,
     transcriptionSplit: normalizeTranscriptionSplit(value?.transcriptionSplit),
     providerSettings: persistentProviderChatSettings(value?.providerSettings),

@@ -151,6 +151,7 @@ test('browser Gateway agents route dual-use IDs once per turn and keep the winni
     if (!['Route this agent turn', 'Use fallback', 'Skip routing'].includes(text)) return route.fulfill(stream('Welcome'));
     expect(body.agent).toBeUndefined();
     expect(body.decision).toBeUndefined();
+    expect(JSON.stringify(body.messages)).not.toContain('streaik_client_model_decision');
     if (text !== 'Route this agent turn') {
       sequence.push(text);
       expect(body).toMatchObject({ model, providerMetadata: { openai: { service_tier: 'flex' } } });
@@ -183,12 +184,17 @@ test('browser Gateway agents route dual-use IDs once per turn and keep the winni
   await send(page, 'Route this agent turn');
   await page.getByRole('dialog', { name: 'Review tool result' }).getByRole('button', { name: 'Approve and share', exact: true }).click();
   await expect(page.getByText('Routed reply', { exact: true })).toBeVisible();
+  await expect(page.getByText('Model decision', { exact: true })).toHaveCount(1);
   expect(sequence).toEqual(['v1 decision', 'chat', 'continuation']);
 
   await routeGroup(page, 'Decisions');
   await page.getByRole('menuitemradio', { name: '/api/decisions', exact: true }).click();
   await send(page, 'Use fallback');
   await expect(page.getByText('Fallback reply', { exact: true })).toBeVisible();
+  const fallback = page.getByRole('article').filter({ hasText: 'Fallback reply' }).getByRole('region', { name: 'Assistant activity' });
+  await expect(fallback.getByText('Fallback used', { exact: true })).toBeVisible();
+  await fallback.getByRole('tab', { name: 'Output', exact: true }).click();
+  await expect(fallback.getByRole('tabpanel', { name: 'Output', exact: true })).toContainText(model);
   await routeGroup(page, 'Decisions');
   await page.getByRole('menuitemradio', { name: 'Off', exact: true }).click();
   await send(page, 'Skip routing');

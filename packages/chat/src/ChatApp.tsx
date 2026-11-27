@@ -85,6 +85,7 @@ export type { McpAppAuth, McpOptions, McpRemoteHeader } from './mcp';
 export { isMcpRuntime } from './mcp';
 import { agentModelDecisionInstructions, chatDecisionInput, chatModelDecision, modelDecisionRouter, selectModelRoleId, useDecisionRoute } from './modelDecisions';
 import type { DecisionAgentContext, ModelDecision } from './modelDecisions';
+import { decisionActivity, withDecisionActivity, withoutDecisionActivity } from './decisionActivity';
 import { conversationNameRoleId, runTextAppAgent, toolSearchRoleId, welcomeRoleId } from './textAppAgents';
 import type { TextAppRequest } from './textAppAgents';
 import { WelcomeHeading } from './WelcomeHeading';
@@ -153,14 +154,14 @@ function useModels(source: Gateway | DirectChat | undefined, ready: boolean, rev
     reload: () => setRefresh((n) => n + 1) };
 }
 
-type MessagePreferences = Pick<ChatPreferences, 'showMessageTokens' | 'showProviderLogo' | 'showMetrics'>;
+type MessagePreferences = Pick<ChatPreferences, 'showMessageTokens' | 'showProviderLogo' | 'showMetrics' | 'showDecisions'>;
 
-const Message = memo(function Message({ message, showMessageTokens, showProviderLogo, showMetrics, pendingReply, speechState, onReadAloud }: {
+const Message = memo(function Message({ message, showMessageTokens, showProviderLogo, showMetrics, showDecisions, pendingReply, speechState, onReadAloud }: {
   message: ChatMessage; pendingReply: boolean; speechState?: MessageSpeechState; onReadAloud?: ToggleMessageSpeech;
 } & MessagePreferences) {
   const { t } = useAppTranslation();
   const user = message.role === 'user';
-  const groups = groupMessageParts(message.parts, user);
+  const groups = groupMessageParts(message.parts, user, showDecisions);
   if (!groups.length) return null;
   return <article className="chat-message" data-role={message.role} aria-label={t(user ? 'You' : 'Assistant')}>
     {user ? <MessageTime timestamp={message.metadata?.timestamp} /> : <div className="chat-message-header">
@@ -187,7 +188,7 @@ const Message = memo(function Message({ message, showMessageTokens, showProvider
   </article>;
 });
 
-function Transcript({ messages, showMessageTokens, showProviderLogo, showMetrics, gateway, speechModel, speechRoute, scope, pendingReply }: {
+function Transcript({ messages, showMessageTokens, showProviderLogo, showMetrics, showDecisions, gateway, speechModel, speechRoute, scope, pendingReply }: {
   messages: ChatMessage[]; gateway: Gateway; speechModel?: string; speechRoute: GatewaySpeechEndpoint; scope?: string; pendingReply?: string;
 } & MessagePreferences) {
   const { t } = useAppTranslation();
@@ -197,7 +198,7 @@ function Transcript({ messages, showMessageTokens, showProviderLogo, showMetrics
   useLayoutEffect(() => {
     const node = scroll.current;
     if (node && follow.current) node.scrollTop = node.scrollHeight;
-  }, [messages, showMessageTokens, showProviderLogo, showMetrics]);
+  }, [messages, showMessageTokens, showProviderLogo, showMetrics, showDecisions]);
   return <section ref={scroll} onScroll={() => {
     const node = scroll.current;
     if (node) follow.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
@@ -205,7 +206,7 @@ function Transcript({ messages, showMessageTokens, showProviderLogo, showMetrics
     <MessageClock><div className="chat-column">{messages.map((message) => <Message key={message.id} message={message}
       pendingReply={message.id === pendingReply} speechState={speech.state?.id === message.id ? speech.state : undefined}
       onReadAloud={message.role === 'assistant' ? speech.toggle : undefined}
-      showMessageTokens={showMessageTokens} showProviderLogo={showProviderLogo} showMetrics={showMetrics} />)}</div></MessageClock>
+      showMessageTokens={showMessageTokens} showProviderLogo={showProviderLogo} showMetrics={showMetrics} showDecisions={showDecisions} />)}</div></MessageClock>
   </section>;
 }
 
@@ -508,6 +509,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       async sendMessages(request) {
         const last = request.messages.at(-1);
         const previous = request.trigger === 'submit-message' && last?.role === 'assistant' ? last : undefined;
+        request = { ...request, messages: withoutDecisionActivity(request.messages) };
         const { route, decision, context, providerSettings: initialSettings, clientToolSearch, hosted, ...body } = (request.body ?? {}) as {
           model?: string; route?: ChatRoute; decision?: TurnDecision; context?: RequestContext; tools?: ChatRequestTool[];
           providerSettings?: ProviderChatSettings; hosted?: HostedTurn; reasoning?: ChatReasoning; toolChoice?: ChatToolChoice;
@@ -525,6 +527,16 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         }
         let model = body.model;
         let providerSettings = initialSettings;
+        let activity: ReturnType<typeof decisionActivity> | undefined;
+        const reply = async (send: ReturnType<typeof apiChat.sendMessages>) => {
+          try {
+            const stream = withReplyMetadata(await send, model, previous);
+            return activity ? withDecisionActivity({ stream }, activity, model) : stream;
+          } catch (error) {
+            if (!activity || request.abortSignal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
+            return withDecisionActivity({ error }, activity, model);
+          }
+        };
         const enabledSkillIds = new Set(context?.skills?.skills.map(({ skill_id }) => skill_id));
         const resourceServers = new Set(context?.mcp?.mcpResourceCatalog.servers.map(({ serverId }) => serverId));
         const replay = filterLocalToolReplay(request.messages, body.tools ?? [], isApiChat(route), enabledSkillIds, resourceServers);
@@ -538,9 +550,11 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
             try {
               winner = await gateway.decideChoice(endpoint, { ...choice, input }, request.abortSignal);
             } catch (error) {
+              request.abortSignal?.throwIfAborted();
+              if (error instanceof Error && error.name === 'AbortError') throw error;
               // Like the hosted runtime, browser agents can still answer with
               // their first candidate when routing is unavailable or invalid.
-              if (!decision.agent) throw error;
+              if (!decision.agent) return withDecisionActivity({ error }, decisionActivity(decision.choice, undefined));
             }
             request.abortSignal?.throwIfAborted();
             if (winner) {
@@ -549,6 +563,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
               setTurn((current) => current && { ...current, model: winner, providerSettings });
               request = { ...request, body: { ...body, model: winner } };
             }
+            activity = decisionActivity(decision.choice, decision.agent?.context,
+              winner ? { selectedModel: winner } : { selectedModel: model, fallback: true });
             setPendingModel(model);
           } finally { setDeciding(false); }
         }
@@ -570,23 +586,20 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           const metadata = namespaces.length ? { ...providerMetadata, openai: { ...openai, tools: [...existing, ...namespaces] } } : providerMetadata;
           const hasTools = tools.length || Object.values(metadata ?? {}).some(options => Array.isArray(options?.tools) && options.tools.length > 0);
           const toolChoice = body.toolChoice === 'required' && !hasTools ? undefined : body.toolChoice;
-          const stream = await apiChat.sendMessages({ ...request, headers, body: { ...request.body,
+          return reply(apiChat.sendMessages({ ...request, headers, body: { ...request.body,
             tools, toolChoice, ...(metadata && { providerMetadata: metadata }) },
-            messages: withRequestContext(request.messages, context) });
-          return withReplyMetadata(stream, model, previous);
+            messages: withRequestContext(request.messages, context) }));
         }
         const nativeOptions = provider?.providerMetadata.anthropic || (route?.endpoint === '/v1/responses' && provider?.providerMetadata.openai)
           ? { providerMetadata: provider.providerMetadata } : {};
         if (route?.mode === 'gateway' && gatewayChatEndpoints.includes(route.endpoint)) {
-          const stream = await gateway.chatTransport(route.endpoint).sendMessages({ ...request, headers,
-            body: { ...request.body, ...nativeOptions, ...(context && { instructions: requestContextText(context) }) } });
-          return withReplyMetadata(stream, model, previous);
+          return reply(gateway.chatTransport(route.endpoint).sendMessages({ ...request, headers,
+            body: { ...request.body, ...nativeOptions, ...(context && { instructions: requestContextText(context) }) } }));
         }
         if (route?.mode === 'direct' && direct && nativeChatEndpoints.includes(route.endpoint)) {
           // Direct native transports use this field for client-provided system context.
-          const stream = await direct.chatTransport(route.endpoint).sendMessages({ ...request, headers,
-            body: { ...request.body, ...nativeOptions, ...(context && { mcpInstructions: requestContextText(context) }) } });
-          return withReplyMetadata(stream, model, previous);
+          return reply(direct.chatTransport(route.endpoint).sendMessages({ ...request, headers,
+            body: { ...request.body, ...nativeOptions, ...(context && { mcpInstructions: requestContextText(context) }) } }));
         }
         throw new GatewayError('The selected chat route is unavailable.');
       },
@@ -1181,7 +1194,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       </main>}
       <main className="chat-main" data-empty={!messages.length} hidden={view !== 'chat' || !!locationIssue}>
         {messages.length ? <Transcript messages={messages} showMessageTokens={preferences.showMessageTokens}
-          showProviderLogo={preferences.showProviderLogo} showMetrics={preferences.showMetrics}
+          showProviderLogo={preferences.showProviderLogo} showMetrics={preferences.showMetrics} showDecisions={preferences.showDecisions}
           gateway={gateway} speechModel={speechModel} speechRoute={speech.selected} scope={scope}
           pendingReply={(busy || toolBusy || pending || voicePhase && turn?.voiceMessage) && last?.role === 'assistant' ? last.id : undefined} /> : null}
         <div className="chat-column chat-dock">

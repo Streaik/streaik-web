@@ -109,7 +109,7 @@ export function SettingsDialog({ dialog, apiKeySettings, accountSettings, prefer
   if (accountSettings) tabs.push({ id: 'account', label: t('Account'), icon: 'user', content: accountSettings });
   tabs.push({ id: 'model-context', label: t('Model Context'), icon: 'tool', content:
     <ModelContextSettings value={preferences.mcp} onChange={mcp => onPreferences({ ...preferences, mcp })} /> });
-  function preference(key: 'dictate' | 'showContextSize' | 'showMessageTokens' | 'showProviderLogo' | 'showMetrics' | 'convertAttachmentsToText', label: string) {
+  function preference(key: 'dictate' | 'showContextSize' | 'showMessageTokens' | 'showProviderLogo' | 'showMetrics' | 'showDecisions' | 'convertAttachmentsToText', label: string) {
     return <SettingSwitch label={t(label)} checked={preferences[key]} onChange={value => onPreferences({ ...preferences, [key]: value })} />;
   }
   tabs.push({ id: 'chat', label: t('Chat'), icon: 'agents', content:
@@ -127,6 +127,7 @@ export function SettingsDialog({ dialog, apiKeySettings, accountSettings, prefer
           {preference('showMessageTokens', 'Show tokens per message')}
           {preference('showProviderLogo', 'Show provider logo')}
           {preference('showMetrics', 'Show metrics')}
+          {preference('showDecisions', 'Show decisions')}
         </div>
       </section>
       <section className="chat-tool-card" aria-labelledby={`${id}-tool-output`}>
