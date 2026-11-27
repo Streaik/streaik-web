@@ -167,6 +167,9 @@ test('browser Gateway agents route dual-use IDs once per turn and keep the winni
     expect(body.tools).toEqual(expect.arrayContaining([expect.objectContaining({ name: toolName })]));
     const toolCallId = 'history-call';
     const chunks = [{ type: 'start' }, { type: 'start-step' },
+      { type: 'reasoning-start', id: 'history-reasoning' },
+      { type: 'reasoning-delta', id: 'history-reasoning', delta: 'Check chat history.' },
+      { type: 'reasoning-end', id: 'history-reasoning' },
       { type: 'tool-input-available', toolCallId, toolName, input: {}, dynamic: true },
       { type: 'tool-approval-request', toolCallId, approvalId: 'review-history', signature: 'fixture-signature' },
       { type: 'finish-step' }, { type: 'finish', finishReason: 'tool-calls' }];
@@ -184,13 +187,25 @@ test('browser Gateway agents route dual-use IDs once per turn and keep the winni
   await send(page, 'Route this agent turn');
   await page.getByRole('dialog', { name: 'Review tool result' }).getByRole('button', { name: 'Approve and share', exact: true }).click();
   await expect(page.getByText('Routed reply', { exact: true })).toBeVisible();
+  const activity = page.getByRole('article').filter({ hasText: 'Routed reply' }).getByRole('region', { name: 'Assistant activity' });
+  await expect(activity).toHaveCount(1);
+  await expect(activity).toContainText('2 of 2');
   await page.getByRole('button', { name: 'Account menu', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
   const outputSettings = page.getByRole('dialog', { name: 'Settings', exact: true });
   await outputSettings.getByRole('tab', { name: 'Chat', exact: true }).click();
   await outputSettings.getByRole('switch', { name: 'Show decisions', exact: true }).check();
   await outputSettings.getByRole('button', { name: 'Close', exact: true }).click();
-  await expect(page.getByText('Decision', { exact: true })).toHaveCount(1);
+  await expect(activity).toHaveCount(1);
+  await expect(activity).toContainText('3 of 3');
+  await expect(activity.getByText(toolName, { exact: true })).toBeVisible();
+  const previous = activity.getByRole('button', { name: 'Previous activity' });
+  await previous.click();
+  await expect(activity).toContainText('Check chat history.');
+  await previous.click();
+  await expect(activity).toContainText('1 of 3');
+  await expect(activity.getByText('Decision', { exact: true })).toBeVisible();
+  await expect(activity.getByRole('tabpanel', { name: 'Input', exact: true })).toContainText('/v1/decisions');
   expect(sequence).toEqual(['v1 decision', 'chat', 'continuation']);
 
   await routeGroup(page, 'Decisions');
@@ -199,6 +214,7 @@ test('browser Gateway agents route dual-use IDs once per turn and keep the winni
   await expect(page.getByText('Fallback reply', { exact: true })).toBeVisible();
   const fallback = page.getByRole('article').filter({ hasText: 'Fallback reply' }).getByRole('region', { name: 'Assistant activity' });
   await expect(fallback.getByText('Fallback used', { exact: true })).toBeVisible();
+  await expect(fallback.getByRole('button', { name: 'Previous activity' })).toHaveCount(0);
   await fallback.getByRole('tab', { name: 'Output', exact: true }).click();
   await expect(fallback.getByRole('tabpanel', { name: 'Output', exact: true })).toContainText(model);
   await routeGroup(page, 'Decisions');

@@ -13,7 +13,7 @@ import { describeToolOutput } from './toolOutputContent';
 type Part = ChatMessage['parts'][number];
 export type Invocation = Extract<Part, { toolCallId: string }>;
 type ActivityPart = Extract<Part, { type: 'reasoning' }> | Invocation;
-type Group = { type: 'text'; start: number; text: string } | { type: 'activity'; start: number; parts: ActivityPart[]; decision?: true }
+type Group = { type: 'text'; start: number; text: string } | { type: 'activity'; start: number; parts: ActivityPart[] }
   | { type: 'attachment'; start: number; name?: string; part: AttachmentPart };
 
 export function groupMessageParts(parts: readonly Part[], user = false, showDecisions = true): Group[] {
@@ -27,10 +27,8 @@ export function groupMessageParts(parts: readonly Part[], user = false, showDeci
       if (last?.type === 'text') last.text += part.text;
       else groups.push({ type: 'text', start, text: part.text });
     } else if ((part.type === 'reasoning' && part.text.trim()) || 'toolCallId' in part) {
-      // Keep decision cards visible even when the answer also contains reasoning or tools.
-      if (isDecisionActivity(part)) {
-        if (showDecisions) groups.push({ type: 'activity', start, parts: [part], decision: true });
-      } else if (last?.type === 'activity' && !last.decision) last.parts.push(part);
+      if (!showDecisions && isDecisionActivity(part)) return;
+      if (last?.type === 'activity') last.parts.push(part);
       else groups.push({ type: 'activity', start, parts: [part] });
     }
   });
