@@ -155,7 +155,22 @@ test('both Decisions routes use their own wire format and scope auth to the deci
   });
   assert.equal(await gateway.decideChoice('/v1/decisions', decision), model);
   assert.equal(await gateway.decideChoice('/api/decisions', decision), model);
+  assert.deepEqual(await gateway.decideChoiceResult('/v1/decisions', decision), { choice: model });
+  assert.deepEqual(await gateway.decideChoiceResult('/api/decisions', decision), { choice: model });
   await assert.rejects(gateway.decideChoice('https://invalid.example/', decision), /route is unavailable/);
+});
+
+test('decision results preserve valid optional scores without overriding the returned choice', async () => {
+  const other = 'anthropic/claude-example';
+  const probabilities = [{ value: model, probability: 0 }, { value: other, probability: 1 }];
+  const answer = { type: 'choice', choice: model };
+  const gateway = createGateway(root, () => ({}), async url => Response.json({ answers: url.endsWith('/v1/decisions')
+    ? [{ ...answer, name: 'chat_model', confidence: 0, probabilities: [...probabilities,
+      { value: 'not/offered', probability: 1 }, { value: model, probability: 1 }, null] }]
+    : { chat_model: { ...answer, confidence: 2, probabilities: { [model]: 0, [other]: 1, 'not/offered': 1 } } },
+  }));
+  assert.deepEqual(await gateway.decideChoiceResult('/v1/decisions', decision), { choice: model, confidence: 0, probabilities });
+  assert.deepEqual(await gateway.decideChoiceResult('/api/decisions', decision), { choice: model, probabilities });
 });
 
 test('Decisions rejects missing, refused, duplicate, and unoffered answers', async () => {

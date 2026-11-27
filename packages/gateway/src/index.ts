@@ -3,7 +3,7 @@ import type { UIMessage } from 'ai';
 import { nativeChatTransport } from './nativeChat.ts';
 import { anthropicChatProtocolHeaders } from './nativeToolOptions.ts';
 import { decisionChoiceBody, gatewayDecisionEndpoints, readDecisionChoice } from './decisionChoice.ts';
-import type { DecisionChoice, GatewayDecisionEndpoint } from './decisionChoice.ts';
+import type { DecisionChoice, DecisionChoiceResult, GatewayDecisionEndpoint } from './decisionChoice.ts';
 import { imageRequestBody, isImageEndpoint, readImageResponse } from './images.ts';
 import type { GatewayImageEndpoint, ImageRequest, ImageResponse } from './images.ts';
 import { readVideoOperation, readVideoStatus, videoOperationParts } from './videos.ts';
@@ -21,7 +21,7 @@ export type { DirectChat } from './directChat.ts';
 export { createAgentBackend } from './agentBackend.ts';
 export type { AgentBackend, AgentBackendCredentials, HostedAgent, HostedAgentSelection } from './agentBackend.ts';
 export { gatewayDecisionEndpoints } from './decisionChoice.ts';
-export type { DecisionChoice, GatewayDecisionEndpoint } from './decisionChoice.ts';
+export type { DecisionChoice, DecisionChoiceResult, GatewayDecisionEndpoint } from './decisionChoice.ts';
 export { gatewayImageEndpoints, imageBatchSizes, imageSource, isImageEndpoint, maxImageCount } from './images.ts';
 export type { GatewayImageEndpoint, ImageFileInput, ImageInput, ImageJsonObject, ImageOptions, ImageProviderOptions, ImageRequest, ImageResponse } from './images.ts';
 export type { VideoAsset, VideoRequest, VideoStatus } from './videos.ts';
@@ -288,6 +288,28 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
     return readModelCatalog(data);
   }
 
+  async function decideChoiceResult(endpoint: GatewayDecisionEndpoint, choice: DecisionChoice, signal?: AbortSignal): Promise<DecisionChoiceResult> {
+    if (!gatewayDecisionEndpoints.includes(endpoint)) throw new GatewayError('The selected Decisions route is unavailable.');
+    const slash = choice.model.indexOf('/');
+    const provider = choice.model.slice(0, slash);
+    if (slash < 1 || !/^[a-z0-9-]+$/.test(provider) || !choice.model.slice(slash + 1).trim()) {
+      throw new GatewayError('Choose a valid Decisions model.');
+    }
+    const response = await request(root && new URL(endpoint.slice(1), root).href, { kind: 'decision', provider }, {
+      method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify(decisionChoiceBody(endpoint, choice)), signal,
+    });
+    let data: unknown;
+    try { data = await response.json(); } catch {
+      signal?.throwIfAborted();
+      throw new GatewayError('The gateway returned an unreadable Decisions response.');
+    }
+    signal?.throwIfAborted();
+    const result = readDecisionChoice(endpoint, data, choice.choices);
+    if (!result) throw new GatewayError('Decisions did not return one of the selected models.');
+    return result;
+  }
+
   async function skillRequest(path: string, auth: CredentialRequest, init: RequestInit = {}) {
     return request(root && new URL(path, root).href, auth, init);
   }
@@ -467,26 +489,9 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
       }
       return readLiveTranscriptionCredential(model, payload, language);
     },
-    async decideChoice(endpoint: GatewayDecisionEndpoint, choice: DecisionChoice, signal?: AbortSignal): Promise<string> {
-      if (!gatewayDecisionEndpoints.includes(endpoint)) throw new GatewayError('The selected Decisions route is unavailable.');
-      const slash = choice.model.indexOf('/');
-      const provider = choice.model.slice(0, slash);
-      if (slash < 1 || !/^[a-z0-9-]+$/.test(provider) || !choice.model.slice(slash + 1).trim()) {
-        throw new GatewayError('Choose a valid Decisions model.');
-      }
-      const response = await request(root && new URL(endpoint.slice(1), root).href, { kind: 'decision', provider }, {
-        method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' },
-        body: JSON.stringify(decisionChoiceBody(endpoint, choice)), signal,
-      });
-      let data: unknown;
-      try { data = await response.json(); } catch {
-        signal?.throwIfAborted();
-        throw new GatewayError('The gateway returned an unreadable Decisions response.');
-      }
-      signal?.throwIfAborted();
-      const winner = readDecisionChoice(endpoint, data, choice.choices);
-      if (winner === undefined) throw new GatewayError('Decisions did not return one of the selected models.');
-      return winner;
+    decideChoiceResult,
+    async decideChoice(endpoint: GatewayDecisionEndpoint, choice: DecisionChoice, signal?: AbortSignal) {
+      return (await decideChoiceResult(endpoint, choice, signal)).choice;
     },
     chatTransport(endpoint: GatewayChatEndpoint = '/api/chat') {
       if (endpoint !== '/api/chat') return nativeChatTransport(endpoint, (model) => {

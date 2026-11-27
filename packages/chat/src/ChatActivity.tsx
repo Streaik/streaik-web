@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import { ChatIcon } from './ChatIcon';
 import { convertedAttachmentName } from './chatAttachments';
 import type { AttachmentPart } from './chatAttachments';
-import { isDecisionActivity } from './decisionActivity';
+import { decisionActivityDisplayInput, isDecisionActivity } from './decisionActivity';
 import { useAppTranslation } from './i18n';
 import { ToolDetails } from './ToolDetails';
 import { describeToolOutput } from './toolOutputContent';
@@ -60,9 +60,11 @@ export function ChatActivity({ parts, renderMarkdown }: { parts: ActivityPart[];
   const part = parts[page];
   const reasoning = part.type === 'reasoning';
   const decision = isDecisionActivity(part);
+  const input = reasoning ? undefined : part.input;
+  const displayInput = useMemo(() => decision ? decisionActivityDisplayInput(input) : input, [decision, input]);
   const output = reasoning ? undefined : part.output;
   const result = useMemo(() => describeToolOutput(output), [output]);
-  const title = reasoning ? t('Reasoning') : decision ? t('Model decision') : invocationName(part);
+  const title = reasoning ? t('Reasoning') : decision ? t('Decision', { context: 'card' }) : invocationName(part);
   const fallback = decision && output && typeof output === 'object' && 'fallback' in output && output.fallback === true;
   // API Chat reserves an approval record before execution, but MCP only asks to review the result.
   const mcpPending = !reasoning && part.state === 'approval-requested' &&
@@ -84,7 +86,7 @@ export function ChatActivity({ parts, renderMarkdown }: { parts: ActivityPart[];
     </header>
     {reasoning ? <div className="chat-activity-body">{renderMarkdown(part.text)}</div> : <div className="chat-activity-body" key={part.toolCallId}>
       {part.errorText && <p>{decision ? t(part.errorText) : part.errorText}</p>}
-      <ToolDetails input={part.input} result={result} />
+      <ToolDetails input={displayInput} result={result} />
     </div>}
   </section>;
 }

@@ -1,7 +1,7 @@
 import { useChat } from '@ai-sdk/react';
 import { GatewayError, gatewayChatEndpoints, isVoiceCatalogModel, nativeChatEndpoints, voiceProtocolForModel, pickChatCatalogModels } from '@streaik/gateway';
 import type { AgentBackend, ChatRoute, DirectChat, GatewayChatEndpoint, HostedAgentSelection } from '@streaik/gateway';
-import type { CatalogModel, ChatMessage, ChatReasoning, ChatToolChoice, Gateway, GatewaySpeechEndpoint } from '@streaik/gateway';
+import type { CatalogModel, ChatMessage, ChatReasoning, ChatToolChoice, DecisionChoiceResult, Gateway, GatewaySpeechEndpoint } from '@streaik/gateway';
 import { Button, ThemeRoot, useColorScheme } from '@streaik/themes';
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -546,9 +546,9 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           const input = chatDecisionInput(request.messages, decision.agent?.context);
           setDeciding(true);
           try {
-            let winner: string | undefined;
+            let result: DecisionChoiceResult | undefined;
             try {
-              winner = await gateway.decideChoice(endpoint, { ...choice, input }, request.abortSignal);
+              result = await gateway.decideChoiceResult(endpoint, { ...choice, input }, request.abortSignal);
             } catch (error) {
               request.abortSignal?.throwIfAborted();
               if (error instanceof Error && error.name === 'AbortError') throw error;
@@ -557,6 +557,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
               if (!decision.agent) return withDecisionActivity({ error }, decisionActivity(decision.choice, undefined));
             }
             request.abortSignal?.throwIfAborted();
+            const { choice: winner, ...scores } = result ?? {};
             if (winner) {
               model = winner;
               if (decision.agent) providerSettings = decision.agent.settings.get(winner);
@@ -564,7 +565,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
               request = { ...request, body: { ...body, model: winner } };
             }
             activity = decisionActivity(decision.choice, decision.agent?.context,
-              winner ? { selectedModel: winner } : { selectedModel: model, fallback: true });
+              winner ? { selectedModel: winner, ...scores } : { selectedModel: model, fallback: true });
             setPendingModel(model);
           } finally { setDeciding(false); }
         }

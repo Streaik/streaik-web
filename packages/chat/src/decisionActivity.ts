@@ -1,4 +1,4 @@
-import type { ChatMessage } from '@streaik/gateway';
+import type { ChatMessage, DecisionChoiceResult } from '@streaik/gateway';
 import type { UIMessageChunk } from 'ai';
 import type { DecisionAgentContext, ModelDecision } from './modelDecisions';
 
@@ -10,8 +10,33 @@ export function isDecisionActivity(part: ChatMessage['parts'][number]) {
   return part.type === 'dynamic-tool' && part.providerExecuted === true && part.toolName === toolName && part.toolCallId.startsWith(callPrefix);
 }
 
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+export function decisionActivityDisplayInput(input: unknown): unknown {
+  const value = record(input);
+  const choices = value?.choices;
+  if (!Array.isArray(choices)) return input;
+  // Earlier cards saved the decorated pricing inline. Clean up the display, not the stored transcript.
+  const display = choices.map(choice => {
+    const entry = record(choice);
+    if (typeof entry?.description !== 'string') return choice;
+    try {
+      const description = record(JSON.parse(entry.description));
+      const price = record(description?.pricing);
+      if (!price || !('currency' in price || 'unit' in price)) return choice;
+      const { input, output, cacheRead, cacheWrite } = price;
+      return { ...entry, description: JSON.stringify({ ...description, pricing: { input, output, cacheRead, cacheWrite } }) };
+    } catch { return choice; }
+  });
+  return display.some((entry, index) => entry !== choices[index]) ? { ...value, choices: display } : input;
+}
+
+type DecisionActivityResult = Omit<DecisionChoiceResult, 'choice'> & { selectedModel: string | undefined; fallback?: true };
+
 export function decisionActivity({ endpoint, model, instructions, choices }: ModelDecision, agent: DecisionAgentContext | undefined,
-  result?: { selectedModel: string | undefined; fallback?: true }): UIMessageChunk[] {
+  result?: DecisionActivityResult): UIMessageChunk[] {
   // Build the display input from routing configuration, never from the serialized conversation.
   const input = { endpoint, model, instructions, choices,
     ...(agent && { agent: { name: agent.name, description: agent.description, instructions: agent.instructions } }) };

@@ -3136,7 +3136,8 @@ async function prepareModelDecisions(page: Page) {
     { id: model, name: 'GPT Mini', pricing: { input: ' ', output: 1 } },
     { id: candidate, name: 'A non-chat entry', type: 'image', description: 'Not the selected chat model.', pricing: { input: 1, output: 1 } },
     { id: candidate, name: candidateLabel, type: 'language', description: 'A candidate for this request.',
-      tags: ['Streaming'], context_window: 8192, max_tokens: 1024, pricing: { input: '0.000003', output: 0.000015, input_cache_read: 0 } },
+      tags: ['Streaming'], context_window: 8192, max_tokens: 1024,
+      pricing: { input: '0.000003', output: 0.000015, input_cache_read: 0, input_cache_write: 0.000004 } },
     { id: 'groq/gpt-4.1-mini', name: 'Groq Mini', type: 'language' },
     { id: 'openai/gpt-6-luna', name: 'Decision model', type: 'decision' },
   ] } }));
@@ -3177,14 +3178,15 @@ test('BYOK chooses between chat models through the selected Decisions route, or 
       expect(Object.keys(criteria)).toEqual([model, candidate]);
       const bundled = directory.providers.find(({ id }) => id === 'openai')?.tokenPricing?.[model];
       expect(bundled).toBeDefined();
-      expect(JSON.parse(criteria[model])).toStrictEqual({ name: 'GPT Mini', provider: 'openai', tags: [],
-        pricing: { currency: 'USD', unit: 'token', ...bundled } });
+      expect(JSON.parse(criteria[model])).toStrictEqual({ name: 'GPT Mini', provider: 'openai', tags: [], pricing: bundled });
       expect(JSON.parse(criteria[candidate])).toStrictEqual({ name: candidateLabel, provider: 'anthropic', description: 'A candidate for this request.',
         tags: ['streaming'], contextWindow: 8192, maxTokens: 1024,
-        pricing: { currency: 'USD', unit: 'token', input: 0.000003, output: 0.000015, cacheRead: 0 } });
+        pricing: { input: 0.000003, output: 0.000015, cacheRead: 0, cacheWrite: 0.000004 } });
       expect(JSON.parse(openAI ? body.input : body.state).at(-1)).toEqual({ role: 'user', text: `Send through ${endpoint}` });
       const answer = { type: 'choice', choice: candidate };
-      await route.fulfill({ json: { answers: openAI ? [{ ...answer, name: 'chat_model' }] : { chat_model: answer } } });
+      await route.fulfill({ json: { answers: openAI ? [{ ...answer, name: 'chat_model', confidence: 0.85,
+        probabilities: [{ value: model, probability: 0.22 }, { value: candidate, probability: 0.78 }] }]
+        : { chat_model: { ...answer, probabilities: { [model]: 0.33, [candidate]: 0.67 } } } } });
     });
   }
   await page.route('**/gateway/api/chat', async (route) => {
@@ -3211,18 +3213,23 @@ test('BYOK chooses between chat models through the selected Decisions route, or 
   await chooseModel(page, 'GPT Mini');
   await send('One model only', 0);
   expect(calls).toEqual([]);
-  const decisions = page.getByText('Model decision', { exact: true });
+  const decisions = page.getByText('Decision', { exact: true });
   await expect(decisions).toHaveCount(0);
   await selectTwoModels(page);
   await send('Send through /v1/decisions', 1);
   const card = page.getByRole('article').filter({ hasText: 'Reply 1' }).getByRole('region', { name: 'Assistant activity' });
-  await expect(card.getByText('Model decision', { exact: true })).toBeVisible();
+  await expect(card.getByText('Decision', { exact: true })).toBeVisible();
   const input = card.getByRole('tabpanel', { name: 'Input', exact: true });
   await expect(input).toContainText('/v1/decisions');
   await expect(input).toContainText('Choose one offered model');
   await expect(input).not.toContainText('Send through /v1/decisions');
   await card.getByRole('tab', { name: 'Output', exact: true }).click();
-  await expect(card.getByRole('tabpanel', { name: 'Output', exact: true })).toContainText(candidate);
+  const output = card.getByRole('tabpanel', { name: 'Output', exact: true });
+  await expect(output).toContainText(candidate);
+  await expect(output).toContainText('confidence');
+  await expect(output).toContainText('0.85');
+  await output.getByRole('button', { name: 'Expand all' }).click();
+  await expect(output).toContainText('0.78');
 
   const outputSettings = await showSettings(page, 'Chat');
   const toggle = outputSettings.getByRole('switch', { name: 'Show decisions', exact: true });
@@ -3268,8 +3275,17 @@ test('BYOK chooses between chat models through the selected Decisions route, or 
   await toggle.check();
   await closeSettings(page);
   await expect(decisions).toHaveCount(2);
+  const apiCard = page.getByRole('article').filter({ hasText: 'Reply 2' }).getByRole('region', { name: 'Assistant activity' });
+  await apiCard.getByRole('tab', { name: 'Output', exact: true }).click();
+  const apiOutput = apiCard.getByRole('tabpanel', { name: 'Output', exact: true });
+  await apiOutput.getByRole('button', { name: 'Expand all' }).click();
+  await expect(apiOutput).toContainText('0.67');
+  await expect(apiOutput).not.toContainText('confidence');
   await openRoute(page, 'Decisions');
   await expect(page.getByRole('menuitemradio', { name: 'Off', exact: true })).toHaveAttribute('aria-checked', 'true');
+  await page.evaluate(() => localStorage.setItem('streaik.language', 'nl'));
+  await page.reload();
+  await expect(page.getByText('Beslissing', { exact: true })).toHaveCount(2);
 });
 
 test('Anthropic chat settings send native fields and headers, persist edits, and restore explicit defaults', async ({ page }) => {
@@ -3462,7 +3478,7 @@ test('invalid or stopped decisions do not submit a chat request', async ({ page 
   await composer.fill('Route once'); await composer.press('Enter');
   await expect(page.getByRole('alert')).toContainText('Decisions did not return one of the selected models.');
   const failure = page.getByRole('region', { name: 'Assistant activity' });
-  await expect(failure.getByText('Model decision', { exact: true })).toBeVisible();
+  await expect(failure.getByText('Decision', { exact: true })).toBeVisible();
   await expect(failure).toContainText('No model could be selected.');
   await expect(failure).not.toContainText('Route once');
   expect(chatCalls).toBe(0);
@@ -3477,7 +3493,7 @@ test('invalid or stopped decisions do not submit a chat request', async ({ page 
     await page.getByRole('button', { name: 'Stop', exact: true }).click();
     await expect(page.locator('html')).toHaveAttribute('data-decision-aborted', 'true');
     await expect(progress).toBeEmpty();
-    await expect(page.getByText('Model decision', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Decision', { exact: true })).toHaveCount(0);
   } finally { response.resolve(); }
   expect(calls).toBe(2);
   expect(chatCalls).toBe(0);

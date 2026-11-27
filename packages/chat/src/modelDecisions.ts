@@ -61,8 +61,9 @@ export function chatModelDecision(router: ModelRouter | undefined, candidates: r
   return { ...router, choices: candidates.map(({ id, name, provider, description, tags, contextWindow, maxTokens, pricing }) => {
     const bundled = bundledPricing.get(provider);
     const rates = pricing ?? (bundled && Object.hasOwn(bundled, id) ? bundled[id] : undefined);
+    const { input, output, cacheRead, cacheWrite } = rates ?? {};
     return { value: id, description: JSON.stringify({ name, provider, description, tags, contextWindow, maxTokens,
-      pricing: rates && { currency: 'USD', unit: 'token', ...rates } }) };
+      pricing: rates && { input, output, cacheRead, cacheWrite } }) };
   }) };
 }
 

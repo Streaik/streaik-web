@@ -206,7 +206,7 @@ export const chatMessages = {
   'Show provider logo': ['Toon providerlogo', 'Mostrar el logotipo del proveedor'],
   'Show metrics': ['Toon metingen', 'Mostrar métricas'],
   'Show decisions': ['Toon beslissingen', 'Mostrar decisiones'],
-  'Model decision': ['Modelbeslissing', 'Decisión de modelo'],
+  'Decision_card': ['Beslissing', 'Decisión'],
   'Fallback used': ['Reservemodel gebruikt', 'Se usó el modelo alternativo'],
   'No model could be selected.': ['Er kon geen model worden gekozen.', 'No se pudo seleccionar un modelo.'],
   'Tool output': ['Tooluitvoer', 'Resultado de herramientas'],

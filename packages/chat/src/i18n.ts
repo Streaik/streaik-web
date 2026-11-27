@@ -7,14 +7,15 @@ import { agentMessages } from './locales/agents';
 
 export const languages = { en: 'English', nl: 'Nederlands', es: 'Español' } as const;
 
-// Keys are English source strings. Plural keys use i18next's _one/_other suffixes.
-const singularEnglish: Record<string, string> = {
+// Keys are English source strings unless they include an i18next plural or context suffix.
+const englishOverrides: Record<string, string> = {
+  Decision_card: 'Decision',
   '{{count, number}} MCP tools enabled_one': '{{count, number}} MCP tool enabled',
   '{{count, number}} providers_one': '{{count, number}} provider',
 };
 const resources = Object.fromEntries(Object.keys(languages).map((language, index) => [language, {
   translation: Object.fromEntries(Object.entries({ ...chatMessages, ...sampleMessages, ...agentMessages }).map(([key, values]) => [key,
-    index === 0 ? singularEnglish[key] ?? key.replace(/_(one|other)$/, '') : values[index - 1],
+    index === 0 ? englishOverrides[key] ?? key.replace(/_(one|other)$/, '') : values[index - 1],
   ])),
 }]));
 

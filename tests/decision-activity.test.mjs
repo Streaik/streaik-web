@@ -1,10 +1,21 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readUIMessageStream } from 'ai';
-import { decisionActivity, isDecisionActivity, withDecisionActivity, withoutDecisionActivity } from '../packages/chat/src/decisionActivity.ts';
+import { decisionActivity, decisionActivityDisplayInput, isDecisionActivity, withDecisionActivity, withoutDecisionActivity } from '../packages/chat/src/decisionActivity.ts';
 
 const choice = { endpoint: '/v1/decisions', model: 'example/router', instructions: 'Choose the best candidate.',
   choices: [{ value: 'example/a', description: 'First' }, { value: 'example/b', description: 'Second' }] };
+
+test('saved decision cards leave synthetic pricing labels out of the display without mutating stored inputs', () => {
+  const rates = { input: 0.01, output: 0.05, cacheRead: 0, cacheWrite: 0.03 };
+  const storedDescription = { name: 'A', pricing: { currency: 'USD', unit: 'token', ...rates } };
+  const input = { ...choice, choices: [{ value: 'example/a', description: JSON.stringify(storedDescription) }, choice.choices[1]] };
+  const display = decisionActivityDisplayInput(input);
+  assert.deepEqual(JSON.parse(display.choices[0].description), { name: 'A', pricing: rates });
+  assert.strictEqual(display.choices[1], choice.choices[1]);
+  assert.deepEqual(JSON.parse(input.choices[0].description), storedDescription);
+  assert.strictEqual(decisionActivityDisplayInput(display), display);
+});
 
 test('decision chunks use the reply ID and save sanitized, provider-executed routing activity', async () => {
   const agent = { name: 'Agent', description: 'An agent', instructions: 'Explain the result.' };
