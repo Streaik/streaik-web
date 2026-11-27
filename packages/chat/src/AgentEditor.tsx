@@ -9,6 +9,7 @@ import type { AgentDefinition } from './agentDefinition';
 import { AgentDetailsFields, AgentGeneralFields, AgentRealtimeFields } from './AgentEditorFields';
 import { AgentProviderFields, agentProviderGroups } from './AgentProviderFields';
 import { AgentSkillFields } from './AgentSkillFields';
+import { SkillExecutionField } from './SkillExecutionField';
 import { agentSkillsTool, patchAgentSkills } from './agentTools';
 import { withAgentProviderOptions } from './agentProviderSettings';
 import { ChatIcon } from './ChatIcon';
@@ -110,10 +111,8 @@ export function AgentEditor({ entry, seed, catalog, catalogStatus, tags, mcpServ
             : key === 'details' ? <AgentDetailsFields {...{ draft, patch, tags }} />
               : key === 'realtime' ? <AgentRealtimeFields {...{ draft, initial, patch, catalog, catalogStatus }} />
                 : key === 'skills' ? <>
-                  <label>{t('Execution')}<select value={skills?.execution === 'server' ? 'server' : 'client'}
-                    onChange={event => patch({ tools: patchAgentSkills(draft.tools, { execution: event.currentTarget.value }) })}>
-                    <option value="client">{t('Agent backend')}</option><option value="server">{t('Gateway')}</option>
-                  </select></label>
+                  <SkillExecutionField value={skills?.execution === 'server' ? 'hosted' : skills?.execution === 'client' ? 'client' : undefined}
+                    onChange={mode => patch({ tools: patchAgentSkills(draft.tools, { execution: mode === 'hosted' ? 'server' : mode }) })} />
                   <AgentSkillFields active={tab === 'skills'} skills={skills?.skills}
                     onChange={entries => patch({ tools: patchAgentSkills(draft.tools, { skills: entries ?? [] }) })}
                     onBusyChange={setSkillBusy} local={localSkills} remote={remoteSkills} gateway={gateway} />

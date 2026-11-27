@@ -21,11 +21,13 @@ export type ReasoningLevel = (typeof reasoningLevels)[number];
 
 const toolOutputDefaults = { text: true, links: true, images: false, audio: false, video: false, documents: false };
 export type ToolOutputPreferences = typeof toolOutputDefaults;
+export type SkillExecution = 'hosted' | 'client';
 
 export type ChatPreferences = {
   delay: number;
   plugins: LocalPluginId[];
   remoteSkillIds: string[];
+  skillExecution?: SkillExecution;
   convertAttachmentsToText: boolean;
   pinnedViews: PinnableView[];
   dictate: boolean;
@@ -73,6 +75,7 @@ export function normalizeChatPreferences(value: StoredPreferences | null | undef
     delay: typeof delay === 'number' && Number.isFinite(delay) ? Math.round(Math.max(0, Math.min(1000, delay)) / 10) * 10 : composerToolDefaults.delay,
     plugins: localPlugins.filter(({ id }) => Array.isArray(plugins) && plugins.includes(id)).map(({ id }) => id),
     remoteSkillIds: Array.isArray(value?.remoteSkillIds) ? [...new Set(value.remoteSkillIds.filter(id => typeof id === 'string' && id.trim()))] : [],
+    ...(value?.skillExecution === 'hosted' || value?.skillExecution === 'client' ? { skillExecution: value.skillExecution } : {}),
     convertAttachmentsToText: value?.convertAttachmentsToText === true,
     pinnedViews: pinnableViews.filter(view => Array.isArray(pinned) && pinned.includes(view)),
     dictate: booleanPreference(value?.dictate, defaultChatPreferences.dictate),

@@ -1,6 +1,9 @@
 import { DefaultChatTransport } from 'ai';
 import type { UIMessage } from 'ai';
 import { nativeChatTransport } from './nativeChat.ts';
+import { apiChatHostedSkillProviders, apiChatHostedSkills, hostedSkillProviders } from './hostedSkills.ts';
+import type { HostedSkill } from './hostedSkills.ts';
+export type { HostedSkill, HostedSkillReference, HostedInlineSkill } from './hostedSkills.ts';
 import { anthropicChatProtocolHeaders } from './nativeToolOptions.ts';
 import { decisionChoiceBody, gatewayDecisionEndpoints, readDecisionChoice } from './decisionChoice.ts';
 import type { DecisionChoice, DecisionChoiceResult, GatewayDecisionEndpoint } from './decisionChoice.ts';
@@ -267,10 +270,19 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
   const chatUrl = root && new URL('api/chat', root).href;
   const videosUrl = root && new URL('api/videos', root).href;
 
-  async function request(destination: string | undefined, auth: CredentialRequest, init: RequestInit = {}, protocolHeaders?: HeadersInit) {
+  async function request(destination: string | undefined, auth: CredentialRequest, init: RequestInit = {}, protocolHeaders?: HeadersInit,
+    skillProviders: readonly string[] = []) {
     if (!destination) throw new GatewayError('No gateway is configured. Choose Route → Direct to chat with a provider.');
     init.signal?.throwIfAborted();
     const selected = new Headers(await credentials(auth));
+    // Add only the scoped skill key. A skill credential must never replace inference authorization.
+    for (const provider of skillProviders) {
+      const name = `X-${provider}-Key`;
+      if (selected.has(name)) continue;
+      init.signal?.throwIfAborted();
+      const key = new Headers(await credentials({ kind: 'skill', provider })).get(name);
+      if (key !== null) selected.set(name, key);
+    }
     if (protocolHeaders) new Headers(protocolHeaders).forEach((value, name) => {
       if (!selected.has(name) || (auth.kind === 'chat' && auth.provider === 'anthropic'
         && (name === 'anthropic-version' || name === 'anthropic-beta'))) selected.set(name, value);
@@ -494,7 +506,7 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
       return (await decideChoiceResult(endpoint, choice, signal)).choice;
     },
     chatTransport(endpoint: GatewayChatEndpoint = '/api/chat') {
-      if (endpoint !== '/api/chat') return nativeChatTransport(endpoint, (model) => {
+      if (endpoint !== '/api/chat') return nativeChatTransport(endpoint, (model, skills) => {
         const provider = apiChatProvider(model);
         if (!provider) throw new GatewayError('Choose a model supported by this gateway route.');
         if (!root) throw new GatewayError('No gateway is configured. Choose Route → Direct to chat with a provider.');
@@ -503,22 +515,27 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
           const headers = new Headers(init?.headers);
           const beta = endpoint === '/v1/responses' && provider === 'openai' && headers.get('openai-beta');
           return expectEventStream(await request(url, { kind: 'chat', provider }, init,
-            provider === 'anthropic' ? anthropicChatProtocolHeaders(headers) : beta ? { 'OpenAI-Beta': beta } : undefined));
+            provider === 'anthropic' ? anthropicChatProtocolHeaders(headers) : beta ? { 'OpenAI-Beta': beta } : undefined,
+            hostedSkillProviders(skills)));
         } };
       });
       return new DefaultChatTransport<ChatMessage>({
         api: chatUrl,
-        prepareSendMessagesRequest: ({ messages, body }) => ({ body: {
-          model: body?.model, messages, ...(Array.isArray(body?.tools) && body.tools.length ? { tools: body.tools } : {}),
-          ...(body?.providerMetadata && { providerMetadata: body.providerMetadata }),
-          reasoning: chatReasoning(body?.reasoning),
-          toolChoice: chatToolChoice(body?.toolChoice),
-        } }),
+        prepareSendMessagesRequest: ({ messages, body }) => {
+          const tools = Array.isArray(body?.tools) ? body.tools : [];
+          const skills = Array.isArray(body?.hostedSkills) ? body.hostedSkills as HostedSkill[] : [];
+          return { body: {
+            model: body?.model, messages, ...(skills.length ? { tools: [...tools, apiChatHostedSkills(skills)] } : tools.length ? { tools } : {}),
+            ...(body?.providerMetadata && { providerMetadata: body.providerMetadata }),
+            reasoning: chatReasoning(body?.reasoning),
+            toolChoice: chatToolChoice(body?.toolChoice),
+          } };
+        },
         fetch: async (input, init) => {
           if (input !== (chatUrl ?? '/api/chat') || init?.method !== 'POST' || typeof init.body !== 'string') {
             throw new GatewayError('Unexpected chat request.');
           }
-          const { model } = JSON.parse(init.body) as { model?: unknown };
+          const { model, tools } = JSON.parse(init.body) as { model?: unknown; tools?: unknown };
           const provider = typeof model === 'string' && apiChatProvider(model);
           if (!provider) {
             throw new GatewayError('Choose a model that supports API Chat.');
@@ -527,7 +544,8 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
           const headers = new Headers(init.headers);
           const beta = headers.get('openai-beta');
           return expectEventStream(await request(chatUrl, { kind: 'chat', provider }, init,
-            provider === 'anthropic' ? anthropicChatProtocolHeaders(headers) : beta ? { 'OpenAI-Beta': beta } : undefined));
+            provider === 'anthropic' ? anthropicChatProtocolHeaders(headers) : beta ? { 'OpenAI-Beta': beta } : undefined,
+            apiChatHostedSkillProviders(tools)));
         },
       });
     },

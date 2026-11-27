@@ -232,7 +232,9 @@ for (const mode of ['Gateway', 'Direct', 'Agents'] as const) test(`saved agent s
   await page.route('**/gateway/api/chat', route => route.fulfill(stream('Welcome')));
   await page.route('**/test-agents/api/chat', route => {
     const body = route.request().postDataJSON();
-    expect(body.agent.skills).toEqual([{ type: 'skill_reference', skill_id: skill.id, version: 'latest' }]);
+    expect(body.agent.tools.find((tool: { type: string }) => tool.type === 'skills')).toEqual({ type: 'skills',
+      skills: [{ type: 'skill_reference', skill_id: skill.id, version: 'latest' }] });
+    expect(body.agent).not.toHaveProperty('skills');
     expect(body.tools).toBeUndefined();
     expect(JSON.stringify(body.messages)).not.toMatch(/activate_skill|read_skill_resource|agenda-check/);
     return route.fulfill(stream('Hosted agenda reply'));
@@ -277,6 +279,13 @@ for (const mode of ['Gateway', 'Direct', 'Agents'] as const) test(`saved agent s
   const editor = page.getByRole('dialog', { name: 'Edit agent' });
   await editor.getByRole('tab', { name: 'Skills', exact: true }).click();
   await editor.getByRole('switch', { name: skill.name, exact: true }).check();
+  if (mode === 'Agents') {
+    const execution = editor.getByRole('combobox', { name: 'Execution', exact: true });
+    await expect(execution).toHaveValue('');
+    await execution.selectOption({ label: 'Hosted' });
+    await execution.selectOption({ label: 'Client' });
+    await execution.selectOption({ label: 'Default' });
+  }
   await editor.getByRole('button', { name: 'Save agent', exact: true }).click();
   await expect(editor).toBeHidden();
   await page.getByRole('button', { name: 'New chat', exact: true }).click();

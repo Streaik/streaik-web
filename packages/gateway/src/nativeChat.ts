@@ -6,6 +6,8 @@ import { chatToolChoice, GatewayError } from './index.ts';
 import type { ChatMessage, ChatMessageMetadata, NativeChatEndpoint } from './index.ts';
 import { anthropicChatProtocolHeaders, extendNativeTools, mergeAnthropicMessagesOptions, mergeOpenAIResponsesOptions } from './nativeToolOptions.ts';
 import { clientToolSearchName, deferredToolReferences } from './toolSearch.ts';
+import { withNativeHostedSkills } from './hostedSkills.ts';
+import type { HostedSkill } from './hostedSkills.ts';
 
 type NativeTarget = {
   url: string;
@@ -40,12 +42,13 @@ function nativeAttachmentMessages(messages: ChatMessage[], endpoint: NativeChatE
   }) });
 }
 
-export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (model: string) => NativeTarget): ChatTransport<ChatMessage> {
+export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (model: string, skills: readonly HostedSkill[]) => NativeTarget): ChatTransport<ChatMessage> {
   return {
     async sendMessages({ messages, body, headers, abortSignal }) {
-      const { model, tools: definitions, toolChoice, instructions: gatewayInstructions, mcpInstructions, providerMetadata } = asRecord(body) ?? {};
+      const { model, tools: definitions, toolChoice, instructions: gatewayInstructions, mcpInstructions, providerMetadata, hostedSkills } = asRecord(body) ?? {};
       if (typeof model !== 'string') throw new GatewayError('Choose a model for this route.');
-      const target = resolve(model);
+      const skills = Array.isArray(hostedSkills) ? hostedSkills as HostedSkill[] : [];
+      const target = resolve(model, skills);
       const openAIResponses = !target.requestBody && endpoint === '/v1/responses' && model.startsWith('openai/');
       const anthropic = !target.requestBody && model.startsWith('anthropic/');
       const anthropicOptions = anthropic ? asRecord(asRecord(providerMetadata)?.anthropic) : undefined;
@@ -79,6 +82,7 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
         let body = target.requestBody ? target.requestBody(init.body) : extendNativeTools(init.body, definitions, endpoint, model);
         if (openAIResponses) body = mergeOpenAIResponsesOptions(body, nativeOptions, registerSearch);
         if (anthropic && endpoint === '/v1/messages') body = mergeAnthropicMessagesOptions(body, anthropicOptions, toolChoice);
+        if (target.gateway) body = withNativeHostedSkills(body, endpoint, skills, toolChoice);
         if (!beta && !anthropic) return target.fetch(input, body === init.body ? init : { ...init, body });
         const outgoing = new Headers(init.headers);
         if (beta) outgoing.set('OpenAI-Beta', beta);
@@ -110,7 +114,7 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
       let gateway: ChatMessageMetadata['gateway'];
       const result = streamText({
         model: adapter, messages: await convertToModelMessages(nativeAttachmentMessages(messages, endpoint), { tools, ignoreIncompleteToolCalls: true }),
-        instructions, tools, toolChoice: Object.keys(tools).length || nativeTools.length ? chatToolChoice(toolChoice) : undefined,
+        instructions, tools, toolChoice: Object.keys(tools).length || nativeTools.length || target.gateway && skills.length ? chatToolChoice(toolChoice) : undefined,
         ...(typeof anthropicLimit === 'number' && { maxOutputTokens: anthropicLimit }),
         abortSignal, maxRetries: 0, includeRawChunks: target.gateway || !!direct,
         ...(endpoint === '/v1/responses' ? { providerOptions: { openai: { store: false, passThroughUnsupportedFiles: true } } }

@@ -1,7 +1,8 @@
-import type { RemoteSkill } from '@streaik/gateway';
+import type { HostedSkill, RemoteSkill } from '@streaik/gateway';
 import type { JsonValue } from './agentDefinition.ts';
-import { agentSkillEntries, downloadAgentSkill, inlineAgentSkillZip, isAgentSkillReference, isCentralSkillId, isInlineAgentSkill } from './agentSkills.ts';
+import { agentSkillEntries, downloadAgentSkill, inlineAgentSkillZip, inlineSkillBundle, isAgentSkillReference, isCentralSkillId, isInlineAgentSkill } from './agentSkills.ts';
 import type { CentralSkillGateway, InlineAgentSkill } from './agentSkills.ts';
+import { defaultSkillVersion } from './skillBundles.ts';
 import type { LocalSkill } from './skillBundles.ts';
 import type { SkillArchive } from './skillTools.ts';
 
@@ -14,9 +15,9 @@ function inlineId(skill: InlineAgentSkill) {
   return id;
 }
 
-export function browserChatSkills({ mode, skills, local, catalog, selectedIds, gateway }: {
+export function browserChatSkills({ mode, skills, local, catalog, selectedIds, gateway, hostedPreferences = false }: {
   mode: 'gateway' | 'direct' | 'agents'; skills?: JsonValue; local: readonly LocalSkill[];
-  catalog: readonly RemoteSkill[]; selectedIds: readonly string[]; gateway?: CentralSkillGateway;
+  catalog: readonly RemoteSkill[]; selectedIds: readonly string[]; gateway?: CentralSkillGateway; hostedPreferences?: boolean;
 }) {
   const archives = new Map<string, SkillArchive>();
   const linkedIds = new Set<string>();
@@ -35,9 +36,23 @@ export function browserChatSkills({ mode, skills, local, catalog, selectedIds, g
     }
   }
   const preferenceSkills = mode === 'gateway' && gateway ? catalog.filter(item => selectedIds.includes(item.id) && !linkedIds.has(item.id)) : [];
-  if (gateway) for (const item of preferenceSkills) {
+  if (gateway && !hostedPreferences) for (const item of preferenceSkills) {
     archives.set(item.id, { id: item.id, name: item.name, description: item.description, load: signal => gateway.downloadSkill(item.id, undefined, signal) });
   }
-  return { local: mode === 'gateway' ? local : [], archives: [...archives.values()], preferenceSkills,
+  return { local: mode === 'gateway' && !hostedPreferences ? local : [], archives: [...archives.values()], preferenceSkills,
     missingCatalog: !!gateway && (mode === 'gateway' && selectedIds.some(id => !remote.has(id)) || [...linkedIds].some(id => !remote.has(id))) };
+}
+
+export function hostedChatSkills(local: readonly LocalSkill[], remote: readonly RemoteSkill[]) {
+  const bundles = local.filter(skill => skill.enabled).map(defaultSkillVersion);
+  const ids = [...new Set(remote.map(skill => skill.id).filter(isCentralSkillId))];
+  if (!bundles.length && !ids.length) return;
+  let prepared: Promise<readonly HostedSkill[]> | undefined;
+  // A continuation uses the same skill versions and does not repackage the ZIPs.
+  return () => prepared ??= (async (): Promise<readonly HostedSkill[]> => {
+    const skills: HostedSkill[] = [];
+    for (const bundle of bundles) skills.push(await inlineSkillBundle(bundle));
+    for (const skill_id of ids) skills.push({ type: 'skill_reference', skill_id });
+    return skills;
+  })();
 }

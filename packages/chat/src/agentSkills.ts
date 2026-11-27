@@ -44,7 +44,11 @@ export async function embedAgentSkill(bundle: SkillBundle, origin: SkillOrigin):
   const metadata: Record<string, string> = { ...bundle.metadata.metadata, [originKey]: origin.id };
   if (origin.version) metadata[versionKey] = origin.version;
   else delete metadata[versionKey];
-  const zip = await exportSkillZip({ ...bundle, metadata: { ...bundle.metadata, metadata } });
+  return inlineSkillBundle({ ...bundle, metadata: { ...bundle.metadata, metadata } });
+}
+
+export async function inlineSkillBundle(bundle: SkillBundle): Promise<InlineAgentSkill> {
+  const zip = await exportSkillZip(bundle);
   const bytes = new Uint8Array(await zip.arrayBuffer());
   const raw: string[] = [];
   for (let i = 0; i < bytes.length; i += 0x8000) raw.push(String.fromCharCode(...bytes.subarray(i, i + 0x8000)));

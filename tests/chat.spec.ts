@@ -1007,6 +1007,75 @@ test('chat settings list and remember remote skills without downloading until th
   expect(downloads).toBe(1);
 });
 
+test('chat Skills Execution switches between browser and hosted and is hidden on Direct', async ({ page }) => {
+  const skill = { id: 'openai/skill_digest', name: 'digest', description: 'Prepare a daily digest.' };
+  await mockModels(page);
+  await page.route('**/gateway/v1/skills?*', route => route.fulfill({ json: { data: [skill], has_more: false } }));
+  await page.route(`**/gateway/v1/skills/${skill.id}/content`, () => { throw new Error('The browser must not download this skill.'); });
+  let gatewayRequests = 0;
+  await page.route('**/gateway/api/chat', async route => {
+    const number = ++gatewayRequests;
+    const body = route.request().postDataJSON();
+    expect(body.messages[0].parts.map((part: { text: string }) => part.text).join('\n')).toContain('systemInformation');
+    if (number === 2) {
+      expect(body.tools).toEqual([{ name: 'skills', inputSchema: { type: 'object', skills: {
+        skills: [{ type: 'skill_reference', skill_id: skill.id }],
+      } } }]);
+      expect(JSON.stringify(body.messages)).not.toContain(skill.id);
+    } else {
+      expect(body.tools.map((tool: { name: string }) => tool.name)).toEqual(['activate_skill', 'read_skill_resource']);
+      expect(body.messages[0].parts[0].text).toContain(skill.id);
+    }
+    const events = [{ type: 'start', messageId: `skills-response-${number}` }, { type: 'text-start', id: 'text' },
+      { type: 'text-delta', id: 'text', delta: `Skill reply ${number}` }, { type: 'text-end', id: 'text' }, { type: 'finish', finishReason: 'stop' }];
+    await route.fulfill({ headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' },
+      body: events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n' });
+  });
+  await page.route('https://api.openai.com/v1/chat/completions', async route => {
+    expect(JSON.stringify(route.request().postDataJSON())).not.toMatch(/skill_digest|activate_skill|read_skill_resource/);
+    await route.fulfill({ contentType: 'text/event-stream', body: nativeChatSse('Direct without hosted skills') });
+  });
+  await page.route('https://api.openai.com/v1/models', route => route.fulfill({ json: { data: [{ id: 'gpt-4.1-mini' }] } }));
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await chooseChatModel(page);
+  const settings = await showChatSkills(page);
+  const execution = settings.getByRole('combobox', { name: 'Execution', exact: true });
+  const close = settings.getByRole('button', { name: 'Close', exact: true });
+  const enabled = settings.getByRole('switch', { name: skill.name, exact: true });
+  await expect(execution).toHaveValue('');
+  await enabled.check();
+  await close.click();
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  const send = async (prompt: string, reply: string) => {
+    await composer.fill(prompt); await composer.press('Enter');
+    await expect(page.getByText(reply, { exact: true })).toBeVisible();
+  };
+  await send('Default execution', 'Skill reply 1');
+  await showChatSkills(page);
+  await execution.selectOption({ label: 'Hosted' });
+  await close.click();
+  await send('Use the gateway', 'Skill reply 2');
+
+  await openRoute(page, 'Direct');
+  await page.getByRole('menuitemradio', { name: '/v1/chat/completions', exact: true }).click();
+  await chooseChatModel(page);
+  await showChatSkills(page);
+  await expect(execution).toHaveCount(0);
+  await close.click();
+  await send('Use Direct', 'Direct without hosted skills');
+
+  await openRoute(page, 'Gateway');
+  await page.getByRole('menuitemradio', { name: '/api/chat', exact: true }).click();
+  await chooseChatModel(page);
+  await showChatSkills(page);
+  await expect(execution).toHaveValue('hosted');
+  await expect(enabled).toBeChecked();
+  await execution.selectOption({ label: 'Client' });
+  await close.click();
+  await send('Back to the browser', 'Skill reply 3');
+});
+
 test('a pinned remote skill can be downloaded, saved locally, and uploaded using BYOK destination selection', async ({ page }) => {
   const skill = { id: 'openai/skill_source', name: 'meeting-brief', description: 'Write meeting briefs.',
     default_version: '2', latest_version: '2', created_at: 1 };

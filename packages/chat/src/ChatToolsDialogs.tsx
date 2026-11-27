@@ -7,6 +7,7 @@ import { DialogTabs } from './DialogTabs';
 import { ToolDetails, ToolValue } from './ToolDetails';
 import { describeToolOutput } from './toolOutputContent';
 import { composerToolDefaults, toolConfigurationDefaults } from './chatPreferences';
+import { SkillExecutionField } from './SkillExecutionField';
 import type { ChatPreferences } from './chatPreferences';
 import { normalizeToolPolicy, toolPolicyForTurn } from './chatToolPolicy';
 import type { ChatToolPolicy } from './chatToolPolicy';
@@ -70,8 +71,9 @@ function ToolPolicyFields({ value, onChange, rows, disabled }: {
   </section>;
 }
 
-export function ChatSettingsDialog({ dialog, value, onChange, gateway, browserToolsSupported, hasHistory, locked, localSkills, remoteSkills, providerModels, toolRows, namespaceSupported, toolOptionsSupported, voice }: {
+export function ChatSettingsDialog({ dialog, value, onChange, gateway, hostedSkillsSupported, browserToolsSupported, hasHistory, locked, localSkills, remoteSkills, providerModels, toolRows, namespaceSupported, toolOptionsSupported, voice }: {
   dialog: DialogRef; value: ChatPreferences; onChange: (preferences: ChatPreferences) => void;
+  hostedSkillsSupported: boolean;
   gateway: boolean; browserToolsSupported: boolean; hasHistory: boolean; locked: boolean; localSkills: LocalSkills; remoteSkills: RemoteSkills;
   providerModels: readonly ChatModel[];
   voice?: { protocol: VoiceProtocol; models: readonly ChatModel[]; agents: readonly LiveClientAgent[] };
@@ -144,6 +146,10 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, browserTo
       </>}
     </div>
     <div id={`${id}-skills-panel`} className="chat-skill-cards" role="tabpanel" aria-labelledby={`${id}-skills-tab`} hidden={tab !== 'skills'}>
+      {hostedSkillsSupported && <section className="chat-tool-card">
+        <SkillExecutionField value={value.skillExecution} disabled={locked}
+          onChange={skillExecution => onChange({ ...value, skillExecution })} />
+      </section>}
       <section className="chat-tool-card" aria-labelledby={`${id}-local-skills`}>
         <h3 id={`${id}-local-skills`}>{t('Local')}</h3>
         {!gateway && <p>{t('Skills are available only on Gateway routes.')}</p>}
@@ -205,7 +211,8 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, browserTo
         } else if (providerTab) {
           setDraft(current => ({ ...(current ?? value.providerSettings), [providerTab]: undefined }));
           setResetKey(key => key + 1);
-        } else onChange({ ...value, ...(tab === 'tool-configuration' ? toolConfigurationDefaults : composerToolDefaults) });
+        } else onChange({ ...value, ...(tab === 'tool-configuration' ? toolConfigurationDefaults : composerToolDefaults),
+          ...(tab === 'skills' && hostedSkillsSupported && { skillExecution: undefined }) });
       }}>{t(providerTab ? 'Reset provider settings' : 'Defaults')}</Button>
       <Button variant={draft || voiceDraft ? 'subtle' : undefined} onClick={() => dialog.current?.close()}>{t(draft || voiceDraft ? 'Cancel' : 'Close')}</Button>
       {(providerTab || draft || tab === 'realtime' || voiceDraft) && <Button disabled={locked || (!draft && !voiceDraft)} onClick={() => {

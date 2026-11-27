@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { browserChatSkills } from '../packages/chat/src/agentChatSkills.ts';
+import { browserChatSkills, hostedChatSkills } from '../packages/chat/src/agentChatSkills.ts';
 import { emptyAgentData, readAgentData, saveAgentDefinition, serializeAgentData } from '../packages/chat/src/agentCatalog.ts';
 import { createAgentDraft, saveAgentDraft } from '../packages/chat/src/agentDraft.ts';
 import { agentSkillsTool, patchAgentSkills } from '../packages/chat/src/agentTools.ts';
@@ -9,6 +9,7 @@ import { buildRequestContext, requestContextText } from '../packages/chat/src/ch
 import { activeChatTools, filterLocalToolReplay } from '../packages/chat/src/localPlugins.ts';
 import { exportSkillZip, importSkillZip, saveSkillVersion } from '../packages/chat/src/skillBundles.ts';
 import { resolveSkillTool, skillTools } from '../packages/chat/src/skillTools.ts';
+import { normalizeChatPreferences } from '../packages/chat/src/chatPreferences.ts';
 
 const bundle = { metadata: { name: 'meeting-notes', description: 'Help with meeting notes.', metadata: { owner: 'docs' } },
   instructions: 'Use the private meeting template.', files: [{ path: 'references/template.md', data: new Blob(['Template contents']) }] };
@@ -34,6 +35,10 @@ test('agent draft and storage round-trip both portable variants without altering
   assert.deepEqual(definition, edited);
   const adjusted = saveAgentDraft({ ...createAgentDraft(definition), tools: patchAgentSkills(definition.tools, { skills: [inline] }) }, definition);
   assert.deepEqual(agentSkillsTool(adjusted.tools), { type: 'skills', skills: [inline], execution: 'server' });
+  const client = patchAgentSkills(adjusted.tools, { execution: 'client' });
+  assert.equal(agentSkillsTool(client).execution, 'client');
+  const defaults = saveAgentDraft({ ...createAgentDraft(adjusted), tools: patchAgentSkills(client, { execution: undefined }) }, adjusted);
+  assert.deepEqual(defaults.tools, [future, { type: 'skills', skills: [inline] }]);
   assert.deepEqual(adjusted.tools[0], future);
   assert.deepEqual(source.tools, [future]);
 });
@@ -85,4 +90,40 @@ test('browser agent chat uses the same catalog and lazy tools in Gateway and Dir
   const offline = browserChatSkills({ ...input, mode: 'direct', gateway: undefined });
   assert.deepEqual(offline.archives.map(({ name }) => name), ['meeting-notes']);
   assert.equal(browserChatSkills({ ...input, mode: 'direct', skills: undefined }).archives.length, 0);
+});
+
+test('Hosted chat packages enabled default versions and references without local tools, context or replay', async () => {
+  const local = saveSkillVersion([], bundle);
+  const version2 = { ...bundle, instructions: 'Updated private instructions', files: [] };
+  const withVersions = saveSkillVersion(local, version2, local[0].id);
+  const [enabled, disabled] = saveSkillVersion(withVersions, { ...bundle, metadata: { name: 'disabled', description: 'Disabled' } });
+  const options = { mode: 'gateway', local: [{ ...enabled, defaultVersion: 1 }, { ...disabled, enabled: false }], catalog: [remote],
+    selectedIds: [remote.id], gateway: { downloadSkill: () => assert.fail('A hosted reference should not be downloaded in the browser') } };
+  for (const value of [undefined, 'client', 'hosted']) {
+    assert.equal(normalizeChatPreferences({ skillExecution: value }).skillExecution, value);
+  }
+  assert.equal(Object.hasOwn(normalizeChatPreferences({ skillExecution: 'default' }), 'skillExecution'), false);
+  const client = browserChatSkills(options);
+  assert.equal(buildRequestContext('Streaik', 'en', false, client.local, client.archives).skills.skills.length, 2);
+  const hosted = browserChatSkills({ ...options, hostedPreferences: true });
+  assert.deepEqual([hosted.local, hosted.archives, hosted.preferenceSkills], [[], [], [remote]]);
+  const context = buildRequestContext('Streaik', 'en', false, hosted.local, hosted.archives);
+  assert.equal(context.skills, undefined);
+  assert.equal(context.system.systemInformation.appName, 'Streaik');
+  const mcp = { name: 'unrelated_mcp_tool', inputSchema: { type: 'object' } };
+  const oldSkill = { type: 'dynamic-tool', toolName: 'activate_skill', toolCallId: 'old', state: 'output-available',
+    input: { skill_id: remote.id }, output: 'Previous instructions' };
+  const oldMcp = { ...oldSkill, toolName: mcp.name, toolCallId: 'mcp', output: 'MCP result' };
+  const replay = filterLocalToolReplay([{ id: 'assistant', role: 'assistant', parts: [oldSkill, oldMcp] }], [mcp], false, new Set());
+  assert.deepEqual(replay[0].parts, [oldMcp]);
+  const prepare = hostedChatSkills(options.local, hosted.preferenceSkills);
+  assert.equal(prepare(), prepare());
+  const [inline, reference] = await prepare();
+  assert.equal(inline.name, bundle.metadata.name);
+  const archive = await importSkillZip(inlineAgentSkillZip(inline));
+  assert.equal(archive.instructions, bundle.instructions);
+  assert.equal(await archive.files[0].data.text(), 'Template contents');
+  assert.deepEqual(reference, { type: 'skill_reference', skill_id: remote.id });
+  assert.equal(hostedChatSkills([], []), undefined);
+  assert.deepEqual(browserChatSkills({ ...options, mode: 'direct' }).preferenceSkills, []);
 });

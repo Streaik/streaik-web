@@ -1,5 +1,7 @@
 export const agentMessages = {
   'General': ['Algemeen', 'General'],
+  'Execution': ['Uitvoering', 'Ejecución'],
+  'Hosted': ['Gehost', 'Alojada'],
   'Details': ['Details', 'Detalles'],
   'Create agent': ['Agent maken', 'Crear agente'],
   'Edit agent': ['Agent bewerken', 'Editar agente'],

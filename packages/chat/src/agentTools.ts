@@ -57,9 +57,10 @@ export function agentSkillsTool(tools?: JsonValue) {
   return agentToolList(tools).map(object).find(tool => tool?.type === 'skills');
 }
 
-export function patchAgentSkills(tools: JsonValue | undefined, patch: JsonObject): readonly JsonValue[] {
+export function patchAgentSkills(tools: JsonValue | undefined, patch: JsonObject | { execution: 'server' | 'client' | undefined }): readonly JsonValue[] {
   const list = agentToolList(tools);
   const previous = agentSkillsTool(tools);
-  const descriptor = { skills: [], ...previous, ...patch, type: 'skills' };
+  const { execution, ...fields } = { ...previous, ...patch };
+  const descriptor = { skills: [], ...fields, ...(execution !== undefined && { execution }), type: 'skills' };
   return previous ? list.map(tool => tool === previous ? descriptor : tool) : [...list, descriptor];
 }

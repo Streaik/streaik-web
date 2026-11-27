@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { readUIMessageStream } from 'ai';
-import { createDirectChat, createGateway, nativeChatEndpoints } from '../packages/gateway/src/index.ts';
+import { createDirectChat, createGateway, gatewayChatEndpoints, nativeChatEndpoints } from '../packages/gateway/src/index.ts';
 import { isClientToolSearch, searchClientTools, searchLocalToolCatalog } from '../packages/chat/src/clientToolSearch.ts';
 import { activeChatTools, runLocalTool } from '../packages/chat/src/localPlugins.ts';
 import { chatRequestTools, configureChatTools } from '../packages/chat/src/chatToolRequest.ts';
@@ -57,6 +57,56 @@ function response(endpoint, model, bridged = false) {
 async function send(transport, model, extras = {}) {
   return Array.fromAsync(await transport.sendMessages({ chatId: 'conversation', messages, body: { model }, trigger: 'submit-message', ...extras }));
 }
+
+for (const endpoint of gatewayChatEndpoints) test(`Gateway sends named hosted skills on ${endpoint} and scopes the skill key`, async () => {
+  const api = endpoint === '/api/chat';
+  const model = endpoint === messagesApi ? 'anthropic/claude-sonnet-4-6' : 'openai/gpt-4.1-mini';
+  const modelProvider = model.split('/')[0];
+  const skillProvider = modelProvider === 'openai' ? 'anthropic' : 'openai';
+  const hostedSkills = [{ type: 'skill_reference', skill_id: `${skillProvider}/skill_test` },
+    { type: 'inline', name: 'meeting-notes', description: 'Help with meetings.', source: { type: 'base64', media_type: 'application/zip', data: 'AQ==' } }];
+  const tools = [{ name: 'lookup', inputSchema: { type: 'object', properties: {} } }];
+  const authRequests = [];
+  const observed = [];
+  const gateway = createGateway(root, auth => {
+    authRequests.push(auth);
+    return auth.kind === 'skill' ? { authorization: 'must-not-override', [`x-${skillProvider}-key`]: 'scoped-skill-key', 'x-unrelated-key': 'no' }
+      : { authorization: 'Bearer model-key' };
+  }, async (url, init) => {
+    assert.equal(url, new URL(endpoint.slice(1), root).href);
+    const body = JSON.parse(init.body);
+    observed.push({ body, headers: new Headers(init.headers) });
+    return api ? sse([{ type: 'start' }, { type: 'finish', finishReason: 'stop' }, '[DONE]']) : response(endpoint, body.model);
+  });
+  const chunks = await send(gateway.chatTransport(endpoint), model, { body: { model, tools, hostedSkills, toolChoice: 'none' } });
+  assert.equal(observed.length, 1);
+  assert.deepEqual(chunks.filter(chunk => chunk.type === 'error'), []);
+  const [{ body, headers }] = observed;
+  assert.equal(body.hostedSkills, undefined);
+  assert.equal(body.tools[0].name ?? body.tools[0].function.name, 'lookup');
+  assert.deepEqual(body.tools[1], api ? { name: 'skills', inputSchema: { type: 'object', skills: { skills: hostedSkills } } }
+    : { type: 'skills', name: 'skills', skills: hostedSkills });
+  assert.deepEqual(api ? body.toolChoice : body.tool_choice, endpoint === messagesApi ? { type: 'none' } : 'none');
+  assert.equal(headers.get('authorization'), 'Bearer model-key');
+  assert.equal(headers.get(`x-${skillProvider}-key`), 'scoped-skill-key');
+  assert.equal(headers.has('x-unrelated-key'), false);
+  assert.deepEqual(authRequests, [{ kind: 'chat', provider: modelProvider }, { kind: 'skill', provider: skillProvider }]);
+});
+
+for (const endpoint of nativeChatEndpoints) test(`Direct never serializes hosted skills on ${endpoint}`, async () => {
+  const model = endpoint === messagesApi ? 'anthropic/claude-sonnet-4-6' : 'openai/gpt-4.1-mini';
+  const hostedSkills = [{ type: 'skill_reference', skill_id: 'anthropic/skill_private' }];
+  const observed = [];
+  const direct = createDirectChat(providers, id => keys[id], async (_url, init) => {
+    const body = JSON.parse(init.body);
+    observed.push(body);
+    return response(endpoint, body.model);
+  });
+  const chunks = await send(direct.chatTransport(endpoint), model, { body: { model, hostedSkills } });
+  assert.equal(observed.length, 1);
+  assert.deepEqual(chunks.filter(chunk => chunk.type === 'error'), []);
+  assert.doesNotMatch(JSON.stringify(observed[0]), /skill_private|hostedSkills/);
+});
 
 test('Local Tool search is opt-in, stays eager, and searches the current catalog', async () => {
   const route = { mode: 'gateway', endpoint: '/api/chat' };
