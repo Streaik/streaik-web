@@ -3,6 +3,7 @@ import test from 'node:test';
 import { browserChatSkills } from '../packages/chat/src/agentChatSkills.ts';
 import { emptyAgentData, readAgentData, saveAgentDefinition, serializeAgentData } from '../packages/chat/src/agentCatalog.ts';
 import { createAgentDraft, saveAgentDraft } from '../packages/chat/src/agentDraft.ts';
+import { agentSkillsTool, patchAgentSkills } from '../packages/chat/src/agentTools.ts';
 import { downloadAgentSkill, embedAgentSkill, embeddedSkillOrigin, inlineAgentSkillZip, linkAgentSkill } from '../packages/chat/src/agentSkills.ts';
 import { buildRequestContext, requestContextText } from '../packages/chat/src/chatContext.ts';
 import { activeChatTools, filterLocalToolReplay } from '../packages/chat/src/localPlugins.ts';
@@ -25,14 +26,16 @@ test('agent draft and storage round-trip both portable variants without altering
   assert.deepEqual(await embeddedSkillOrigin(inline), origin);
   assert.equal((await importSkillZip(inlineAgentSkillZip(inline))).metadata.metadata.owner, 'docs');
   assert.equal(bundle.metadata.metadata['streaik-agent-skill-id'], undefined);
-  const future = { type: 'future_skill', settings: { foo: [false, null] } };
-  const source = { name: 'Test agent', description: 'A test.', instructions: 'Help.', skills: [future] };
-  const edited = saveAgentDraft({ ...createAgentDraft(source), skills: [future, reference, inline] }, source);
+  const future = { type: 'future_tool', settings: { foo: [false, null] } };
+  const source = { name: 'Test agent', description: 'A test.', instructions: 'Help.', tools: [future] };
+  const edited = saveAgentDraft({ ...createAgentDraft(source), tools: patchAgentSkills(source.tools, { skills: [reference, inline], execution: 'server' }) }, source);
   const data = saveAgentDefinition(emptyAgentData(), [], edited, undefined, 'test');
   const { definition } = readAgentData(serializeAgentData(data)).local[0];
   assert.deepEqual(definition, edited);
-  assert.deepEqual(saveAgentDraft({ ...createAgentDraft(definition), skills: [future, inline] }, definition).skills, [future, inline]);
-  assert.deepEqual(source.skills, [future]);
+  const adjusted = saveAgentDraft({ ...createAgentDraft(definition), tools: patchAgentSkills(definition.tools, { skills: [inline] }) }, definition);
+  assert.deepEqual(agentSkillsTool(adjusted.tools), { type: 'skills', skills: [inline], execution: 'server' });
+  assert.deepEqual(adjusted.tools[0], future);
+  assert.deepEqual(source.tools, [future]);
 });
 
 test('agent links resolve Default, Latest and pinned versions without downloading when configured', async () => {

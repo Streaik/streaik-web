@@ -49,7 +49,7 @@ import { buildRequestContext, requestContextText, withRequestContext } from './c
 import type { RequestContext } from './chatContext';
 import { activeChatTools, filterLocalToolReplay, localPlugins, runLocalTool, toolPartName } from './localPlugins';
 import type { ChatTool } from './localPlugins';
-import { agentMcpAllows, agentMcpServers } from './agentTools';
+import { agentMcpAllows, agentMcpServers, agentSkillsTool } from './agentTools';
 import { apiChatTools, chatRequestTools, chatToolCapabilities, configureChatTools } from './chatToolRequest';
 import type { ChatRequestTool } from './chatToolRequest';
 import { isClientToolSearch, searchClientTools, searchLocalToolCatalog } from './clientToolSearch';
@@ -431,6 +431,11 @@ type Turn = { model: string; route: ChatRoute; tools: ChatTool[]; context?: Requ
   providerSettings?: ProviderChatSettings; reasoning?: ChatReasoning; toolSearchAgent?: TextAppRequest;
   toolPolicy: ChatToolPolicy; toolChoice?: ChatToolChoice; toolProgress: ToolProgress; resolved: Set<string> };
 const isApiChat = (route: ChatRoute | undefined) => !route || (route.mode === 'gateway' && route.endpoint === '/api/chat');
+const isApiChatTurn = (turn: Turn) => turn.hosted ? turn.hosted.endpoint === '/api/chat' : isApiChat(turn.route);
+const isResponsesTurn = (turn: Turn) => turn.hosted ? turn.hosted.endpoint === '/v1/responses'
+  : turn.route.mode === 'gateway' && turn.route.endpoint === '/v1/responses';
+const isConvertedMcpReview = (part: Invocation) => part.providerExecuted === true && toolPartName(part) === 'streaik_mcp_result_review';
+const isNativeMcpApproval = (part: Invocation) => part.providerExecuted === true && !!part.approval && toolPartName(part)?.startsWith('mcp.');
 
 function ChatSession({ appName, gateway, connection, conversation, history, searchHistory, searchConversationText, storageIssue, locationIssue, nav, view, onView, toggleNav, onPersist, onNew, onSwitch, onPin, onDelete, models, route, onRoute, decisions, images, videos, transcriptions, speech, scope, onSettings, preferences, onPreferences, localSkills, remoteSkills, mcpServers, readHistory }: {
   appName: string; gateway: Gateway; connection: Connection; conversation: Conversation; history: Conversation[]; storageIssue: string;
@@ -503,6 +508,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const fetchGatewayModels = route.mode === 'direct' && (view === 'agents' ||
     hasGateway && (mediaView || transcriptionModelIds.length > 0 || speechModelIds.length > 0));
   const gatewayModels = useModels(gateway, connection.ready && fetchGatewayModels, connection.modelRevision ?? 0, scope);
+  // Responses decisions are input for one request, not replayable conversation items.
+  const sentNativeApprovals = useRef(new Set<string>());
   const transport = useMemo<ReturnType<Gateway['chatTransport']>>(() => {
     const apiChat = gateway.chatTransport();
     return {
@@ -515,15 +522,39 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           providerSettings?: ProviderChatSettings; hosted?: HostedTurn; reasoning?: ChatReasoning; toolChoice?: ChatToolChoice;
           clientToolSearch?: boolean;
         };
+        if (hosted?.endpoint === '/v1/responses' || (!hosted && route?.mode === 'gateway' && route.endpoint === '/v1/responses')) {
+          request = { ...request, messages: request.messages.map(message => ({ ...message, parts: message.parts.filter(part => {
+            if (!('toolCallId' in part) || !isNativeMcpApproval(part)) return true;
+            if (message.id !== previous?.id || part.state !== 'approval-responded' || sentNativeApprovals.current.has(part.approval.id)) return false;
+            sentNativeApprovals.current.add(part.approval.id);
+            return true;
+          }) })) };
+        }
         if (hosted) {
           if (!connection.agentBackend) throw new GatewayError('The agent backend is not configured.');
-          // Do not replay browser tool outputs (or send browser MCP credentials) to a hosted runtime.
+          const api = hosted.endpoint === '/api/chat';
+          const tools = api ? (body.tools ?? []).map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) : [];
+          const names = new Set(tools.map(tool => tool.name));
+          // Replay only reviews from this hosted agent, not gateway tools or browser MCP credentials.
           const messages = request.messages.flatMap(message => {
-            const parts = message.parts.filter(part => part.type === 'text' || (message.role === 'user' && part.type === 'file'));
+            const parts = message.parts.flatMap((part): ChatMessage['parts'] => {
+              if (part.type === 'text' || (message.role === 'user' && part.type === 'file')) return [part];
+              if (!api && 'toolCallId' in part && isNativeMcpApproval(part)) return [part];
+              if (!api || message.role !== 'assistant' || !('toolCallId' in part) || !part.approval || !toolComplete(part)
+                || !('toolMetadata' in part) || typeof part.toolMetadata !== 'object' || part.toolMetadata === null
+                || !('streaikAgent' in part.toolMetadata) || part.toolMetadata.streaikAgent !== hosted.selection.id) return [];
+              const { toolMetadata: _private, ...replay } = part;
+              if (isConvertedMcpReview(part)) return [part.approval.approved ? replay : { ...replay, output: undefined } as Invocation];
+              return !part.providerExecuted && part.approval.signature && names.has(toolPartName(part) ?? '') ? [replay] : [];
+            });
             return parts.length ? [{ ...message, parts }] : [];
           });
-          const stream = await connection.agentBackend.chatTransport(hosted.endpoint, hosted.selection).sendMessages({ ...request, body: undefined, messages });
-          return withReplyMetadata(stream, body.model, previous);
+          const stream = await connection.agentBackend.chatTransport(hosted.endpoint, hosted.selection)
+            .sendMessages({ ...request, body: { tools }, messages });
+          return withReplyMetadata(api ? stream.pipeThrough(new TransformStream({ transform(chunk, controller) {
+            controller.enqueue(chunk.type === 'tool-input-available' ? { ...chunk,
+              toolMetadata: { ...chunk.toolMetadata, streaikAgent: hosted.selection.id } } : chunk);
+          } })) : stream, body.model, previous);
         }
         let model = body.model;
         let providerSettings = initialSettings;
@@ -539,7 +570,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         };
         const enabledSkillIds = new Set(context?.skills?.skills.map(({ skill_id }) => skill_id));
         const resourceServers = new Set(context?.mcp?.mcpResourceCatalog.servers.map(({ serverId }) => serverId));
-        const replay = filterLocalToolReplay(request.messages, body.tools ?? [], isApiChat(route), enabledSkillIds, resourceServers);
+        const replay = filterLocalToolReplay(request.messages, body.tools ?? [], isApiChat(route), enabledSkillIds, resourceServers,
+          route?.mode === 'gateway' && route.endpoint === '/v1/responses');
         request = { ...request, body, messages: filterToolOutputContent(replay, preferences.toolOutput) };
         if (route?.mode === 'gateway' && decision) {
           const { endpoint, ...choice } = decision.choice;
@@ -616,7 +648,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const [modelContextOpen, setModelContextOpen] = useState(false);
   const [mcpEditor, setMcpEditor] = useState<McpEditorTarget>();
   const mcpSelection = useMcpSelection(mcpServers);
-  const declaredMcp = view === 'chat' && !hostedRoute ? agentMcpServers(chatAgent?.mcpServers).filter(({ server }) => server.disabled !== true) : [];
+  const declaredMcp = view === 'chat' && !hostedRoute ? agentMcpServers(chatAgent?.tools).filter(({ server }) => server.execution !== 'server') : [];
   const agentMcp = useMcpSelection(mcpServers, mcpServers.records.filter(record => declaredMcp.some(entry => entry.endpoint === record.endpoint)));
   const connectedMcp = hostedRoute ? [] : [...agentMcp.connected, ...mcpSelection.connected.filter(({ record }) =>
     !agentMcp.connected.some(entry => entry.record === record))];
@@ -637,7 +669,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const { online: skillsOnline, skills: providerSkills, busy: skillsBusy, needsLoad: needsSkills, cursor: skillCursor,
     error: skillCatalogError, load: loadSkills } = remoteSkills;
   const skillMode = hostedRoute ? 'agents' : runRoute.mode;
-  const attachedSkills = view === 'chat' ? chatAgent?.skills : undefined;
+  const skillsTool = view === 'chat' ? agentSkillsTool(chatAgent?.tools) : undefined;
+  const attachedSkills = skillsTool?.execution === 'server' ? undefined : skillsTool?.skills;
   const chatSkills = useMemo(() => browserChatSkills({ mode: skillMode, skills: attachedSkills, local: localSkills.skills,
     catalog: providerSkills, selectedIds: preferences.remoteSkillIds, gateway: skillsOnline ? gateway : undefined }),
     [skillMode, attachedSkills, localSkills.skills, providerSkills, preferences.remoteSkillIds, skillsOnline, gateway]);
@@ -653,7 +686,9 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     const declaration = declaredMcp.find(entry => entry.endpoint === record.endpoint);
     return declaration ? discovery.tools.filter(tool => agentMcpAllows(declaration.server, tool.remoteName)) : discovery.tools;
   }).filter((tool, index, all) => all.findIndex(other => other.name === tool.name) === index);
-  const enabledTools = hostedRoute ? [] : activeChatTools(runRoute, preferences.plugins, hasHistory, mcpTools, hasSkills, mcpCatalog ? readResourceTool : undefined);
+  const enabledTools = hostedRoute ? hostedRoute.endpoint === '/api/chat'
+    ? activeChatTools({ mode: 'gateway', endpoint: '/api/chat' }, preferences.plugins, hasHistory, []).filter(tool => tool.source === 'local') : []
+    : activeChatTools(runRoute, preferences.plugins, hasHistory, mcpTools, hasSkills, mcpCatalog ? readResourceTool : undefined);
   const configuredTools = configureChatTools(enabledTools, preferences.toolRequestConfig, preferences.useToolNamespaces, chatAgent);
   const baseContext = useMemo(() => gatewayRoute || hasSkills ? buildRequestContext(appName, language, darkMode, chatSkills.local, chatSkills.archives) : undefined,
     [gatewayRoute, hasSkills, appName, language, darkMode, chatSkills]);
@@ -681,11 +716,15 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const isSearch = (part: Invocation) => !!turn?.toolSearchAgent && !turn.voiceMessage && turn.model.startsWith('openai/') &&
     toolPartName(part) === 'tool_search' && isClientToolSearch(part.input, part.toolCallId, part.callProviderMetadata);
   const toolParts = parts.flatMap(part => {
-    if (!('toolCallId' in part) || !turn || turn.hosted || (!turn.voiceMessage && turn.toolChoice === 'none') || part.providerExecuted || turn.toolProgress.seen.has(part.toolCallId)) return [];
+    if (!('toolCallId' in part) || !turn || turn.toolProgress.seen.has(part.toolCallId)) return [];
+    if (isResponsesTurn(turn) && isNativeMcpApproval(part)) return [{ part, tool: undefined }];
+    if (turn.hosted && !isApiChatTurn(turn)) return [];
+    if (isApiChatTurn(turn) && isConvertedMcpReview(part)) return [{ part, tool: undefined }];
+    if (part.providerExecuted || (!turn.voiceMessage && turn.toolChoice === 'none')) return [];
     const name = toolPartName(part);
     if (isApiChat(turn.route) && turn.model === echoInputModel && isEchoInputCall(part)) return [{ part, tool: undefined }];
     const tool = turn.tools.find(tool => tool.definition.name === name);
-    return tool || isSearch(part) || (isApiChat(turn.route) && part.state === 'approval-requested') ? [{ part, tool }] : [];
+    return tool || isSearch(part) || (isApiChatTurn(turn) && part.state === 'approval-requested') ? [{ part, tool }] : [];
   });
   const pending = toolParts.find(({ part }) => !toolComplete(part) && !turn?.resolved.has(part.toolCallId));
   const stagedResult = staged && staged.turn === turn && staged.callId === pending?.part.toolCallId ? staged.result : undefined;
@@ -710,8 +749,9 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         void completeSearch(turn, pending.part, api);
       return;
     }
-    if (pending && isApiChat(turn.route)) {
+    if (pending && isApiChatTurn(turn)) {
       const { part, tool } = pending;
+      if (isConvertedMcpReview(part)) return;
       if (turn.model === echoInputModel && isEchoInputCall(part) && part.state === 'approval-requested') {
         void answerProviderForm(part);
         return;
@@ -846,10 +886,22 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   }
 
   function answerTool(approved: boolean) {
-    if (!turn || turn.route.mode === 'direct' || !pending || !last || toolBusy || operation.current || status !== 'ready') return;
+    if (!turn || (!turn.hosted && turn.route.mode === 'direct') || !pending || !last || toolBusy || operation.current || status !== 'ready') return;
     const { part, tool } = pending;
     if (turn.resolved.has(part.toolCallId)) return;
-    if (!isApiChat(turn.route)) {
+    if (part.state === 'approval-requested' && (isApiChatTurn(turn) && isConvertedMcpReview(part) || isResponsesTurn(turn) && isNativeMcpApproval(part))) {
+      let answered: Invocation;
+      if (approved && isConvertedMcpReview(part)) {
+        const metadata = part.toolMetadata;
+        if (!metadata || typeof metadata !== 'object' || !('mcpReviewOutput' in metadata)) return;
+        answered = { ...part, state: 'output-available', output: metadata.mcpReviewOutput, approval: { ...part.approval, approved: true } };
+      } else answered = { ...part, state: 'approval-responded', approval: { ...part.approval, approved } };
+      turn.resolved.add(part.toolCallId);
+      setMessages(current => current.map(message => message.id === last.id ? { ...message,
+        parts: message.parts.map(item => 'toolCallId' in item && item.toolCallId === part.toolCallId ? answered : item) } : message));
+      return;
+    }
+    if (!isApiChatTurn(turn)) {
       if (tool?.source === 'mcp' || tool?.source === 'mcp-resource') {
         if (!stagedResult || part.state !== 'input-available') return;
         turn.resolved.add(part.toolCallId);
@@ -910,12 +962,17 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   }
 
   function pendingReview(): ToolReview | undefined {
-    if (!turn || turn.route.mode === 'direct' || !pending || status !== 'ready') return;
+    if (!turn || (!turn.hosted && turn.route.mode === 'direct') || !pending || status !== 'ready') return;
     const { tool, part } = pending;
     const name = tool?.source === 'mcp' ? tool.tool.title || tool.tool.remoteName : invocationName(part);
     const details = { id: part.toolCallId, name, input: part.input, disabled: toolBusy || !connection.ready };
+    if (part.state === 'approval-requested' && isResponsesTurn(turn) && isNativeMcpApproval(part)) return { ...details, kind: 'execution' };
+    if (part.state === 'approval-requested' && isConvertedMcpReview(part) && 'toolMetadata' in part &&
+      typeof part.toolMetadata === 'object' && part.toolMetadata !== null && 'mcpReviewOutput' in part.toolMetadata) {
+      return { ...details, kind: 'result', output: part.toolMetadata.mcpReviewOutput };
+    }
     if (stagedResult) return { ...details, kind: 'result', ...stagedResult };
-    if (!isApiChat(turn.route) && part.state === 'input-available' && tool?.source === 'local' && tool.plugin.approval) {
+    if (!isApiChatTurn(turn) && part.state === 'input-available' && tool?.source === 'local' && tool.plugin.approval) {
       return { ...details, kind: 'execution' };
     }
   }

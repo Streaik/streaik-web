@@ -56,8 +56,9 @@ test('an explicit browser Gateway router takes precedence and never supplies ans
   assert.deepEqual(answers.map(({ configuration }) => configuration), [untyped, answer]);
 });
 
-test('hosted catalog and API Chat scope credentials and serialize only the selected definition and transcript', async () => {
+test('hosted catalog and API Chat scope credentials and send the conversation and browser declarations', async () => {
   const requests = [];
+  const tools = [{ name: 'browser_lookup', description: 'Search locally', inputSchema: { type: 'object' } }];
   const backend = createAgentBackend(base, request => request.kind === 'catalog' ? {}
     : agentProviderHeaders({ openai: 'selected-provider-key', anthropic: 'unrelated-provider-key' }, request.modelIds), async (url, init) => {
     requests.push(url);
@@ -75,14 +76,14 @@ test('hosted catalog and API Chat scope credentials and serialize only the selec
     }
     assert.equal(url, `${base.href}api/chat`);
     assert.equal(init.headers.get('x-openai-key'), 'selected-provider-key');
-    assert.deepEqual(JSON.parse(init.body), { agent: definition, messages: [message] });
+    assert.deepEqual(JSON.parse(init.body), { agent: definition, id: 'chat', messages: [message], tools });
     return sse({ type: 'start' }, { type: 'text-start', id: '1' }, { type: 'text-delta', id: '1', delta: 'Hello' }, { type: 'text-end', id: '1' }, { type: 'finish' });
   });
   const agents = await backend.listAgents();
   assert.deepEqual(agents.map(agent => agent.id), ['catalog/greeter']);
   assert.deepEqual(await backend.getAgent(agents[0].id), definition);
   const stream = await backend.chatTransport('/api/chat', { id: definition.name, definition, modelIds: [modelId] }).sendMessages({
-    chatId: 'chat', trigger: 'submit-message', messages: [message], headers: { authorization: 'Bearer ignored' }, body: { model: 'ignored', tools: ['ignored'] },
+    chatId: 'chat', trigger: 'submit-message', messages: [message], headers: { authorization: 'Bearer ignored' }, body: { model: 'ignored', tools },
   });
   assert.equal(await read(stream), 'Hello');
   assert.equal(requests.length, 3);

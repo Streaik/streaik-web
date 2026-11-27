@@ -54,7 +54,7 @@ export function AgentsProvider({ config, scope, children }: { config?: AgentsCon
     const entries = buildAgentCatalog(config, data);
     value = { config, data, entries, notice,
       save: (definition, entry) => commit(saveAgentDefinition(data, entries, definition, entry, entry ? undefined : crypto.randomUUID()),
-        definition.skills !== entry?.definition.skills),
+        definition.tools !== entry?.definition.tools),
       removeChange: (entry) => commit(removeAgentChange(data, entry)),
       assign: (role, selection) => commit(setRoleAssignment(data, role, selection)),
     };

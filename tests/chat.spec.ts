@@ -3159,6 +3159,68 @@ async function selectTwoModels(page: Page) {
   await expect(modelPicker(page)).toHaveText(decisionModelSummary);
 }
 
+test('long shadcn conversations scroll without moving the composer or the page', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.addInitScript(() => {
+    localStorage.setItem('streaik.theme', 'shadcn');
+    localStorage.setItem('streaik.color-mode', 'dark');
+  });
+  await page.route('**/gateway/v1/decisions', route => route.fulfill({ json: {
+    answers: [{ type: 'choice', name: 'chat_model', choice: candidate }],
+  } }));
+  await page.route('**/gateway/api/chat', route => route.fulfill({ contentType: 'text/event-stream',
+    headers: { 'x-vercel-ai-ui-message-stream': 'v1' }, body: sse('End of the conversation.', 1, candidate) }));
+  await prepareModelDecisions(page);
+  await selectTwoModels(page);
+
+  const transcript = page.getByRole('region', { name: 'Conversation', exact: true });
+  const composer = page.getByRole('form', { name: 'Message composer', exact: true });
+  const message = composer.getByRole('textbox', { name: 'Message', exact: true });
+  await message.fill(Array.from({ length: 100 }, (_, index) => `Long conversation line ${index + 1}`).join('\n'));
+  await message.press('Enter');
+  const reply = transcript.getByText('End of the conversation.', { exact: true });
+  await expect(reply).toBeVisible();
+
+  const card = transcript.getByRole('region', { name: 'Assistant activity' });
+  await expect(card.getByText('Decision', { exact: true })).toBeVisible();
+  const input = card.getByRole('tabpanel', { name: 'Input', exact: true });
+  await input.getByRole('button', { name: 'Expand all' }).click();
+  const tree = input.getByRole('tree');
+  await expect.poll(() => tree.evaluate(node => {
+    node.scrollTop = node.scrollHeight;
+    return node.scrollTop;
+  })).toBeGreaterThan(0);
+
+  const expectNoPageScroll = async () => {
+    expect(await page.evaluate(() => {
+      const root = document.scrollingElement!;
+      return root.scrollHeight - root.clientHeight;
+    }), 'document should have no vertical scroll range').toBeLessThanOrEqual(1);
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  };
+  const dock = await composer.boundingBox();
+  await transcript.evaluate(node => { node.scrollTop = 0; });
+  await expectNoPageScroll();
+  expect(await composer.boundingBox()).toEqual(dock);
+
+  const viewport = (await transcript.boundingBox())!;
+  await page.mouse.move(viewport.x + 4, viewport.y + viewport.height / 2);
+  await page.mouse.wheel(0, 10_000);
+  await expect(reply).toBeInViewport();
+  await page.mouse.wheel(0, 10_000);
+  await expectNoPageScroll();
+  expect(await composer.boundingBox()).toEqual(dock);
+
+  await page.setViewportSize({ width: 390, height: 640 });
+  await expect(composer).toBeInViewport({ ratio: 1 });
+  await expectNoPageScroll();
+  await composer.getByRole('button', { name: /^(Add attachments|Add to message)$/ }).click();
+  await expect(composer.getByRole('menuitem', { name: 'Files', exact: true })).toBeInViewport({ ratio: 1 });
+  await page.keyboard.press('Escape');
+  await expectNoPageScroll();
+});
+
 test('BYOK chooses between chat models through the selected Decisions route, or bypasses it when Off', async ({ page }) => {
   const calls: string[] = [];
   for (const endpoint of ['/v1/decisions', '/api/decisions']) {

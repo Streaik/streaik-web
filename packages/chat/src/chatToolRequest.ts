@@ -11,7 +11,7 @@ export type ConfiguredChatTool = { tool: ChatTool; source: string; options: Tool
 export type ChatRequestTool = ToolDefinition & ToolOptions & { namespace?: Namespace };
 
 export function configureChatTools(tools: readonly ChatTool[], config: ToolConfiguration, useNamespaces: boolean, agent?: AgentDefinition): ConfiguredChatTool[] {
-  const declarations = agentMcpServers(agent?.mcpServers);
+  const declarations = agentMcpServers(agent?.tools).filter(({ server }) => server.execution !== 'server');
   return tools.map(tool => {
     const mcp = tool.source === 'mcp' ? tool.tool : undefined;
     const declaration = mcp && declarations.find(entry => entry.endpoint === mcp.server.endpoint && entry.server.disabled !== true);

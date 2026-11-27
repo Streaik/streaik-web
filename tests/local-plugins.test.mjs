@@ -142,3 +142,17 @@ test('approved and declined client results replay with signatures only on API ch
   assert.deepEqual(native.map(part => part.output), [{ result: 'approved' }, 'The user declined to share this tool result.', 'provider result']);
   assert.doesNotMatch(JSON.stringify(native), /signed-|three|old-provider/);
 });
+
+test('API Chat replays client-carried MCP output on approval and drops it on denial', () => {
+  const review = { type: 'dynamic-tool', toolName: 'streaik_mcp_result_review', providerExecuted: true, input: { country: 'Poland' },
+    toolMetadata: { mcpReviewOutput: 'server preview' } };
+  const approved = { ...review, toolCallId: 'approved', state: 'output-available', output: 'client edit',
+    approval: { id: 'approved', signature: 'proof', approved: true } };
+  const denied = { ...review, toolCallId: 'denied', state: 'approval-responded', output: 'must not be sent',
+    approval: { id: 'denied', approved: false } };
+  const pending = { ...review, toolCallId: 'pending', state: 'approval-requested', approval: { id: 'pending' } };
+  const [message] = filterLocalToolReplay([{ id: 'assistant', role: 'assistant', parts: [approved, denied, pending] }], []);
+  assert.deepEqual(message.parts.map(({ toolCallId, output }) => [toolCallId, output]), [['approved', 'client edit'], ['denied', undefined]]);
+  assert.equal(message.parts[0].approval.signature, 'proof');
+  assert.ok(message.parts.every(part => !('toolMetadata' in part)));
+});

@@ -18,7 +18,7 @@ export function agentToolOptions(tools: JsonValue | undefined, id: AgentToolIden
   return toolOptions(agentToolList(tools).find(tool => match(tool, id)));
 }
 
-export function patchAgentTool(tools: JsonValue | undefined, id: AgentToolIdentity, patch: ToolOptions): readonly JsonValue[] {
+export function patchAgentTool(tools: JsonValue | undefined, id: AgentToolIdentity, patch: ToolOptions & { execution?: 'server' | 'client' }): readonly JsonValue[] {
   const list = agentToolList(tools);
   const index = list.findIndex(tool => match(tool, id));
   const next = { ...id, ...object(list[index]), ...patch };
@@ -33,18 +33,33 @@ export function enableAgentSearch(tools: JsonValue | undefined, type: keyof type
 }
 
 export function agentMcpServers(value?: JsonValue) {
-  return Object.entries(object(value) ?? {}).flatMap(([key, entry]) => {
+  return agentToolList(value).flatMap(entry => {
     const server = object(entry);
-    return server?.type === 'http' ? [{ key, server, endpoint: typeof server.url === 'string' ? mcpEndpoint(server.url) : undefined }] : [];
+    return server?.type === 'mcp' && typeof server.server_label === 'string'
+      ? [{ key: server.server_label, server, endpoint: typeof server.server_url === 'string' ? mcpEndpoint(server.server_url) : undefined }] : [];
   });
 }
 
 export function agentMcpAllows(server: JsonObject, toolName: string) {
-  return !Array.isArray(server.allowed_tools) || server.allowed_tools.includes(toolName);
+  const names = Array.isArray(server.allowed_tools) ? server.allowed_tools : object(server.allowed_tools)?.tool_names;
+  return !Array.isArray(names) || names.includes(toolName);
 }
 
-export function patchAgentMcp(servers: JsonValue | undefined, key: string, patch?: JsonObject): JsonObject {
-  const previous = object(servers) ?? {};
-  const { [key]: current, ...others } = previous;
-  return patch ? { ...previous, [key]: { ...object(current), ...patch } } : others;
+export function patchAgentMcp(tools: JsonValue | undefined, key: string, patch?: JsonObject): readonly JsonValue[] {
+  const list = agentToolList(tools);
+  const index = list.findIndex(tool => object(tool)?.type === 'mcp' && object(tool)?.server_label === key);
+  if (!patch) return list.filter((_, i) => i !== index);
+  const descriptor = { ...object(list[index]), ...patch, type: 'mcp', server_label: key };
+  return index < 0 ? [...list, descriptor] : list.map((tool, i) => index === i ? descriptor : tool);
+}
+
+export function agentSkillsTool(tools?: JsonValue) {
+  return agentToolList(tools).map(object).find(tool => tool?.type === 'skills');
+}
+
+export function patchAgentSkills(tools: JsonValue | undefined, patch: JsonObject): readonly JsonValue[] {
+  const list = agentToolList(tools);
+  const previous = agentSkillsTool(tools);
+  const descriptor = { skills: [], ...previous, ...patch, type: 'skills' };
+  return previous ? list.map(tool => tool === previous ? descriptor : tool) : [...list, descriptor];
 }

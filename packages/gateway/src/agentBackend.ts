@@ -56,7 +56,9 @@ export function createAgentBackend(base: URL, credentials: AgentBackendCredentia
         }
       };
       if (endpoint === '/api/chat') return new DefaultChatTransport<ChatMessage>({
-        api: url, fetch: send, prepareSendMessagesRequest: ({ messages }) => ({ body: { ...selector, messages } }),
+        api: url, fetch: send, prepareSendMessagesRequest: ({ id, messages, body }) => ({
+          body: { ...selector, id, messages, ...(Array.isArray(body?.tools) && body.tools.length ? { tools: body.tools } : {}) },
+        }),
       });
 
       const transport = nativeChatTransport(endpoint, () => ({ url, model: selection.id, fetch: send,

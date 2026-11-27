@@ -206,13 +206,21 @@ export function toolPartName(part: ChatMessage['parts'][number]) {
 // Never replay unfinished calls or results from local plugins that are no longer enabled.
 // Native routes use ordinary tool results, not signed API-chat approval records.
 export function filterLocalToolReplay(messages: ChatMessage[], definitions: readonly ToolDefinition[], apiChat = true, enabledSkillIds?: ReadonlySet<string>,
-  enabledMcpResourceServers?: ReadonlySet<string>): ChatMessage[] {
+  enabledMcpResourceServers?: ReadonlySet<string>, nativeMcp = false): ChatMessage[] {
   const allowed = new Set(definitions.map(({ name }) => name));
   return messages.flatMap(message => {
     let changed = false;
     const parts = message.parts.flatMap((part): ChatMessage['parts'] => {
       const name = toolPartName(part);
       if (!name || !('toolCallId' in part)) return [part];
+      if (part.providerExecuted && part.approval && typeof part.approval.approved === 'boolean') {
+        if (nativeMcp && part.state === 'approval-responded' && name.startsWith('mcp.')) return [part];
+        if (apiChat && name === 'streaik_mcp_result_review' && (part.state === 'approval-responded' || part.state === 'output-available')) {
+          const { toolMetadata: _preview, ...decision } = part;
+          changed = true;
+          return [part.approval.approved ? decision : { ...decision, output: undefined }];
+        }
+      }
       const declined = part.state === 'approval-responded' && part.approval?.approved === false;
       const complete = part.state === 'output-available' || part.state === 'output-error' || declined;
       const reviewed = part.approval?.id?.trim() && (declined || part.approval.approved === true);

@@ -164,8 +164,6 @@ test('agent tool configuration preserves portable fields and auto-attaches only 
   await addServer.getByLabel('MCP URL').fill(url);
   await addServer.getByRole('button', { name: 'Add MCP server' }).click();
   const server = tools.getByRole('group', { name: 'Inventory', exact: true });
-  await server.getByRole('checkbox', { name: 'Namespace', exact: true }).check();
-  await server.getByRole('checkbox', { name: 'Required', exact: true }).check();
   await server.getByRole('checkbox', { name: 'Search', exact: true }).check();
   await server.getByRole('checkbox', { name: 'Restrict allowed tools' }).check();
   await server.getByLabel('Allowed tool names (one per line)').fill('lookup');
@@ -180,8 +178,10 @@ test('agent tool configuration preserves portable fields and auto-attaches only 
     const key = Object.keys(localStorage).find(value => value.startsWith('streaik.agents.v1:'));
     return key ? JSON.parse(localStorage.getItem(key)!).local.find((item: { definition: { name: string } }) => item.definition.name === 'Inventory helper')?.definition : undefined;
   });
-  expect(saved).toMatchObject({ tools: [{ type: 'tool_search' }, { type: 'function', name: 'lookup', allowed_callers: ['direct'], defer_loading: false }],
-    mcpServers: { Inventory: { type: 'http', url, allowed_tools: ['lookup'], required: true, namespace: true, defer_loading: true } } });
+  expect(saved).toMatchObject({ tools: [{ type: 'tool_search' },
+    { type: 'mcp', server_label: 'Inventory', server_url: url, allowed_tools: ['lookup'], defer_loading: true },
+    { type: 'function', name: 'lookup', allowed_callers: ['direct'], defer_loading: false }] });
+  expect(saved).not.toHaveProperty('mcpServers');
 
   const roles = await settings(page);
   await roles.getByRole('combobox', { name: 'Chat', exact: true }).click();
@@ -193,8 +193,7 @@ test('agent tool configuration preserves portable fields and auto-attaches only 
   await page.getByRole('option', { name: 'Answer model', exact: true }).click();
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   await composer.fill('Look up inventory');
-  await expect(page.getByText(/Install, authorize, or reconnect the agent’s MCP servers.*Inventory/)).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
   expect(discoveries).toBe(0);
 
   await page.getByRole('button', { name: 'Add to message', exact: true }).click();
@@ -211,10 +210,9 @@ test('agent tool configuration preserves portable fields and auto-attaches only 
   await page.route('**/gateway/api/chat', route => {
     const body = route.request().postDataJSON();
     expect(body).not.toHaveProperty('clientToolResultApproval');
-    expect(body.providerMetadata.openai.tools).toMatchObject([{ type: 'namespace', name: 'inventory', tools: [
-      { name: expect.stringMatching(/lookup$/), allowed_callers: ['direct'] },
-    ] }]);
-    expect(body.providerMetadata.openai.tools[0].tools[0]).not.toHaveProperty('defer_loading');
+    const lookup = body.tools.find((tool: { name: string }) => /lookup$/.test(tool.name));
+    expect(lookup).toMatchObject({ name: expect.stringMatching(/lookup$/), allowed_callers: ['direct'] });
+    expect(lookup).not.toHaveProperty('defer_loading');
     return finishText(route, 'Inventory attached');
   });
   await page.getByRole('button', { name: 'Send', exact: true }).click();

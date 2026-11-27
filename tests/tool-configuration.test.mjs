@@ -12,9 +12,9 @@ const endpoint = 'https://inventory.example/mcp';
 const agent = {
   name: 'Inventory', description: 'Read inventory', instructions: 'Look up inventory.',
   model: { id: 'openai/test' },
-  tools: [{ type: 'function', name: 'lookup', defer_loading: false, future: 2 }, { type: 'resource_search', future: 3 }],
-  mcpServers: { 'Inventory EU': { type: 'http', url: endpoint, allowed_tools: ['lookup'], namespace: true,
-    allowed_callers: ['direct', 'programmatic'], defer_loading: true, extension: { retained: true } } },
+  tools: [{ type: 'function', name: 'lookup', defer_loading: false, future: 2 }, { type: 'resource_search' },
+    { type: 'mcp', server_label: 'Inventory EU', server_url: endpoint, allowed_tools: ['lookup'],
+      allowed_callers: ['direct', 'programmatic'], defer_loading: true }],
   futureField: 1,
 };
 const tool = { name: 'mcp_inventory_lookup', remoteName: 'lookup', inputSchema: schema, server: { id: 'inventory', title: 'Installed Inventory', endpoint } };
@@ -29,31 +29,32 @@ test('scoped preference normalization preserves explicit off and clears malforme
   assert.equal(normalizeChatPreferences({}).useToolNamespaces, false);
 });
 
-test('agent edits keep the AI Happey tool identities and unrelated blueprint options', () => {
+test('agent edits keep MCP and search in one tools array and preserve unrelated blueprint options', () => {
   const draft = createAgentDraft(agent);
   draft.tools = patchAgentTool(enableAgentSearch(draft.tools, 'tool_search', true), { type: 'function', name: 'lookup' }, { allowed_callers: [] });
-  draft.mcpServers = patchAgentMcp(draft.mcpServers, 'Inventory EU', { required: true });
+  draft.tools = patchAgentMcp(draft.tools, 'Inventory EU', { execution: 'server' });
   const saved = JSON.parse(JSON.stringify(saveAgentDraft(draft, agent)));
   assert.deepEqual(saved.tools, [
     { type: 'function', name: 'lookup', defer_loading: false, allowed_callers: [], future: 2 },
-    { type: 'resource_search', future: 3 }, { type: 'tool_search' },
+    { type: 'resource_search' }, { ...agent.tools[2], execution: 'server' }, { type: 'tool_search' },
   ]);
   assert.equal(saved.futureField, 1);
-  const declaration = agentMcpServers(saved.mcpServers)[0];
+  const declaration = agentMcpServers(saved.tools)[0];
   assert.equal(declaration.endpoint, endpoint);
-  assert.deepEqual(declaration.server.extension, { retained: true });
-  assert.equal(declaration.server.required, true);
+  assert.equal(declaration.server.execution, 'server');
+  assert.equal(Object.hasOwn(saved, 'mcpServers'), false);
   assert.equal(agentMcpAllows(declaration.server, 'lookup'), true);
   assert.equal(agentMcpAllows(declaration.server, 'write'), false);
   assert.equal(agentMcpAllows({ allowed_tools: [] }, 'lookup'), false);
 });
 
 test('chat applies agent inheritance to the resolved MCP endpoint and retains client identities across provider shapes', () => {
-  const definitions = chatRequestTools(configureChatTools(tools, { activate_skill: { defer_loading: true } }, false, agent));
+  const definitions = chatRequestTools(configureChatTools(tools, { activate_skill: { defer_loading: true } }, true, agent));
   const openai = apiChatTools(definitions, route, 'openai/test');
-  assert.deepEqual(openai.tools.map(t => t.name), ['activate_skill']);
-  assert.equal(openai.tools[0].defer_loading, true);
-  assert.deepEqual(openai.namespaces.map(ns => [ns.name, ns.tools]), [['inventory_eu', [
+  assert.deepEqual(openai.tools, []);
+  assert.equal(openai.namespaces.find(ns => ns.name === 'local').tools[0].name, 'activate_skill');
+  assert.equal(openai.namespaces.find(ns => ns.name === 'local').tools[0].defer_loading, true);
+  assert.deepEqual(openai.namespaces.filter(ns => ns.name === 'inventory_eu').map(ns => [ns.name, ns.tools]), [['inventory_eu', [
     { type: 'function', name: tool.name, description: undefined, parameters: schema, allowed_callers: ['direct', 'programmatic'] },
   ]]]);
   const anthropic = apiChatTools(definitions, route, 'anthropic/test');
