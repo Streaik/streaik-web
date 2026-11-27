@@ -1,7 +1,7 @@
 import { AgentSwitch } from './AgentToolControls';
 import { agentSearchTools } from './agentTools';
 import { ChatExecutionField } from './ChatExecutionField';
-import { browserMcpPolicy, hostedMcpResponsesNotice, normalizeChatModelContext } from './chatModelContext';
+import { browserMcpPolicy, normalizeChatModelContext } from './chatModelContext';
 import type { ChatMcpServerOptions, ChatModelContext, hostedMcpRoute } from './chatModelContext';
 import { useAppTranslation } from './i18n';
 import type { McpOptions } from './mcp';
@@ -35,7 +35,7 @@ export function ChatModelContextFields({ servers, registry, descriptions, route,
         disabled={locked} hostedSupported={!!route} onChange={execution => change({ execution })} />
     </section>
     <McpPolicyCard policy={policy} onChange={hosted || locked ? undefined : (flag, checked) => change({ policy: { ...policy, [flag]: checked } })} />
-    {hosted && <p>{t(route === '/v1/responses' ? hostedMcpResponsesNotice : 'Select Always to review hosted tool results before sharing them with the model.')}</p>}
+    {hosted && <p>{t(route === '/v1/responses' ? 'Select Always to review hosted tool arguments before execution.' : 'Select Always to review hosted tool results before sharing them with the model.')}</p>}
     {servers.map(({ record, discovery }) => {
       const { id, endpoint, title } = record;
       const options = value?.servers?.[endpoint];

@@ -10,6 +10,7 @@ import { withNativeHostedSkills } from './hostedSkills.ts';
 import type { HostedSkill } from './hostedSkills.ts';
 import { withResponsesHostedMcp } from './hostedMcp.ts';
 import type { HostedMcpTool } from './hostedMcp.ts';
+import { responsesMcpOutput, responsesMcpReplay } from './responsesMcp.ts';
 
 type NativeTarget = {
   url: string;
@@ -51,6 +52,10 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
       if (typeof model !== 'string') throw new GatewayError('Choose a model for this route.');
       const skills = Array.isArray(hostedSkills) ? hostedSkills as HostedSkill[] : [];
       const target = resolve(model, skills);
+      const rawMcp = endpoint === '/v1/responses' && !target.requestBody;
+      const mcpReplay = rawMcp ? responsesMcpReplay(messages, target.url, model, !!target.gateway) : undefined;
+      const previous = messages.at(-1);
+      const mcpOutput = rawMcp ? responsesMcpOutput(target.url, model, previous?.role === 'assistant' ? previous : undefined) : undefined;
       const mcp = target.gateway && endpoint === '/v1/responses' && Array.isArray(hostedMcp) ? hostedMcp as HostedMcpTool[] : [];
       const openAIResponses = !target.requestBody && endpoint === '/v1/responses' && model.startsWith('openai/');
       const anthropic = !target.requestBody && model.startsWith('anthropic/');
@@ -87,6 +92,7 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
         if (anthropic && endpoint === '/v1/messages') body = mergeAnthropicMessagesOptions(body, anthropicOptions, toolChoice);
         if (target.gateway) body = withNativeHostedSkills(body, endpoint, skills, toolChoice);
         body = withResponsesHostedMcp(body, mcp, toolChoice);
+        if (mcpReplay) body = mcpReplay.body(body);
         if (!beta && !anthropic) return target.fetch(input, body === init.body ? init : { ...init, body });
         const outgoing = new Headers(init.headers);
         if (beta) outgoing.set('OpenAI-Beta', beta);
@@ -117,11 +123,11 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
       if (registerSearch && openai) tools.tool_search = openai.tools.toolSearch({ execution: search?.execution === 'client' ? 'client' : 'server' });
       let gateway: ChatMessageMetadata['gateway'];
       const result = streamText({
-        model: adapter, messages: await convertToModelMessages(nativeAttachmentMessages(messages, endpoint), { tools, ignoreIncompleteToolCalls: true }),
+        model: adapter, messages: await convertToModelMessages(nativeAttachmentMessages(mcpReplay?.messages ?? messages, endpoint), { tools, ignoreIncompleteToolCalls: true }),
         instructions, tools, toolChoice: Object.keys(tools).length || nativeTools.length || target.gateway && skills.length || mcp.length
           ? chatToolChoice(toolChoice) : undefined,
         ...(typeof anthropicLimit === 'number' && { maxOutputTokens: anthropicLimit }),
-        abortSignal, maxRetries: 0, includeRawChunks: target.gateway || !!direct,
+        abortSignal, maxRetries: 0, includeRawChunks: target.gateway || !!direct || !!mcpOutput,
         ...(endpoint === '/v1/responses' ? { providerOptions: { openai: { store: false, passThroughUnsupportedFiles: true } } }
           : endpoint === '/v1/chat/completions' && (target.gateway || model.startsWith('openai/'))
           ? { providerOptions: { openai: { store: false } } } : {}),
@@ -133,13 +139,14 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
         originalMessages: messages,
         onError: (error) => error instanceof GatewayError ? error.message : 'The selected chat route could not complete the request.',
         messageMetadata: ({ part }) => {
+          if (part.type === 'raw') mcpOutput?.observe(part.rawValue);
           if (direct) direct.observe(part);
           else if (part.type === 'raw') gateway = readGatewayMetrics(part.rawValue) ?? gateway;
           if (part.type !== 'finish') return;
           const { inputTokens, outputTokens, totalTokens } = part.totalUsage;
           const observed = direct?.finish(part.totalUsage);
           const metrics = observed?.metrics ?? gateway;
-          return { model, usage: observed?.summary ?? { promptTokens: inputTokens, completionTokens: outputTokens, totalTokens },
+          return { model, ...mcpOutput?.metadata(), usage: observed?.summary ?? { promptTokens: inputTokens, completionTokens: outputTokens, totalTokens },
             ...(metrics && { providerMetadata: { gateway: metrics } }) };
         },
       });

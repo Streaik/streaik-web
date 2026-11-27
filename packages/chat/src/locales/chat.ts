@@ -287,9 +287,13 @@ export const chatMessages = {
     'Kies Altijd om resultaten van gehoste tools te beoordelen voordat je ze met het model deelt.',
     'Selecciona Siempre para revisar los resultados de las herramientas alojadas antes de compartirlos con el modelo.',
   ],
-  'Gateway-hosted MCP on Responses requires Never for each server. Use API Chat to review hosted results.': [
-    'Voor gehoste MCP op Responses moet elke server op Nooit staan. Gebruik API Chat om gehoste resultaten te beoordelen.',
-    'En Responses, el MCP alojado en la puerta de enlace requiere Nunca para cada servidor. Usa API Chat para revisar los resultados alojados.',
+  'Select Always to review hosted tool arguments before execution.': [
+    'Kies Altijd om de invoer van gehoste tools te beoordelen voordat ze worden uitgevoerd.',
+    'Selecciona Siempre para revisar los argumentos de las herramientas alojadas antes de ejecutarlas.',
+  ],
+  'The MCP tool may have run, but no result was received. Check the MCP server before trying again.': [
+    'De MCP-tool is mogelijk uitgevoerd, maar er is geen resultaat ontvangen. Controleer de MCP-server voordat je het opnieuw probeert.',
+    'Es posible que la herramienta MCP se haya ejecutado, pero no se recibió ningún resultado. Comprueba el servidor MCP antes de volver a intentarlo.',
   ],
   'Always': ['Altijd', 'Siempre'],
   'Never': ['Nooit', 'Nunca'],

@@ -1535,7 +1535,7 @@ test('chat Model Context opts into Gateway-hosted MCP and preserves per-route ap
     ] });
   });
   const requests: { tools?: { name: string }[]; id?: string; messages: unknown }[] = [];
-  let responsesTools: unknown;
+  const responsesRequests: { tools: unknown; input: { type?: string; id?: string }[]; streaik_mcp_approvals?: unknown; streaik_mcp_history?: unknown }[] = [];
   const output = { content: [{ type: 'text', text: 'Hosted inventory result' }] };
   await page.route('**/gateway/api/chat', route => {
     requests.push(route.request().postDataJSON());
@@ -1543,16 +1543,32 @@ test('chat Model Context opts into Gateway-hosted MCP and preserves per-route ap
     const events = [
       { type: 'start', messageId: 'hosted-inventory-reply' }, { type: 'start-step' },
       { type: 'tool-input-available', toolCallId: 'hosted-review', toolName: 'streaik_mcp_result_review', input: { item: 'abc' },
-        providerExecuted: true, dynamic: true, toolMetadata: { mcpReviewOutput: output } },
-      { type: 'tool-approval-request', toolCallId: 'hosted-review', approvalId: 'hosted-review' },
+        providerExecuted: true, dynamic: true },
+      { type: 'tool-approval-request', toolCallId: 'hosted-review', approvalId: 'hosted-review', approvalDescriptor: { input: { item: 'abc' }, output } },
       { type: 'finish-step' }, { type: 'finish', finishReason: 'tool-calls' },
     ];
     return route.fulfill({ headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' },
       body: turn === 3 ? events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n' : sse(`MCP reply ${turn}`, turn) });
   });
+  const nativeApproval = { type: 'mcp_approval_request', id: 'mcpr_inventory', name: 'lookup', server_label: 'Inventory fixture', arguments: '{"item":"xyz"}' };
+  const nativeResult = { type: 'mcp_call', id: 'mcp_streaik_inventory', name: 'lookup', server_label: 'Inventory fixture', arguments: '{"item":"xyz"}',
+    approval_request_id: nativeApproval.id, status: 'completed', output: '{"content":[{"type":"text","text":"Found"}]}' };
   await page.route('**/gateway/v1/responses', route => {
-    responsesTools = route.request().postDataJSON().tools;
-    return route.fulfill({ contentType: 'text/event-stream', body: nativeToolSse('/v1/responses', model, [], 'Responses hosted reply') });
+    responsesRequests.push(route.request().postDataJSON());
+    const stage = responsesRequests.length;
+    const item = stage === 1 ? nativeApproval : nativeResult;
+    let body = nativeToolSse('/v1/responses', model, [], stage === 1 ? '' : 'Responses hosted reply');
+    if (stage <= 2) body = body.split('\n').flatMap(line => {
+      if (!line.startsWith('data: {')) return [line];
+      const frame = JSON.parse(line.slice(6));
+      if (frame.type !== 'response.completed') return [line];
+      frame.response.output = [...(frame.response.output ?? []), item];
+      if (stage === 1) frame.response.metadata = { streaik_mcp_approvals: { [nativeApproval.id]: 'gateway-proof' } };
+      else frame.response.metadata = { streaik_mcp_history: { [nativeResult.id]: 'gateway-history-receipt' } };
+      return [`data: ${JSON.stringify({ type: 'response.output_item.added', sequence_number: 97, output_index: 1, item })}`, '',
+        `data: ${JSON.stringify({ type: 'response.output_item.done', sequence_number: 98, output_index: 1, item })}`, '', `data: ${JSON.stringify(frame)}`];
+    }).join('\n');
+    return route.fulfill({ contentType: 'text/event-stream', body });
   });
 
   await page.goto('/');
@@ -1566,7 +1582,7 @@ test('chat Model Context opts into Gateway-hosted MCP and preserves per-route ap
   const panel = settings.getByRole('tabpanel', { name: 'Model Context', exact: true });
   const execution = panel.getByRole('combobox', { name: 'Execution', exact: true });
   const approval = panel.getByRole('combobox', { name: 'Require approval', exact: true });
-  const allowed = panel.getByRole('combobox', { name: 'Allowed tools', exact: true });
+  const allowed = panel.getByRole('button', { name: 'Allowed tools', exact: true });
   const toolSearch = panel.getByRole('switch', { name: 'Tool search', exact: true });
   const resourceSearch = panel.getByRole('switch', { name: 'Resource search', exact: true });
   const readOnly = panel.getByRole('switch', { name: 'Read-only', exact: true });
@@ -1589,7 +1605,7 @@ test('chat Model Context opts into Gateway-hosted MCP and preserves per-route ap
 
   await openContext();
   await expect(panel.getByRole('heading')).toHaveText(['Policy', 'Inventory fixture']);
-  await expect(panel.getByRole('combobox')).toHaveCount(3);
+  await expect(allowed).toBeVisible();
   await expect(execution).toHaveText('Default');
   await expect(approval).toBeDisabled();
   await expect(toolSearch).toHaveCount(0);
@@ -1635,13 +1651,27 @@ test('chat Model Context opts into Gateway-hosted MCP and preserves per-route ap
 
   await openRoute(page, 'Gateway');
   await page.getByRole('menuitemradio', { name: '/v1/responses', exact: true }).click();
-  await expect(page.getByText('Gateway-hosted MCP on Responses requires Never for each server. Use API Chat to review hosted results.')).toBeVisible();
+  await composer.fill('Use hosted Responses with approval'); await composer.press('Enter');
+  const run = page.getByRole('dialog', { name: 'Approve tool execution', exact: true });
+  await expect(run).toBeVisible();
+  await expect(run.getByRole('tab', { name: 'Input' })).toBeVisible();
+  await expect(run.getByRole('button', { name: 'Approve and run' })).toBeVisible();
+  await expect(run.getByRole('button', { name: 'Decline' })).toHaveCount(0);
+  expect(responsesRequests).toHaveLength(1);
+  await run.getByRole('button', { name: 'Approve and run' }).click();
+  await expect(page.getByText('Responses hosted reply', { exact: true })).toBeVisible();
+  expect(responsesRequests[1].input).toEqual(expect.arrayContaining([nativeApproval,
+    { type: 'mcp_approval_response', approval_request_id: nativeApproval.id, approve: true }]));
+  expect(responsesRequests[1].streaik_mcp_approvals).toEqual({ [nativeApproval.id]: 'gateway-proof' });
   await openContext();
   await selectOptionByName(page, approval, 'Never');
   await closeSettingsDialog();
   await submit('Use hosted Responses with no approval', 'Responses hosted reply');
-  expect(responsesTools).toEqual([{ type: 'mcp', name: 'mcp', ...descriptor, require_approval: 'never' },
+  expect(responsesRequests[2].tools).toEqual([{ type: 'mcp', name: 'mcp', ...descriptor, require_approval: 'never' },
     ...searches.map(type => ({ type, name: type }))]);
+  expect(responsesRequests[2].input).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'mcp_call', id: nativeResult.id })]));
+  expect(responsesRequests[2].streaik_mcp_history).toEqual({ [nativeResult.id]: 'gateway-history-receipt' });
+  expect(responsesRequests[2].input.some(item => item.type?.startsWith('mcp_approval_'))).toBe(false);
   expect(methods).toEqual(['server/discover', 'tools/list']);
 
   await openContext();
@@ -3855,6 +3885,47 @@ function nativeToolSse(endpoint: DirectToolRoute, model: string, calls: FixtureT
   })();
   return frames.map(frame => `event: ${frame.type}\ndata: ${JSON.stringify(frame)}\n\n`).join('');
 }
+
+test('direct Responses approves native MCP inline and does not retry an uncertain dispatch', async ({ page }) => {
+  const base = 'https://api.openai.com';
+  const nativeModel = 'gpt-4.1-mini';
+  const approval = { type: 'mcp_approval_request', id: 'mcpr_direct', server_label: 'inventory', name: 'lookup', arguments: '{"sku":"A1"}' };
+  const bodies: { input: unknown[]; streaik_mcp_approvals?: unknown }[] = [];
+  await page.route(url => url.pathname.startsWith('/gateway/'), route => route.abort());
+  await page.route(`${base}/v1/**`, route => {
+    const request = route.request();
+    const headers = { 'access-control-allow-origin': 'http://localhost:15173', 'access-control-allow-methods': 'GET, POST, OPTIONS',
+      'access-control-allow-headers': 'authorization, content-type' };
+    if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    if (request.method() === 'GET') return route.fulfill({ headers, json: { data: [{ id: nativeModel }] } });
+    expect(request.url()).toBe(`${base}/v1/responses`);
+    bodies.push(request.postDataJSON());
+    if (bodies.length > 1) return route.abort();
+    const body = nativeToolSse('/v1/responses', nativeModel, [], '').replace('event: response.completed',
+      `data: ${JSON.stringify({ type: 'response.output_item.added', output_index: 0, item: approval })}\n\n` +
+      `data: ${JSON.stringify({ type: 'response.output_item.done', output_index: 0, item: approval })}\n\nevent: response.completed`);
+    return route.fulfill({ headers: { ...headers, 'content-type': 'text/event-stream' }, body });
+  });
+  await page.goto('/');
+  await openRoute(page, 'Direct');
+  await page.getByRole('menuitemradio', { name: '/v1/responses', exact: true }).click();
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await chooseModel(page, nativeModel);
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('Look up A1'); await composer.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Approve tool execution' });
+  await expect(dialog.getByRole('tabpanel', { name: 'Input' })).toContainText('A1');
+  expect(bodies).toHaveLength(1);
+  await dialog.getByRole('button', { name: 'Approve and run' }).click();
+  await expect(page.getByText('The MCP tool may have run, but no result was received.', { exact: false })).toBeVisible();
+  expect(bodies).toHaveLength(2);
+  expect(bodies[1].input).toEqual(expect.arrayContaining([approval,
+    { type: 'mcp_approval_response', approval_request_id: approval.id, approve: true }]));
+  expect(bodies[1].streaik_mcp_approvals).toBeUndefined();
+  await page.reload();
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible();
+  expect(bodies).toHaveLength(2);
+});
 
 for (const endpoint of directToolRoutes) test(`Direct ${endpoint} runs browser tools and continues without review`, async ({ page }) => {
   const anthropic = endpoint === '/v1/messages';

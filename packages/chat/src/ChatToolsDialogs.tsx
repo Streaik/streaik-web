@@ -296,7 +296,7 @@ export function ViewContextDialog({ context, tools, onClose }: { context?: Reque
 }
 
 export type ToolReview = { id: string; name: string; input: unknown; disabled?: boolean } & (
-  { kind: 'result'; output: unknown } | { kind: 'execution' });
+  { kind: 'result'; output: unknown } | { kind: 'execution'; approveOnly?: boolean });
 
 export function ToolApprovalDialog({ review, onAnswer, onStop }: {
   review: ToolReview; onAnswer: (approved: boolean) => void; onStop: () => void;
@@ -305,6 +305,7 @@ export function ToolApprovalDialog({ review, onAnswer, onStop }: {
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   const output = review.kind === 'result' ? review.output : undefined;
+  const approveOnly = review.kind === 'execution' && review.approveOnly;
   const result = useMemo(() => describeToolOutput(output), [output]);
   useLayoutEffect(() => {
     const node = dialog.current;
@@ -312,15 +313,15 @@ export function ToolApprovalDialog({ review, onAnswer, onStop }: {
     return () => node?.close();
   }, []);
   return <dialog ref={dialog} className="chat-settings chat-tools-dialog chat-approval-dialog" aria-labelledby={`${id}-title`}
-    onCancel={event => { event.preventDefault(); if (!review.disabled) onAnswer(false); }}>
+    onCancel={event => { event.preventDefault(); if (!review.disabled) { if (approveOnly) onStop(); else onAnswer(false); } }}>
     <header className="chat-settings-header">
       <h2 id={`${id}-title`}>{t(review.kind === 'result' ? 'Review tool result' : 'Approve tool execution')}</h2>
     </header>
     <div className="chat-approval-name"><ChatIcon name="tool" /><strong>{review.name}</strong></div>
-    <ToolDetails input={review.input} result={result} mode={review.kind} />
+    {(!approveOnly || review.input != null) && <ToolDetails input={review.input} result={result} mode={review.kind} />}
     <footer className="chat-tool-footer">
-      <Button type="button" variant="subtle" onClick={onStop}>{t('Stop')}</Button>
-      <Button type="button" disabled={review.disabled} onClick={() => onAnswer(false)}>{t('Decline')}</Button>
+      {!approveOnly && <Button type="button" variant="subtle" onClick={onStop}>{t('Stop')}</Button>}
+      {!approveOnly && <Button type="button" disabled={review.disabled} onClick={() => onAnswer(false)}>{t('Decline')}</Button>}
       <Button type="button" variant="primary" disabled={review.disabled} onClick={() => onAnswer(true)}>
         {t(review.kind === 'result' ? 'Approve and share' : 'Approve and run')}
       </Button>

@@ -79,5 +79,3 @@ export function chatHostedMcp(settings: ChatModelContext | undefined, servers: r
   if (settings.resourceSearch) tools.push({ type: 'resource_search' });
   return tools;
 }
-
-export const hostedMcpResponsesNotice = 'Gateway-hosted MCP on Responses requires Never for each server. Use API Chat to review hosted results.';
