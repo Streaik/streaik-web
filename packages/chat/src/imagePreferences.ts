@@ -40,7 +40,11 @@ export function imageOptionsForModel(route: GatewayImageEndpoint, model: ChatMod
   const saved = settings.byProvider[provider] ?? {};
   const { style, input_fidelity, output_compression, ...rest } = saved;
   let fields: ImageJsonObject = { ...saved };
-  if (provider === 'openai' && isDallE(id)) {
+  if (provider === 'google') {
+    // Older image settings could override Google's default even after the form was removed.
+    const { output_format, ...extensions } = saved;
+    fields = extensions;
+  } else if (provider === 'openai' && isDallE(id)) {
     const { quality, background, moderation, output_format, complexity, frame_count, frame_duration_ms, svg, ...extensions } = rest;
     fields = id === 'openai/dall-e-3' ? { ...extensions, quality: settings.dallE3Quality, style } : extensions;
   } else if (provider === 'openai' || provider === 'imagerouter' || provider === 'openrouter') {

@@ -90,13 +90,6 @@ function RouterImageFields(props: ProviderFormProps) {
   </div></section>;
 }
 
-function GoogleImageFields(props: ProviderFormProps) {
-  const { t } = useAppTranslation();
-  return <section className="chat-tool-card"><h3>{t('Output')}</h3><div className="image-settings-fields">
-    {imageOptionFields(props).choice('output_format', 'Output format', ['png', 'jpeg'])}
-  </div></section>;
-}
-
 function OpenAIImageFields(props: ProviderFormProps) {
   const { t } = useAppTranslation();
   const { models, route, options, setOption, value, setGeneral } = props;
@@ -149,7 +142,6 @@ function OpenAIImageFields(props: ProviderFormProps) {
 const providerForms: Partial<Record<string, { Form: ComponentType<ProviderFormProps>; nativeGeneral?: boolean;
   applies?: (route: GatewayImageEndpoint, model: ChatModel) => boolean }>> = {
   openai: { Form: OpenAIImageFields, nativeGeneral: true, applies: (route, { id }) => id !== 'openai/dall-e-2' && (route !== '/v1/images/edits' || canEditImage(route, id)) },
-  google: { Form: GoogleImageFields },
   imagerouter: { Form: RouterImageFields },
   openrouter: { Form: RouterImageFields },
 };

@@ -3269,6 +3269,49 @@ const imagen = 'google/imagen-4';
 const gptImage1 = 'openai/gpt-image-1';
 const gptImage2 = 'openai/gpt-image-2';
 
+test('Images hides the Google settings tab and ignores saved Google formats on both image routes', async ({ page }) => {
+  const gemini = 'google/gemini-2.5-flash-image';
+  const requests: unknown[] = [];
+  await page.addInitScript(() => {
+    const scope = JSON.stringify([new URL('/gateway/api/chat', location.href).href, 'byok']);
+    localStorage.setItem(`streaik.images.settings.v1:${scope}`, JSON.stringify({
+      n: 1, aspectRatio: '16:9', byProvider: { google: { output_format: 'png' } },
+    }));
+  });
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [
+    { id: gemini, name: 'Gemini Image', type: 'image' },
+  ] } }));
+  await page.route('**/gateway/v1/skills?*', route => route.fulfill({ json: { data: [], has_more: false } }));
+  await page.route(/\/gateway\/(api\/images|v1\/images\/generations)$/, route => {
+    requests.push(route.request().postDataJSON());
+    return route.fulfill({ json: route.request().url().endsWith('/api/images')
+      ? { images: [imagePng], warnings: [], response: { modelId: gemini, timestamp: new Date().toISOString() } }
+      : { data: [{ b64_json: imagePng }] } });
+  });
+  await page.goto('/');
+  await showSettings(page); await addKey(page, 'Google Gemini', 'test-google-key'); await closeSettings(page);
+  await page.getByRole('button', { name: 'Images', exact: true }).click();
+  await chooseModel(page, 'Gemini Image');
+  const composer = page.getByRole('form', { name: 'Image composer' });
+  for (const [index, endpoint] of ['/api/images', '/v1/images/generations'].entries()) {
+    await openRoute(page);
+    await page.getByRole('menuitemradio', { name: endpoint, exact: true }).click();
+    await composer.getByRole('button', { name: 'Image settings' }).click();
+    const settings = page.getByRole('dialog', { name: 'Image settings' });
+    await expect(settings.getByLabel('Aspect ratio')).toHaveValue('16:9');
+    await expect(settings.getByRole('tab', { name: 'Google Gemini', exact: true })).toHaveCount(0);
+    await expect(settings.getByLabel('Output format')).toHaveCount(0);
+    await settings.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await composer.getByRole('textbox', { name: 'Image prompt' }).fill('Draw a tree');
+    await composer.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(page.getByRole('img', { name: 'Generated image' })).toHaveCount(index + 1);
+  }
+  expect(requests).toEqual([
+    { model: gemini, prompt: 'Draw a tree', n: 1, aspectRatio: '16:9' },
+    { model: gemini, prompt: 'Draw a tree', n: 1, aspect_ratio: '16:9' },
+  ]);
+});
+
 async function prepareImageDecisions(page: Page, useDirectChat = false) {
   await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [
     { id: model }, { id: 'openai/gpt-6-luna', type: 'decision' },
@@ -3351,8 +3394,7 @@ test('Images routes checked models through the shared agent and generates with t
   await imageSettings.getByLabel('Number of images').fill('5');
   await imageSettings.getByLabel('Aspect ratio').fill('16:9');
   await expect(imageSettings.getByRole('combobox', { name: 'Image model', exact: true })).toHaveCount(0);
-  await imageSettings.getByRole('tab', { name: 'Google Gemini', exact: true }).click();
-  await imageSettings.getByRole('tabpanel', { name: 'Google Gemini', exact: true }).getByLabel('Output format').selectOption('jpeg');
+  await expect(imageSettings.getByRole('tab', { name: 'Google Gemini', exact: true })).toHaveCount(0);
   await imageSettings.getByRole('tab', { name: 'ImageRouter', exact: true }).click();
   await imageSettings.getByRole('tabpanel', { name: 'ImageRouter', exact: true }).getByLabel('Quality').selectOption('low');
   await imageSettings.getByRole('tab', { name: 'OpenRouter', exact: true }).click();
@@ -3367,8 +3409,7 @@ test('Images routes checked models through the shared agent and generates with t
   await expect(imageSettings.getByRole('tabpanel', { name: 'General', exact: true }).getByLabel('Quality')).toHaveValue('high');
   await expect(imageSettings.getByRole('tab', { name: 'OpenAI', exact: true })).toHaveCount(0);
   await expect(imageSettings.getByLabel('Edit mask')).toHaveCount(0);
-  await imageSettings.getByRole('tab', { name: 'Google Gemini', exact: true }).click();
-  await expect(imageSettings.getByRole('tabpanel', { name: 'Google Gemini', exact: true }).getByLabel('Output format')).toHaveValue('jpeg');
+  await expect(imageSettings.getByRole('tab', { name: 'Google Gemini', exact: true })).toHaveCount(0);
   await imageSettings.getByRole('tab', { name: 'ImageRouter', exact: true }).click();
   await expect(imageSettings.getByRole('tabpanel', { name: 'ImageRouter', exact: true }).getByLabel('Quality')).toHaveValue('low');
   await imageSettings.getByRole('tab', { name: 'OpenRouter', exact: true }).click();
