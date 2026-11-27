@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import type { Page, Route } from '@playwright/test';
+import type { Locator, Page, Route } from '@playwright/test';
 import { appAgents } from '../samples/shared/appAgents';
 import { exportSkillZip } from '../packages/chat/src/skillBundles';
 import { faviconEndpoint, iconResponse, openAiFavicon } from './icon-fixtures';
@@ -165,7 +165,7 @@ test('agent tool configuration preserves portable fields and auto-attaches only 
   await resourceSearch.check();
   await resourceSearch.uncheck();
   await toolSearch.check();
-  await expect(tools.getByRole('combobox', { name: 'Execution', exact: true })).toHaveText('Agent backend');
+  await expect(tools.getByRole('combobox', { name: 'Execution', exact: true })).toHaveText('Default');
   await editor.getByRole('tab', { name: 'Model Context', exact: true }).click();
   const contextPanel = editor.getByRole('tabpanel', { name: 'Model Context', exact: true });
   const addByUrl = contextPanel.getByRole('button', { name: 'Add by URL' });
@@ -178,9 +178,7 @@ test('agent tool configuration preserves portable fields and auto-attaches only 
   await expect(addServer).toBeHidden();
   const server = contextPanel.getByRole('article').filter({ has: page.getByRole('heading', { name: 'Inventory', exact: true }) });
   await server.getByRole('switch', { name: 'Search', exact: true }).check();
-  await server.getByRole('combobox', { name: 'Allowed tools', exact: true }).click();
-  await expect(page.getByRole('option', { name: 'Selected tools', exact: true })).toHaveCount(0);
-  await page.keyboard.press('Escape');
+  await expect(server.getByRole('button', { name: 'Allowed tools', exact: true })).toBeDisabled();
   await expect(server.getByRole('textbox')).toHaveCount(0);
   await editor.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(card(page, 'Inventory helper')).toBeVisible();
@@ -213,20 +211,29 @@ test('agent tool configuration preserves portable fields and auto-attaches only 
   await agents(page).click();
   const item = card(page, 'Inventory helper');
   const reopened = page.getByRole('dialog', { name: 'Agent', exact: true });
-  const openModelContext = async () => {
+  const openModelContext = async (): Promise<Locator> => {
     await item.getByRole('button', { name: 'Edit', exact: true }).click();
     await reopened.getByRole('tab', { name: 'Model Context', exact: true }).click();
     return reopened.getByRole('tabpanel', { name: 'Model Context', exact: true });
   };
   const reopenedPanel = await openModelContext();
-  await reopenedPanel.getByRole('button', { name: 'Connect Model Context', exact: true }).click();
-  await expect(reopenedPanel.getByRole('button', { name: 'Connected', exact: true })).toBeDisabled();
+  const footer = reopenedPanel.locator('.mcp-card-footer');
+  const connect = footer.getByRole('button', { name: 'Connect Model Context', exact: true });
+  await expect(connect).toHaveText('');
+  await connect.click();
+  const connected = footer.getByRole('button', { name: 'Connected', exact: true });
+  await expect(connected).toBeDisabled();
+  await expect(connected).toHaveText('');
   await reopenedPanel.getByRole('combobox', { name: 'Execution', exact: true }).click();
   await page.getByRole('option', { name: 'Client', exact: true }).click();
-  await reopenedPanel.getByRole('combobox', { name: 'Allowed tools', exact: true }).click();
-  await page.getByRole('option', { name: 'Selected tools', exact: true }).click();
-  const selected = reopenedPanel.getByRole('button', { name: 'Selected tools', exact: true });
+  const selected = reopenedPanel.getByRole('button', { name: 'Allowed tools', exact: true });
+  await expect(selected).toHaveText('All tools');
   await selected.click();
+  const options = page.getByRole('listbox', { name: 'Allowed tools', exact: true });
+  await expect(options.getByRole('option')).toHaveText(['All tools', 'No tools', 'excluded', 'lookup']);
+  await options.getByRole('option', { name: 'No tools' }).click();
+  await expect(selected).toHaveText('No tools');
+  await options.getByRole('option', { name: 'All tools' }).click();
   await page.getByRole('option', { name: 'lookup', exact: true }).click();
   await page.keyboard.press('Escape');
   await expect(selected).toHaveText('lookup');
@@ -251,6 +258,8 @@ test('agent tool configuration preserves portable fields and auto-attaches only 
   await expect(selected).toHaveText('lookup');
   await reopened.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.getByRole('button', { name: 'New chat', exact: true }).click();
+  await picker.click();
+  await page.getByRole('option', { name: 'Answer model', exact: true }).click();
   await composer.fill('Look up inventory');
 
   await page.route('**/gateway/api/chat', route => {
@@ -337,6 +346,49 @@ test('agent Model Context saves portable settings and catalog selections only on
   await expect(reopened).toBeHidden();
   expect((await saved()).tools[0]).not.toHaveProperty('require_approval');
   expect((await saved()).tools[0]).not.toHaveProperty('execution');
+});
+
+test('agent Tools cards show per-search Execution only when enabled and omit Default', async ({ page }) => {
+  await page.goto('/');
+  await agents(page).click();
+  const editor = await create(page, 'Search execution sample');
+  const openTools = async (dialog: Locator) => {
+    await dialog.getByRole('tab', { name: 'Tools', exact: true }).click();
+    return dialog.getByRole('tabpanel', { name: 'Tools', exact: true });
+  };
+  const panel = await openTools(editor);
+  const searchTypes = ['Tool search', 'Resource search'];
+  for (const [index, title] of searchTypes.entries()) {
+    const section = panel.getByRole('region', { name: title, exact: true });
+    const header = section.locator('header');
+    const toggle = header.getByRole('switch', { name: title, exact: true });
+    const execution = section.getByRole('combobox', { name: 'Execution', exact: true });
+    await expect(header).toHaveText(title);
+    await expect(execution).toHaveCount(0);
+    await toggle.check();
+    await expect(execution).toHaveText('Default');
+    await execution.click();
+    await page.getByRole('option', { name: index === 0 ? 'Hosted' : 'Client', exact: true }).click();
+  }
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
+  const savedTools = () => page.evaluate(() => {
+    const key = Object.keys(localStorage).find(value => value.startsWith('streaik.agents.v1:'))!;
+    return JSON.parse(localStorage.getItem(key)!).local[0].definition.tools;
+  });
+  expect(await savedTools()).toEqual([{ type: 'tool_search', execution: 'server' }, { type: 'resource_search', execution: 'client' }]);
+
+  await card(page, 'Search execution sample').getByRole('button', { name: 'Edit', exact: true }).click();
+  const reopened = page.getByRole('dialog', { name: 'Agent', exact: true });
+  const reopenedPanel = await openTools(reopened);
+  for (const [index, title] of searchTypes.entries()) {
+    const section = reopenedPanel.getByRole('region', { name: title, exact: true });
+    const execution = section.getByRole('combobox', { name: 'Execution', exact: true });
+    await expect(execution).toHaveText(index === 0 ? 'Hosted' : 'Client');
+    await execution.click();
+    await page.getByRole('option', { name: 'Default', exact: true }).click();
+  }
+  await reopened.getByRole('button', { name: 'Save', exact: true }).click();
+  expect(await savedTools()).toEqual([{ type: 'tool_search' }, { type: 'resource_search' }]);
 });
 
 const textAgentModel = 'openai/gpt-6-luna';

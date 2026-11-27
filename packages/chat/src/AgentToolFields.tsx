@@ -3,7 +3,7 @@ import type { AgentDraft } from './agentDraft';
 import { agentMcpAllows, agentMcpServers, agentMcpToolNames, agentSearchTools, agentToolKey, agentToolList, agentToolOptions,
   enableAgentSearch, patchAgentTool } from './agentTools';
 import type { AgentToolIdentity } from './agentTools';
-import { AgentSelectField, AgentSwitch } from './AgentToolControls';
+import { AgentExecutionField, AgentSwitch } from './AgentToolControls';
 import { useAppTranslation } from './i18n';
 import { ToolConfigurationEditor } from './ToolConfigurationEditor';
 import type { ToolConfigurationRow } from './ToolConfigurationEditor';
@@ -16,18 +16,18 @@ const searchTypes = Object.keys(agentSearchTools) as (keyof typeof agentSearchTo
 
 export function AgentToolsFields({ draft, patch }: Props) {
   const { t } = useAppTranslation();
-  return <section className="agent-field-group"><h3>{t('Tools')}</h3>
-    {searchTypes.map(type => {
-      const tool = agentToolList(draft.tools).find(entry => isObject(entry) && entry.type === type);
-      return <div key={type} className="agent-mcp-columns">
-        <AgentSwitch label={t(agentSearchTools[type])} checked={!!tool}
-          onChange={enabled => patch({ tools: enableAgentSearch(draft.tools, type, enabled) })} />
-        {isObject(tool) && <AgentSelectField label={t('Execution')} value={tool.execution === 'server' ? 'server' : 'client'}
-          options={[{ value: 'client', label: t('Agent backend') }, { value: 'server', label: t('Gateway') }]}
-          onValueChange={value => patch({ tools: patchAgentTool(draft.tools, { type }, { execution: value === 'server' ? 'server' : 'client' }) })} />}
-      </div>;
-    })}
-  </section>;
+  return searchTypes.map(type => {
+    const tool = agentToolList(draft.tools).find(entry => isObject(entry) && entry.type === type);
+    const label = t(agentSearchTools[type]);
+    return <section key={type} aria-label={label} className="agent-field-group">
+      <header className="agent-mcp-heading">
+        <h3>{label}</h3>
+        <AgentSwitch label={label} hideLabel checked={!!tool} onChange={enabled => patch({ tools: enableAgentSearch(draft.tools, type, enabled) })} />
+      </header>
+      {isObject(tool) && <AgentExecutionField execution={tool.execution}
+        onChange={execution => patch({ tools: patchAgentTool(draft.tools, { type }, { execution }) })} />}
+    </section>;
+  });
 }
 
 export function AgentToolConfigurationFields({ draft, patch, discovery }: Props & { discovery: McpSelection }) {

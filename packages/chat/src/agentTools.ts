@@ -22,6 +22,7 @@ export function patchAgentTool(tools: JsonValue | undefined, id: AgentToolIdenti
   const list = agentToolList(tools);
   const index = list.findIndex(tool => match(tool, id));
   const next = { ...id, ...object(list[index]), ...patch };
+  if (Object.hasOwn(patch, 'execution') && patch.execution === undefined) delete next.execution;
   // Keep an empty caller array: the runtime uses it to clear an inherited server default.
   return index < 0 ? [...list, next as JsonObject] : list.map((tool, i) => i === index ? next as JsonObject : tool);
 }

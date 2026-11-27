@@ -7,7 +7,7 @@ import { isObject } from './agentDefinition';
 import type { JsonObject, JsonValue } from './agentDefinition';
 import { agentMcpClientSettings, agentMcpPolicy, setAgentElicitation, setAgentMcpPolicy } from './agentMcpClient';
 import { agentMcpServers, agentMcpToolNames, patchAgentMcp } from './agentTools';
-import { AgentSelectField, AgentSwitch } from './AgentToolControls';
+import { AgentExecutionField, AgentSelectField, AgentSwitch } from './AgentToolControls';
 import { ChatIcon } from './ChatIcon';
 import { useAppTranslation } from './i18n';
 import type { McpCatalogServer, McpOptions } from './mcp';
@@ -19,6 +19,7 @@ import type { McpSelection, McpServers } from './useMcpServers';
 type Server = ReturnType<typeof agentMcpServers>[number];
 type ServerPatch = Readonly<Record<string, JsonValue | undefined>>;
 const policyFlags = Object.keys(agentMcpPolicy) as (keyof typeof agentMcpPolicy)[];
+const toolValue = (name: string) => `tool:${name}`;
 
 function AgentMcpServerFields({ entry, change, installed, discovery, registryEntry, onEdit, onRemove }: {
   entry: Server; change: (patch: ServerPatch) => void; installed: McpServers; discovery: McpSelection;
@@ -35,12 +36,12 @@ function AgentMcpServerFields({ entry, change, installed, discovery, registryEnt
   const discoveredNames = connected ? status.discovery.tools.map(tool => tool.remoteName) : [];
   // Retain existing tool names even if the server is offline or no longer lists them.
   const availableNames = [...new Set([...discoveredNames, ...(names ?? [])])].sort();
-  const [choosingTools, setChoosingTools] = useState(false);
-  const toolsMode = choosingTools || names?.length ? 'selected' : names ? 'none' : filter ? 'custom' : 'all';
-  const canSelectTools = connected && availableNames.length > 0;
+  const selectedTools = names?.length ? names.map(toolValue) : [names ? 'none' : filter ? 'custom' : 'all'];
   const approval = server.require_approval;
   const approvalMode = approval === 'always' || approval === 'never' ? approval : approval == null ? 'default' : 'custom';
-  const execution = server.execution === 'client' || server.execution === 'server' || server.execution === 'provider' ? server.execution : 'default';
+  const canConnect = record && installed.connection(record);
+  const connecting = status?.state === 'loading';
+  const connectLabel = t(connecting ? 'Connecting...' : connected ? 'Connected' : status?.state === 'error' ? 'Retry connection' : 'Connect Model Context');
   const editLabel = t('Edit MCP URL');
   const removeLabel = t('Remove {{name}}', { name: key });
   const changeNames = (next: readonly string[]) => change({ allowed_tools: filter ? { ...filter, tool_names: next } : next });
@@ -48,7 +49,12 @@ function AgentMcpServerFields({ entry, change, installed, discovery, registryEnt
   return <McpServerCard title={key} registryEntry={registryEntry} inDialog
     description={typeof server.server_description === 'string' ? server.server_description : undefined}
     actions={<>
+      {!canConnect && <small role="status">{t('Install and authorize this server first.')}</small>}
       {endpoint && <CopyServerUrl key={endpoint} endpoint={endpoint} />}
+      {canConnect && <Button type="button" variant="subtle" className="chat-composer-icon" title={connectLabel} aria-label={connectLabel}
+        aria-busy={connecting || undefined} disabled={connecting || connected} onClick={() => discovery.set(record, true)}>
+        <ChatIcon name={connected ? 'check' : 'providers'} />
+      </Button>}
       <Button type="button" variant="subtle" className="chat-composer-icon" title={editLabel} aria-label={editLabel} aria-haspopup="dialog" onClick={onEdit}>
         <ChatIcon name="link" />
       </Button>
@@ -57,10 +63,7 @@ function AgentMcpServerFields({ entry, change, installed, discovery, registryEnt
       </Button>
     </>}>
     <div className="agent-mcp-server-fields">
-      <AgentSelectField label={t('Execution')} value={execution} options={[
-        { value: 'default', label: t('Default') }, { value: 'client', label: t('Client') }, { value: 'server', label: t('Hosted') },
-        ...(execution === 'provider' ? [{ value: 'provider', label: t('Provider') }] : []),
-      ]} onValueChange={value => change({ execution: value === 'default' ? undefined : value })} />
+      <AgentExecutionField execution={server.execution} allowProvider onChange={execution => change({ execution })} />
       <div className="agent-mcp-usage">
         <AgentSelectField multiple label={t('Allowed callers')} value={callers} options={toolCallers.map(caller => ({
           value: caller, label: t(caller === 'direct' ? 'Direct' : 'Programmatic'),
@@ -71,15 +74,18 @@ function AgentMcpServerFields({ entry, change, installed, discovery, registryEnt
         <AgentSwitch label={t('Namespace')} checked={server.namespace === true} onChange={checked => change({ namespace: checked || undefined })} />
       </div>
       <div className="agent-mcp-columns">
-        <AgentSelectField label={t('Allowed tools')} value={toolsMode} options={[
+        <AgentSelectField multiple label={t('Allowed tools')} value={selectedTools} disabled={!connected} options={[
           { value: 'all', label: t('All tools') }, { value: 'none', label: t('No tools') },
-          ...(canSelectTools || toolsMode === 'selected' ? [{ value: 'selected', label: t('Selected tools') }] : []),
-          ...(toolsMode === 'custom' ? [{ value: 'custom', label: t('Custom filter') }] : []),
-        ]} onValueChange={value => {
-          if (value === 'custom') return;
-          setChoosingTools(value === 'selected');
-          if (value === 'all') change({ allowed_tools: undefined });
-          else if (value === 'none' || !names) changeNames([]);
+          ...(selectedTools.includes('custom') ? [{ value: 'custom', label: t('Custom filter') }] : []),
+          ...availableNames.map(name => ({ value: toolValue(name), label: name })),
+        ]} onValueChange={next => {
+          if (next.includes('all') && !selectedTools.includes('all')) change({ allowed_tools: undefined });
+          else if (next.includes('none') && !selectedTools.includes('none')) changeNames([]);
+          else {
+            const picked = next.filter(value => value.startsWith('tool:')).map(value => value.slice('tool:'.length));
+            // Toggling the current All/No/Custom mode does not change the allowlist.
+            if (picked.length || names?.length) changeNames(picked);
+          }
         }} />
         <AgentSelectField label={t('Require approval')} value={approvalMode} options={[
           { value: 'default', label: t('Default') }, { value: 'always', label: t('Always') }, { value: 'never', label: t('Never') },
@@ -88,13 +94,6 @@ function AgentMcpServerFields({ entry, change, installed, discovery, registryEnt
           if (value !== 'custom') change({ require_approval: value === 'default' ? undefined : value });
         }} />
       </div>
-      {toolsMode === 'selected' && <AgentSelectField multiple label={t('Selected tools')} value={names ?? []} disabled={!canSelectTools}
-        options={availableNames.map(name => ({ value: name, label: name }))} onValueChange={changeNames} />}
-      {record && installed.connection(record)
-        ? <Button type="button" variant="subtle" className="agent-mcp-discover" disabled={status?.state === 'loading' || connected}
-          onClick={() => discovery.set(record, true)}>{t(status?.state === 'loading' ? 'Connecting...' : connected ? 'Connected'
-            : status?.state === 'error' ? 'Retry connection' : 'Connect Model Context')}</Button>
-        : <small>{t('Install and authorize this server first.')}</small>}
     </div>
   </McpServerCard>;
 }
