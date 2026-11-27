@@ -4437,6 +4437,25 @@ test('BYOK can leave a failed gateway model request and discover directly', asyn
   expect(gatewayCalls).toBe(1);
 });
 
+for (const streaming of [false, true]) test(`API Chat shows the provider diagnostic ${streaming ? 'after partial output' : 'on HTTP rejection'}`, async ({ page }) => {
+  const message = 'Unsupported parameter: reasoning.effort is not supported with this model.';
+  await mockModels(page);
+  await page.route('**/gateway/api/chat', route => {
+    if (!streaming) return route.fulfill({ status: 400, json: { error: { type: 'invalid_request_error', message } } });
+    const frames = [{ type: 'start' }, { type: 'text-start', id: 'text-1' },
+      { type: 'text-delta', id: 'text-1', delta: 'Partial reply.' }, { type: 'error', errorText: message }];
+    return route.fulfill({ contentType: 'text/event-stream', body: frames.map(frame => `data: ${JSON.stringify(frame)}\n\n`).join('') + 'data: [DONE]\n\n' });
+  });
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await chooseChatModel(page);
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('Try a provider option'); await composer.press('Enter');
+  await expect(page.getByRole('alert')).toContainText(message);
+  if (streaming) await expect(page.getByText('Partial reply.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
+});
+
 test('switching from API Chat to a native gateway route keeps inline history and Retry uses the selected route', async ({ page }) => {
   await mockModels(page);
   const skill = { id: 'openai/skill_native-context', name: 'native-context', description: 'A hosted skill for this chat.' };

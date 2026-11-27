@@ -4,7 +4,7 @@ import { asRecord, createDirectMetrics } from './directMetrics.ts';
 import type { DirectMetricsOptions } from './directMetrics.ts';
 import { chatToolChoice, GatewayError } from './index.ts';
 import type { ChatMessage, ChatMessageMetadata, NativeChatEndpoint } from './index.ts';
-import { nativeStreamError, safeMessage } from './errorDetails.ts';
+import { earlyStreamError, nativeStreamError, safeMessage } from './errorDetails.ts';
 import { anthropicChatProtocolHeaders, extendNativeTools, mergeAnthropicMessagesOptions, mergeOpenAIResponsesOptions } from './nativeToolOptions.ts';
 import { clientToolSearchName, deferredToolReferences } from './toolSearch.ts';
 import { withNativeHostedSkills } from './hostedSkills.ts';
@@ -144,8 +144,10 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
           if (target.gateway) {
             // SDKs can promote early error events to an API error before yielding raw chunks.
             const message = StreamProviderError.isInstance(error) ? safeMessage(error.message)
-              : APICallError.isInstance(error) ? nativeStreamError(error.data) : undefined;
-            if (message ?? diagnostic) return (message ?? diagnostic)!;
+              : APICallError.isInstance(error) && error.responseHeaders?.['content-type']?.startsWith('text/event-stream')
+                ? earlyStreamError(error.data, error.responseBody) : undefined;
+            const detail = message ?? diagnostic;
+            if (detail) return detail;
           }
           return 'The selected chat route could not complete the request.';
         },

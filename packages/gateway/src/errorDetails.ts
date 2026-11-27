@@ -49,8 +49,17 @@ export async function readGatewayError(response: Response, credentials: Headers,
 export function nativeStreamError(event: unknown): string | undefined {
   const frame = asRecord(event);
   if (frame?.type === 'response.failed') return safeMessage(asRecord(asRecord(frame.response)?.error)?.message);
-  if (frame?.type === 'error' || (frame?.type == null && frame?.error != null))
+  if (frame?.type === 'error' || (typeof frame?.type === 'string' && frame.type.endsWith('_error'))
+    || (frame?.type == null && frame?.error != null))
     return safeMessage(frame.message) ?? safeMessage(asRecord(frame.error)?.message);
+}
+
+export function earlyStreamError(data: unknown, responseBody: string | undefined): string | undefined {
+  const structured = nativeStreamError(data);
+  if (structured || !responseBody || responseBody.length > bodyLimit) return structured;
+  // Some SDKs put only the structured error object in responseBody. Do not use
+  // the raw body or the SDK exception's message as display text.
+  try { return nativeStreamError(JSON.parse(responseBody)); } catch { return; }
 }
 
 export function sanitizeChatErrors(stream: ReadableStream<UIMessageChunk>): ReadableStream<UIMessageChunk> {
