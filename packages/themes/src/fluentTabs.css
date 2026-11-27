@@ -1,0 +1,3 @@
+.fluent-tabs-row { display: flex; align-items: center; min-width: 0; }
+.fluent-tabs-list { min-width: 0; }
+.fluent-tabs-trigger { flex: none; white-space: nowrap; }

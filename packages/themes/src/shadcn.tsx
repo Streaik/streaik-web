@@ -1,4 +1,5 @@
 import * as RadixSelect from '@radix-ui/react-select';
+import * as RadixTabs from '@radix-ui/react-tabs';
 import * as RadixTooltip from '@radix-ui/react-tooltip';
 import { Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { lazy, useCallback, useState } from 'react';
@@ -73,6 +74,13 @@ export const shadcn: ThemeAdapter = {
   icons: lucideIcons,
   JsonViewer,
   Tooltip,
+  TabList: ({ label, className, items, value, onValueChange }) =>
+    <RadixTabs.Root className={className} data-themed-tabs="shadcn" value={value} onValueChange={onValueChange}>
+      <RadixTabs.List className="shadcn-tabs-list" aria-label={label} loop>
+        {items.map(item => <RadixTabs.Trigger key={item.id} id={item.id} value={item.value} aria-controls={item.panelId}
+          className="shadcn-tabs-trigger">{item.icon}{item.label}</RadixTabs.Trigger>)}
+      </RadixTabs.List>
+    </RadixTabs.Root>,
   style: ({ preferences, scheme }) => {
     const palette = preferences.palette === 'blue' || preferences.palette === 'rose' ? colors[preferences.palette][scheme] : undefined;
     return {

@@ -31,6 +31,19 @@
   border-radius: var(--radius); background: var(--foreground); color: var(--background);
   font-size: .75rem; overflow-wrap: anywhere;
 }
+[data-themed-tabs=shadcn] { min-width: 0; max-width: 100%; }
+.shadcn-tabs-list {
+  box-sizing: border-box; display: flex; gap: .2rem; width: fit-content; max-width: 100%;
+  overflow-x: auto; scrollbar-width: thin; padding: .25rem; background: var(--soft); border-radius: var(--radius);
+}
+.shadcn-tabs-trigger {
+  display: inline-flex; flex: none; align-items: center; gap: .35rem; min-height: 2rem; padding: .25rem .65rem;
+  border: 1px solid transparent; border-radius: calc(var(--radius) * .75); background: transparent; color: var(--muted);
+  font: inherit; font-size: .875rem; font-weight: 500; white-space: nowrap; cursor: pointer;
+}
+.shadcn-tabs-trigger:hover { color: var(--foreground); }
+.shadcn-tabs-trigger[data-state=active] { color: var(--foreground); background: var(--surface); border-color: var(--border); }
+.shadcn-tabs-trigger:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .shadcn-json-viewer {
   --radius-panel: var(--radius);
   --font-body: inherit;

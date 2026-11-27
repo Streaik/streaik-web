@@ -14,6 +14,7 @@ import { ChatExecutionField } from './ChatExecutionField';
 import { agentSkillsTool, patchAgentSkills } from './agentTools';
 import { withAgentProviderOptions } from './agentProviderSettings';
 import { ChatIcon } from './ChatIcon';
+import { DialogTabs } from './DialogTabs';
 import { useAppTranslation } from './i18n';
 import { chatProviders } from './providerChat/settings';
 import type { ChatProviderId, NativeOptions } from './providerChat/settings';
@@ -94,19 +95,8 @@ export function AgentEditor({ entry, seed, catalog, catalogStatus, tags, mcpServ
 
   return <AgentDialog title={t(entry ? 'Agent' : 'Create agent')} onClose={onClose}>{(close) => <>
     <form className="agent-form" noValidate onSubmit={(event) => save(event, close)}>
-      <div className="catalog-tabs" role="tablist" aria-label={t('Agent settings')}>
-        {tabs.map(([key, label], index) => <button key={key} id={`${id}-${key}-tab`} type="button" role="tab"
-          aria-selected={tab === key} aria-controls={`${id}-${key}-panel`} tabIndex={tab === key ? 0 : -1}
-          onClick={() => setTab(key)} onKeyDown={(event) => {
-            const next = ({ ArrowRight: (index + 1) % tabs.length, ArrowLeft: (index - 1 + tabs.length) % tabs.length,
-              Home: 0, End: tabs.length - 1 } as Record<string, number>)[event.key];
-            if (typeof next !== 'number') return;
-            event.preventDefault();
-            const target = tabs[next][0];
-            setTab(target);
-            event.currentTarget.ownerDocument.getElementById(`${id}-${target}-tab`)?.focus();
-          }}>{t(label)}</button>)}
-      </div>
+      <DialogTabs id={id} label={t('Agent settings')} className="catalog-tabs" value={tab} onChange={setTab}
+        tabs={tabs.map(([key, label]) => [key, t(label)])} />
       <div className="agent-panels" ref={panels}>
         {baseTabs.map(([key]) => <section key={key} className="agent-panel" id={`${id}-${key}-panel`} role="tabpanel"
           aria-labelledby={`${id}-${key}-tab`} hidden={key !== tab}>

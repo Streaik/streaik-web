@@ -16,6 +16,7 @@ import { lazy, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { choices } from './contract';
 import type { ThemeAdapter, ThemeEnv } from './contract';
+import { FluentTabs } from './FluentTabs';
 import { nativeSelectOptions } from './selectOptions';
 
 const parse = choices({ preset: ['web', 'teams'] });
@@ -61,6 +62,10 @@ export const fluent: ThemeAdapter = {
   Chart: FluentChart,
   parse,
   Tooltip: FluentTooltip,
+  TabList: ({ className, scheme, preferences, ...props }) => <FluentProvider className={className} data-themed-tabs="fluent"
+    theme={tokens({ scheme, preferences })} style={{ minWidth: 0, background: 'transparent' }}>
+    <FluentTabs {...props} />
+  </FluentProvider>,
   icons: {
     back: ArrowLeft24Regular,
     close: Dismiss24Regular,

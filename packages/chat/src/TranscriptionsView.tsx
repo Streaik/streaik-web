@@ -1,7 +1,7 @@
 import * as Menu from '@radix-ui/react-dropdown-menu';
 import { GatewayError, isLiveTranscriptionModel, supportsFileTranscription, transcriptionFileAccept, transcriptionMediaType, transcriptionUploadLimit, usesTranscriptionWebSocket } from '@streaik/gateway';
 import type { CatalogModel, Gateway, GatewayTranscriptionEndpoint, Transcript } from '@streaik/gateway';
-import { Button, Tooltip } from '@streaik/themes';
+import { Button, TabList, Tooltip } from '@streaik/themes';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { assignedAgent } from './agentCatalog';
@@ -370,15 +370,8 @@ export default function TranscriptionsView({ gateway, scope, route, toolbar, men
       {error && <p className="chat-attachment-notice" role="alert">{t(error)}</p>}
       {libraryError && <p className="chat-attachment-notice" role="alert">{t(libraryError)}</p>}
       <section className="images-library" aria-label={t('Transcription results')}>
-        <div className="catalog-tabs" role="tablist" aria-label={t('Transcription results')}>
-          {options.map(key => <button key={key} id={`${id}-${key}`} type="button" role="tab" aria-selected={tab === key}
-            aria-controls={`${id}-${key}-panel`} tabIndex={tab === key ? 0 : -1} onClick={() => setTab(key)} onKeyDown={event => {
-              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-              event.preventDefault();
-              const next = event.key === 'Home' ? 'finished' : event.key === 'End' ? 'streaming' : key === 'finished' ? 'streaming' : 'finished';
-              setTab(next); document.getElementById(`${id}-${next}`)?.focus();
-            }}>{t(key === 'finished' ? 'Finished' : 'Streaming')}</button>)}
-        </div>
+        <TabList className="catalog-tabs" label={t('Transcription results')} moreLabel={t('More tabs')} value={tab} onValueChange={setTab}
+          items={options.map(key => ({ value: key, id: `${id}-${key}`, panelId: `${id}-${key}-panel`, label: t(key === 'finished' ? 'Finished' : 'Streaming') }))} />
         <section role="tabpanel" id={`${id}-finished-panel`} aria-labelledby={`${id}-finished`} hidden={tab !== 'finished'}>
           <input type="search" className="ui-input transcription-search" aria-label={t('Search transcriptions')}
             placeholder={t('Search transcriptions…')} value={query} onChange={event => setQuery(event.currentTarget.value)} />

@@ -1,6 +1,6 @@
 import { Suspense, createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
-import type { ButtonProps, ColorMode, IconName, JsonViewerProps, MultiSelectProps, Preferences, SelectProps, TextareaProps, ThemeAdapter, ThemeEnv, TooltipProps } from './contract';
+import type { ButtonProps, ColorMode, IconName, JsonViewerProps, MultiSelectProps, Preferences, SelectProps, TabListProps, TextareaProps, ThemeAdapter, ThemeEnv, TooltipProps } from './contract';
 import { ChartFigure } from './charts/ChartFigure';
 import type { ChartProps } from './charts/ChartFigure';
 import { FallbackJsonViewer } from './FallbackJsonViewer';
@@ -133,6 +133,15 @@ export function Tooltip(props: TooltipProps) {
   const active = useContext(Appearance);
   const Hint = active?.adapter.Tooltip ?? html.Tooltip;
   return <Hint {...props} {...(active?.env ?? fallback)} />;
+}
+
+export function TabList<T extends string>({ items, onValueChange, ...props }: TabListProps<T>) {
+  const active = useContext(Appearance);
+  const List = (active?.adapter ?? html).TabList;
+  return <List {...props} {...(active?.env ?? fallback)} items={items} onValueChange={value => {
+    const item = items.find(item => item.value === value);
+    if (item) onValueChange(item.value);
+  }} />;
 }
 
 // Icons decorate their parent control or badge, which owns the accessible label.

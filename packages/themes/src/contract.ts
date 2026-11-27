@@ -7,6 +7,11 @@ export type JsonViewerProps = { value: object; label?: string };
 export type ChartRendererProps = { spec: ChartSpec } & ThemeEnv;
 export type ButtonProps = ComponentPropsWithRef<'button'> & { variant?: 'primary' | 'subtle' };
 export type TooltipProps = { content?: string; children: ReactElement<{ title?: string }>; visualOnly?: boolean; side?: 'top' | 'right' | 'bottom' | 'left' };
+export type TabItem<T extends string = string> = { value: T; id: string; panelId: string; label: string; icon?: ReactElement };
+// Callers own the panels so switching themes doesn't remount forms or other panel content.
+export type TabListProps<T extends string = string> = {
+  label: string; moreLabel: string; className?: string; items: readonly TabItem<T>[]; value: T; onValueChange: (value: T) => void;
+};
 export type SelectGroup = { id: string; label: string };
 export type SelectOption = { value: string; label: string; group?: SelectGroup };
 export type SelectSearch = { label?: string; placeholder?: string; emptyMessage?: string; allowDeselect?: boolean };
@@ -41,6 +46,7 @@ export type ThemeAdapter = {
   Chart: ComponentType<ChartRendererProps>;
   Button: ComponentType<ButtonProps & ThemeEnv>;
   Tooltip: ComponentType<TooltipProps & ThemeEnv>;
+  TabList: ComponentType<TabListProps & ThemeEnv>;
   Select: ComponentType<SelectProps & ThemeEnv>;
   Textarea: ComponentType<TextareaProps & ThemeEnv>;
   icons: IconSet;

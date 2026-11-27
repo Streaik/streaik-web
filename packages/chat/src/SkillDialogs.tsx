@@ -1,4 +1,4 @@
-import { Button } from '@streaik/themes';
+import { Button, TabList } from '@streaik/themes';
 import type { Gateway, RemoteSkill, RemoteSkillVersion, SkillUploadTargets } from '@streaik/gateway';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -20,21 +20,13 @@ export function downloadSkillZip(zip: Blob, name: string) {
 export function SkillTabs({ label, tabs, onChange }: {
   label: string; tabs: readonly { title: string; panel: ReactNode }[]; onChange?: (index: number) => void;
 }) {
+  const { t } = useAppTranslation();
   const id = useId();
   const [active, setActive] = useState(0);
-  const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   function select(index: number) { setActive(index); onChange?.(index); }
   return <>
-    <div className="catalog-tabs" role="tablist" aria-label={label}>
-      {tabs.map(({ title }, index) => <button type="button" key={title} ref={el => { buttons.current[index] = el; }}
-        id={`${id}-tab-${index}`} role="tab" tabIndex={index === active ? 0 : -1} aria-selected={index === active}
-        aria-controls={`${id}-panel-${index}`} onClick={() => select(index)} onKeyDown={event => {
-          const next = event.key === 'ArrowRight' ? (index + 1) % tabs.length
-            : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length
-            : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : undefined;
-          if (next !== undefined) { event.preventDefault(); select(next); buttons.current[next]?.focus(); }
-        }}>{title}</button>)}
-    </div>
+    <TabList className="catalog-tabs" label={label} moreLabel={t('More tabs')} value={String(active)} onValueChange={key => select(Number(key))}
+      items={tabs.map(({ title }, index) => ({ value: String(index), id: `${id}-tab-${index}`, panelId: `${id}-panel-${index}`, label: title }))} />
     {tabs.map(({ panel }, index) => <section key={index} className="skill-panel" role="tabpanel" id={`${id}-panel-${index}`}
       aria-labelledby={`${id}-tab-${index}`} hidden={index !== active}>{panel}</section>)}
   </>;

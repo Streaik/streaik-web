@@ -240,10 +240,10 @@ body { margin: 0; }
 .tool-config-switch::before { content: ''; width: 1rem; height: 1rem; border-radius: 50%; background: currentColor; opacity: .7; }
 .tool-config-switch:checked::before { justify-self: end; opacity: 1; }
 .tool-config-switch:disabled { opacity: .5; cursor: default; }
-.chat-tool-tabs { display: flex; flex-wrap: wrap; gap: .25rem; padding: .25rem; width: fit-content; max-width: 100%; box-sizing: border-box; background: var(--surface); border-radius: .55rem; }
-.chat-tool-tabs button { border: 1px solid transparent; border-radius: .4rem; background: transparent; color: var(--foreground); font: inherit; padding: .5rem .75rem; cursor: pointer; }
-.chat-tool-tabs button[aria-selected=true] { border-color: var(--border); background: var(--background); font-weight: 650; }
-.chat-tool-tabs button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.chat-tool-tabs:where(:not([data-themed-tabs])) { display: flex; flex-wrap: wrap; gap: .25rem; padding: .25rem; width: fit-content; max-width: 100%; box-sizing: border-box; background: var(--surface); border-radius: .55rem; }
+.chat-tool-tabs:where(:not([data-themed-tabs])) button { border: 1px solid transparent; border-radius: .4rem; background: transparent; color: var(--foreground); font: inherit; padding: .5rem .75rem; cursor: pointer; }
+.chat-tool-tabs:where(:not([data-themed-tabs])) button[aria-selected=true] { border-color: var(--border); background: var(--background); font-weight: 650; }
+.chat-tool-tabs:where(:not([data-themed-tabs])) button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .chat-tool-card { display: grid; gap: .65rem; min-width: 0; padding: .9rem; background: var(--surface); border: 1px solid var(--border); border-radius: .55rem; }
 .chat-tool-card :is(h3, p, pre, ul) { margin: 0; }
 .chat-tool-card :is(pre, li) { overflow-wrap: anywhere; }
@@ -366,12 +366,12 @@ body { margin: 0; }
   font: inherit; font-size: .95rem; font-weight: 400; color: var(--foreground); background: var(--surface);
   border: 1px solid var(--border); border-radius: var(--radius);
 }
-.catalog-tabs { display: flex; gap: .25rem; overflow-x: auto; scrollbar-width: thin; padding: .35rem; background: var(--soft); border-radius: var(--radius); }
-.catalog-tabs button {
+.catalog-tabs:where(:not([data-themed-tabs])) { display: flex; gap: .25rem; overflow-x: auto; scrollbar-width: thin; padding: .35rem; background: var(--soft); border-radius: var(--radius); }
+.catalog-tabs:where(:not([data-themed-tabs])) button {
   flex: none; border: 1px solid transparent; border-radius: var(--radius); background: transparent;
   font: inherit; font-size: .875rem; color: var(--muted); padding: .55rem .72rem; cursor: pointer;
 }
-.catalog-tabs button:is([aria-selected=true], :hover) { color: var(--foreground); background: var(--surface); border-color: var(--border); }
+.catalog-tabs:where(:not([data-themed-tabs])) button:is([aria-selected=true], :hover) { color: var(--foreground); background: var(--surface); border-color: var(--border); }
 .catalog-model-tabs > button { display: inline-flex; align-items: center; gap: .35rem; }
 .catalog-model-tabs .chat-icon { width: 1rem; height: 1rem; }
 .catalog-tabs + [role=tabpanel] { margin-top: 1.2rem; }

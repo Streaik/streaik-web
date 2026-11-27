@@ -518,6 +518,7 @@ export const chatMessages = {
   'Unpin {{title}}': ['{{title}} losmaken', 'Desfijar {{title}}'],
   'More actions for {{title}}': ['Meer acties voor {{title}}', 'Más acciones para {{title}}'],
   'More actions': ['Meer acties', 'Más acciones'],
+  'More tabs': ['Meer tabbladen', 'Más pestañas'],
   'Delete': ['Verwijderen', 'Eliminar'],
   'Chat navigation': ['Chatnavigatie', 'Navegación del chat'],
   'Toggle navigation': ['Navigatie in- of uitklappen', 'Mostrar u ocultar la navegación'],

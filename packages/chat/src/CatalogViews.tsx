@@ -1,4 +1,4 @@
-import { Button, Tooltip } from '@streaik/themes';
+import { Button, TabList, Tooltip } from '@streaik/themes';
 import type { IconName } from '@streaik/themes';
 import type { CatalogModel } from '@streaik/gateway';
 import { useId, useState } from 'react';
@@ -128,19 +128,11 @@ export function ModelsView({ models, status, refresh }: { models?: CatalogModel[
       </Tooltip>}
     </div>
     {models && <>
-      <div className="catalog-tabs catalog-model-tabs" role="tablist" aria-label={t('Model capabilities')}>
-        {tabs.map(([key, [label, icon]], index) => <button key={key} id={`${id}-${key}`} type="button" role="tab"
-          aria-selected={selected === key} aria-controls={`${id}-results`} tabIndex={selected === key ? 0 : -1}
-          onClick={() => setTab(key)} onKeyDown={event => {
-            const next = ({ ArrowRight: (index + 1) % tabs.length, ArrowLeft: (index - 1 + tabs.length) % tabs.length,
-              Home: 0, End: tabs.length - 1 } as Record<string, number>)[event.key];
-            if (typeof next !== 'number') return;
-            event.preventDefault();
-            const nextKey = tabs[next][0];
-            setTab(nextKey);
-            document.getElementById(`${id}-${nextKey}`)?.focus();
-           }}><ChatIcon name={icon} />{t(label)} ({number.format(groups.get(key)?.length ?? 0)})</button>)}
-      </div>
+      <TabList className="catalog-tabs catalog-model-tabs" label={t('Model capabilities')} moreLabel={t('More tabs')}
+        value={selected} onValueChange={setTab} items={tabs.map(([key, [label, icon]]) => ({
+          value: key, id: `${id}-${key}`, panelId: `${id}-results`, icon: <ChatIcon name={icon} />,
+          label: `${t(label)} (${number.format(groups.get(key)?.length ?? 0)})`,
+        }))} />
       <section id={`${id}-results`} role="tabpanel" aria-labelledby={`${id}-${selected}`} tabIndex={0}>
         {searchMessage ? <p className="catalog-empty" role="status">{t(searchMessage)}</p> :
           <CardGrid key={JSON.stringify([selected, search.trim(), selectedProvider])} items={groups.get(selected) ?? []}
