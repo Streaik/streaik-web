@@ -14,7 +14,7 @@ import type { ChatPreferences } from './chatPreferences';
 import { normalizeToolPolicy, toolPolicyForTurn } from './chatToolPolicy';
 import type { ChatToolPolicy } from './chatToolPolicy';
 import type { RequestContext } from './chatContext';
-import { localPlugins } from './localPlugins';
+import { localPlugins, localToolSearchPluginId } from './localPlugins';
 import type { ChatTool } from './localPlugins';
 import { useAppTranslation } from './i18n';
 import { defaultSkillVersion } from './skillBundles';
@@ -73,7 +73,7 @@ function ToolPolicyFields({ value, onChange, rows, disabled }: {
   </section>;
 }
 
-export function ChatSettingsDialog({ dialog, value, onChange, gateway, hostedSkillsSupported, browserToolsSupported, hasHistory, locked, localSkills, remoteSkills, providerModels, toolRows, namespaceSupported, toolOptionsSupported, voice, modelContext }: {
+export function ChatSettingsDialog({ dialog, value, onChange, gateway, hostedSkillsSupported, browserToolsSupported, hasHistory, locked, localSkills, remoteSkills, providerModels, toolRows, namespaceSupported, toolOptionsSupported, voice, modelContext, hostedToolSearch, localToolSearch }: {
   dialog: DialogRef; value: ChatPreferences; onChange: (preferences: ChatPreferences) => void;
   hostedSkillsSupported: boolean;
   gateway: boolean; browserToolsSupported: boolean; hasHistory: boolean; locked: boolean; localSkills: LocalSkills; remoteSkills: RemoteSkills;
@@ -81,6 +81,7 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hostedSki
   voice?: { protocol: VoiceProtocol; models: readonly ChatModel[]; agents: readonly LiveClientAgent[] };
   toolRows: readonly ToolConfigurationRow[]; namespaceSupported: boolean; toolOptionsSupported: boolean;
   modelContext: ChatModelContextServers;
+  hostedToolSearch: boolean; localToolSearch: boolean;
 }) {
   const { t } = useAppTranslation();
   const id = useId();
@@ -128,6 +129,7 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hostedSki
     </div>
     {hasModelContext && <div id={`${id}-model-context-panel`} role="tabpanel" aria-labelledby={`${id}-model-context-tab`} hidden={tab !== 'model-context'}>
       {tab === 'model-context' && <ChatModelContextFields {...modelContext} locked={locked} value={value.modelContext}
+        hostedToolSearch={hostedToolSearch} localToolSearch={localToolSearch}
         onChange={modelContext => onChange({ ...value, modelContext })} />}
     </div>}
     <div id={`${id}-tools-panel`} role="tabpanel" aria-labelledby={`${id}-tools-tab`} hidden={tab !== 'tools'}>
@@ -136,7 +138,7 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hostedSki
         <div className="chat-tool-switches">
           {localPlugins.map(plugin => <label key={plugin.id}>
             <input type="checkbox" role="switch" checked={value.plugins.includes(plugin.id)}
-              disabled={locked || !browserToolsSupported || (plugin.requiresHistory && !hasHistory)}
+              disabled={locked || !browserToolsSupported || (plugin.requiresHistory && !hasHistory) || (hostedToolSearch && plugin.id === localToolSearchPluginId)}
               onChange={event => onChange({ ...value, plugins: event.currentTarget.checked ? [...value.plugins, plugin.id]
                 : value.plugins.filter(id => id !== plugin.id) })} />
             <span>{t(plugin.label)}</span>
@@ -148,7 +150,8 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hostedSki
     <div id={`${id}-tool-configuration-panel`} role="tabpanel" aria-labelledby={`${id}-tool-configuration-tab`} hidden={tab !== 'tool-configuration'}>
       {tab === 'tool-configuration' && <>
         {!toolOptionsSupported && <p>{t('This route does not send tool usage or search options.')}</p>}
-        <ToolConfigurationEditor rows={toolRows} disabled={locked} namespaces={{ checked: value.useToolNamespaces, disabled: !namespaceSupported,
+        <ToolConfigurationEditor rows={toolRows} disabled={locked} deferLoadingDisabled={hostedToolSearch}
+          namespaces={{ checked: value.useToolNamespaces, disabled: !namespaceSupported,
           onChange: useToolNamespaces => onChange({ ...value, useToolNamespaces }) }} onChange={(keys, patch) => {
           const toolRequestConfig = { ...value.toolRequestConfig, ...Object.fromEntries(keys.map(key =>
             [key, { ...(Object.hasOwn(value.toolRequestConfig, key) && value.toolRequestConfig[key]), ...patch }])) };

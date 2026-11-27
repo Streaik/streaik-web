@@ -2,7 +2,7 @@ import { asRecord } from './directMetrics.ts';
 
 export type HostedMcpTool = {
   type: 'mcp'; server_label: string; server_url: string; allowed_tools?: readonly string[];
-  require_approval?: 'always' | 'never'; defer_loading?: boolean;
+  require_approval?: 'always' | 'never'; allowed_callers?: readonly ('direct' | 'programmatic')[]; defer_loading?: boolean;
 } | { type: 'tool_search' | 'resource_search' };
 
 export function apiChatHostedMcp({ type, ...options }: HostedMcpTool) {

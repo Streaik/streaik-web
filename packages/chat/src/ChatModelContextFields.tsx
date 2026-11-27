@@ -1,12 +1,13 @@
-import { AgentSwitch } from './AgentToolControls';
+import { AgentSelectField, AgentSwitch } from './AgentToolControls';
 import { agentSearchTools } from './agentTools';
 import { ChatExecutionField } from './ChatExecutionField';
-import { browserMcpPolicy, normalizeChatModelContext } from './chatModelContext';
+import { browserMcpPolicy, hostedMcpDefers, normalizeChatModelContext } from './chatModelContext';
 import type { ChatMcpServerOptions, ChatModelContext, hostedMcpRoute } from './chatModelContext';
 import { useAppTranslation } from './i18n';
 import type { McpOptions } from './mcp';
 import { McpServerCard } from './McpServersView';
 import { McpAllowedToolsField, McpApprovalField, McpPolicyCard } from './McpToolControls';
+import { toolCallers } from './toolConfiguration';
 import { useMcpRegistry } from './useMcpRegistry';
 import type { McpSelection } from './useMcpServers';
 
@@ -17,8 +18,9 @@ export type ChatModelContextServers = {
   route: ReturnType<typeof hostedMcpRoute>;
 };
 
-export function ChatModelContextFields({ servers, registry, descriptions, route, value, onChange, locked }: ChatModelContextServers & {
+export function ChatModelContextFields({ servers, registry, descriptions, route, value, onChange, locked, hostedToolSearch, localToolSearch }: ChatModelContextServers & {
   value?: ChatModelContext; onChange: (value: ChatModelContext | undefined) => void; locked: boolean;
+  hostedToolSearch: boolean; localToolSearch: boolean;
 }) {
   const { t } = useAppTranslation();
   const { byEndpoint } = useMcpRegistry(registry, false, servers.map(({ record }) => record));
@@ -34,12 +36,21 @@ export function ChatModelContextFields({ servers, registry, descriptions, route,
       <ChatExecutionField value={route || value?.execution !== 'hosted' ? value?.execution : undefined}
         disabled={locked} hostedSupported={!!route} onChange={execution => change({ execution })} />
     </section>
-    <McpPolicyCard policy={policy} onChange={hosted || locked ? undefined : (flag, checked) => change({ policy: { ...policy, [flag]: checked } })} />
-    {hosted && <p>{t(route === '/v1/responses' ? 'Select Always to review hosted tool arguments before execution.' : 'Select Always to review hosted tool results before sharing them with the model.')}</p>}
+    {!hosted && <McpPolicyCard policy={policy} onChange={locked ? undefined : (flag, checked) => change({ policy: { ...policy, [flag]: checked } })} />}
     {servers.map(({ record, discovery }) => {
       const { id, endpoint, title } = record;
       const options = value?.servers?.[endpoint];
       return <McpServerCard key={id} title={title} registryEntry={byEndpoint.get(endpoint)} description={descriptions.get(endpoint)} inDialog>
+        {hosted && <div className="agent-mcp-usage">
+          <AgentSelectField multiple label={t('Allowed callers')} value={options?.allowedCallers ?? toolCallers} disabled={locked}
+            options={toolCallers.map(caller => ({ value: caller, label: t(caller === 'direct' ? 'Direct' : 'Programmatic') }))}
+            onValueChange={next => {
+              const callers = toolCallers.filter(caller => next.includes(caller));
+              if (callers.length) changeServer(endpoint, { allowedCallers: callers.length === toolCallers.length ? undefined : callers });
+            }} />
+          <AgentSwitch label={t('Search')} checked={hostedMcpDefers(options, hostedToolSearch, localToolSearch)}
+            onChange={locked || localToolSearch ? undefined : deferLoading => changeServer(endpoint, { deferLoading })} />
+        </div>}
         <div className="agent-mcp-columns">
           <McpAllowedToolsField available={discovery.tools.map(tool => tool.remoteName)} names={options?.allowedTools} disabled={locked}
             onChange={allowedTools => changeServer(endpoint, { allowedTools })} />
@@ -49,10 +60,12 @@ export function ChatModelContextFields({ servers, registry, descriptions, route,
       </McpServerCard>;
     })}
     {hosted && (['toolSearch', 'resourceSearch'] as const).map(key => {
-      const label = t(agentSearchTools[key === 'toolSearch' ? 'tool_search' : 'resource_search']);
+      const isToolSearch = key === 'toolSearch';
+      const label = t(agentSearchTools[isToolSearch ? 'tool_search' : 'resource_search']);
       return <section key={key} className="agent-field-group" aria-label={label}>
         <header className="agent-mcp-heading"><h3>{label}</h3>
-          <AgentSwitch label={label} hideLabel checked={value?.[key] === true} onChange={locked ? undefined : checked => change({ [key]: checked })} />
+          <AgentSwitch label={label} hideLabel checked={isToolSearch ? hostedToolSearch : value?.resourceSearch === true}
+            onChange={locked || (isToolSearch && localToolSearch) ? undefined : checked => change({ [key]: checked })} />
         </header>
       </section>;
     })}

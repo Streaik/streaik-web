@@ -1534,8 +1534,8 @@ test('chat Model Context opts into Gateway-hosted MCP and preserves per-route ap
       { name: 'update', inputSchema: { type: 'object' } },
     ] });
   });
-  const requests: { tools?: { name: string }[]; id?: string; messages: unknown }[] = [];
-  const responsesRequests: { tools: unknown; input: { type?: string; id?: string }[]; streaik_mcp_approvals?: unknown; streaik_mcp_history?: unknown }[] = [];
+  const requests: { tools?: { name: string; defer_loading?: boolean }[]; id?: string; messages: unknown }[] = [];
+  const responsesRequests: { tools: { type: string; name: string }[]; input: { type?: string; id?: string }[]; streaik_mcp_approvals?: unknown; streaik_mcp_history?: unknown }[] = [];
   const output = { content: [{ type: 'text', text: 'Hosted inventory result' }] };
   await page.route('**/gateway/api/chat', route => {
     requests.push(route.request().postDataJSON());
@@ -1583,9 +1583,17 @@ test('chat Model Context opts into Gateway-hosted MCP and preserves per-route ap
   const execution = panel.getByRole('combobox', { name: 'Execution', exact: true });
   const approval = panel.getByRole('combobox', { name: 'Require approval', exact: true });
   const allowed = panel.getByRole('button', { name: 'Allowed tools', exact: true });
+  const callers = panel.getByRole('button', { name: 'Allowed callers', exact: true });
+  const serverSearch = panel.getByRole('switch', { name: 'Search', exact: true });
   const toolSearch = panel.getByRole('switch', { name: 'Tool search', exact: true });
   const resourceSearch = panel.getByRole('switch', { name: 'Resource search', exact: true });
   const readOnly = panel.getByRole('switch', { name: 'Read-only', exact: true });
+  const toolsTab = settings.getByRole('tab', { name: 'Tools', exact: true });
+  const toolsPanel = settings.getByRole('tabpanel', { name: 'Tools', exact: true });
+  const localSearch = toolsPanel.getByRole('switch', { name: 'Tool search', exact: true });
+  const configTab = settings.getByRole('tab', { name: 'Tool configuration', exact: true });
+  const chartSearch = settings.getByRole('switch', { name: 'Search for local_chart_instructions', exact: true });
+  const bulkSearch = settings.getByRole('switch', { name: 'Search for All tools', exact: true });
   const openContext = async () => { await openSettings(); await tab.click(); };
   await openSettings();
   await expect(tab).toHaveCount(0);
@@ -1608,6 +1616,8 @@ test('chat Model Context opts into Gateway-hosted MCP and preserves per-route ap
   await expect(allowed).toBeVisible();
   await expect(execution).toHaveText('Default');
   await expect(approval).toBeDisabled();
+  await expect(callers).toHaveCount(0);
+  await expect(serverSearch).toHaveCount(0);
   await expect(toolSearch).toHaveCount(0);
   await closeSettingsDialog();
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
@@ -1625,23 +1635,52 @@ test('chat Model Context opts into Gateway-hosted MCP and preserves per-route ap
 
   await openContext();
   await selectOptionByName(page, execution, 'Hosted');
-  await expect(readOnly).toBeChecked();
-  await expect(readOnly).toBeDisabled();
+  await expect(panel.getByRole('heading', { name: 'Policy', exact: true })).toHaveCount(0);
+  await expect(panel.getByText('Select Always to review hosted tool results before sharing them with the model.')).toHaveCount(0);
+  await expect(callers).toBeVisible();
+  await expect(serverSearch).not.toBeChecked();
+  await expect(panel.getByRole('switch', { name: 'Namespace', exact: true })).toHaveCount(0);
   await selectOptionByName(page, approval, 'Always');
   await selectOptionByName(page, allowed, 'update');
   await page.keyboard.press('Escape');
-  await toolSearch.check(); await resourceSearch.check();
+  await selectOptionByName(page, callers, 'Programmatic');
+  await page.keyboard.press('Escape');
+  await toolsTab.click();
+  await localSearch.check();
+  await toolsPanel.getByRole('switch', { name: 'Charts', exact: true }).check();
+  await tab.click();
+  await expect(toolSearch).toBeDisabled();
+  await expect(toolSearch).not.toBeChecked();
+  await expect(serverSearch).toBeDisabled();
+  await resourceSearch.check();
+  await toolsTab.click();
+  await expect(localSearch).toBeEnabled();
+  await localSearch.uncheck();
+  await configTab.click();
+  await chartSearch.check();
+  await tab.click();
+  await toolSearch.check();
+  await expect(serverSearch).toBeChecked();
+  await toolsTab.click();
+  await expect(localSearch).toBeDisabled();
+  await expect(localSearch).not.toBeChecked();
+  await configTab.click();
+  await expect(chartSearch).toBeDisabled();
+  await expect(chartSearch).not.toBeChecked();
+  await expect(bulkSearch).toBeDisabled();
   await closeSettingsDialog();
   await composer.fill('Use hosted execution'); await composer.press('Enter');
   const review = page.getByRole('dialog', { name: 'Review tool result', exact: true });
   await expect(review).toBeVisible();
   await review.getByRole('tab', { name: 'Text', exact: true }).click();
   await expect(review.getByRole('tabpanel', { name: 'Text' })).toHaveText('Hosted inventory result');
-  const descriptor = { server_label: 'Inventory fixture', server_url: endpoint, allowed_tools: ['update'], defer_loading: true };
+  const descriptor = { server_label: 'Inventory fixture', server_url: endpoint, allowed_tools: ['update'], allowed_callers: ['direct'] };
   const searches = ['tool_search', 'resource_search'];
-  const expectedTools = [{ name: 'mcp', inputSchema: { type: 'object', mcp: { ...descriptor, require_approval: 'always' } } },
+  const expectedTools = [expect.objectContaining({ name: 'local_chart_instructions' }),
+    { name: 'mcp', inputSchema: { type: 'object', mcp: { ...descriptor, defer_loading: true, require_approval: 'always' } } },
     ...searches.map(name => ({ name, inputSchema: { type: 'object', [name]: {} } }))];
   expect(requests[2].tools).toEqual(expectedTools);
+  expect(requests[2].tools?.find(tool => tool.name === 'local_chart_instructions')).not.toHaveProperty('defer_loading');
   expect(requests[2].id).toBeTruthy();
   await review.getByRole('button', { name: 'Approve and share', exact: true }).click();
   await expect(page.getByText('MCP reply 4', { exact: true })).toBeVisible();
@@ -1665,10 +1704,14 @@ test('chat Model Context opts into Gateway-hosted MCP and preserves per-route ap
   expect(responsesRequests[1].streaik_mcp_approvals).toEqual({ [nativeApproval.id]: 'gateway-proof' });
   await openContext();
   await selectOptionByName(page, approval, 'Never');
+  await serverSearch.uncheck();
+  await expect(toolSearch).toBeChecked();
   await closeSettingsDialog();
   await submit('Use hosted Responses with no approval', 'Responses hosted reply');
-  expect(responsesRequests[2].tools).toEqual([{ type: 'mcp', name: 'mcp', ...descriptor, require_approval: 'never' },
+  expect(responsesRequests[2].tools).toEqual([expect.objectContaining({ type: 'function', name: 'local_chart_instructions' }),
+    { type: 'mcp', name: 'mcp', ...descriptor, require_approval: 'never' },
     ...searches.map(type => ({ type, name: type }))]);
+  expect(responsesRequests[2].tools.find(tool => tool.name === 'local_chart_instructions')).not.toHaveProperty('defer_loading');
   expect(responsesRequests[2].input).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'mcp_call', id: nativeResult.id })]));
   expect(responsesRequests[2].streaik_mcp_history).toEqual({ [nativeResult.id]: 'gateway-history-receipt' });
   expect(responsesRequests[2].input.some(item => item.type?.startsWith('mcp_approval_'))).toBe(false);
@@ -1677,13 +1720,23 @@ test('chat Model Context opts into Gateway-hosted MCP and preserves per-route ap
   await openContext();
   await selectOptionByName(page, execution, 'Client');
   await expect(readOnly).toBeEnabled();
+  await expect(readOnly).toBeChecked();
   await expect(approval).toBeDisabled();
+  await expect(callers).toHaveCount(0);
+  await expect(serverSearch).toHaveCount(0);
   await expect(resourceSearch).toHaveCount(0);
+  await configTab.click();
+  await expect(chartSearch).toBeEnabled();
+  await expect(chartSearch).toBeChecked();
+  await toolsTab.click();
+  await expect(localSearch).toBeEnabled();
+  await tab.click();
   await panel.getByRole('combobox', { name: 'Execution', exact: true }).click();
   await page.getByRole('option', { name: 'Default', exact: true }).click();
   const preferences = await page.evaluate(() => JSON.parse(localStorage.getItem(Object.keys(localStorage)
     .find(key => key.startsWith('streaik-chat-preferences:'))!)!));
   expect(preferences.modelContext).not.toHaveProperty('execution');
+  expect(preferences.modelContext.servers[endpoint]).toMatchObject({ allowedCallers: ['direct'], deferLoading: false });
   await closeSettingsDialog();
   await page.getByRole('button', { name: 'Remove Inventory fixture', exact: true }).click();
   await openSettings();

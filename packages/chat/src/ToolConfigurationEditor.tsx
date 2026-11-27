@@ -5,11 +5,11 @@ import type { ToolCaller, ToolOptions } from './toolConfiguration';
 export type ToolConfigurationRow = { key: string; label: string; source: string; options: ToolOptions; namespace?: string };
 const labels = { direct: 'Direct', programmatic: 'Programmatic' } as const;
 
-export function ToolConfigurationEditor({ rows, onChange, namespaces, disabled }: {
+export function ToolConfigurationEditor({ rows, onChange, namespaces, disabled, deferLoadingDisabled }: {
   rows: readonly ToolConfigurationRow[];
   onChange: (keys: readonly string[], patch: ToolOptions) => void;
   namespaces?: { checked: boolean; onChange: (checked: boolean) => void; disabled?: boolean };
-  disabled?: boolean;
+  disabled?: boolean; deferLoadingDisabled?: boolean;
 }) {
   const { t } = useAppTranslation();
   const sorted = [...rows].sort((a, b) => (a.namespace ?? '').localeCompare(b.namespace ?? '') || a.label.localeCompare(b.label));
@@ -33,7 +33,7 @@ export function ToolConfigurationEditor({ rows, onChange, namespaces, disabled }
     </details>;
   }
   function search(label: string, checked: boolean, keys: readonly string[]) {
-    return <input className="tool-config-switch" type="checkbox" role="switch" checked={checked} disabled={disabled}
+    return <input className="tool-config-switch" type="checkbox" role="switch" checked={!deferLoadingDisabled && checked} disabled={disabled || deferLoadingDisabled}
       aria-label={t('Search for {{tool}}', { tool: label })} onChange={event => onChange(keys, { defer_loading: event.currentTarget.checked })} />;
   }
   return <div className="tool-config-editor">

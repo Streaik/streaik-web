@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { defaultChatPreferences, loadChatPreferences, normalizeChatPreferences, saveChatPreferences } from '../packages/chat/src/chatPreferences.ts';
+import { chatHostedMcp } from '../packages/chat/src/chatModelContext.ts';
 import { defaultMcpPreferences } from '../packages/chat/src/mcpPreferences.ts';
 import { conversationGatewayCost, latestContextUsage } from '../packages/chat/src/messageMetadata.ts';
 import { filterToolOutputContent } from '../packages/chat/src/toolOutputContent.ts';
@@ -52,6 +53,30 @@ test('MCP defaults are backward compatible and saved settings remain scoped and 
   assert.equal(normalizeChatPreferences({ mcp: { toolTimeoutMinutes: 0 } }).mcp.toolTimeoutMinutes, 1);
   assert.equal(normalizeChatPreferences({ mcp: { toolTimeoutMinutes: 2.7 } }).mcp.toolTimeoutMinutes, 3);
   assert.deepEqual(normalizeChatPreferences({ mcp: { toolTimeoutMinutes: NaN, formElicitation: 'false' } }).mcp, defaultMcpPreferences);
+});
+
+test('hosted MCP normalizes per-server callers and deferral, and honors a saved Local search selection', () => {
+  const eager = 'https://eager.example/mcp';
+  const configured = 'https://configured.example/mcp';
+  const inherited = 'https://inherited.example/mcp';
+  const { modelContext } = normalizeChatPreferences({ modelContext: {
+    execution: 'hosted', toolSearch: true, resourceSearch: true, servers: {
+      [eager]: { allowedCallers: ['programmatic', 'unsupported', 'programmatic'], deferLoading: false },
+      [configured]: { deferLoading: true },
+      [inherited]: { allowedCallers: ['unsupported'], deferLoading: 'true' },
+    },
+  } });
+  assert.deepEqual(modelContext.servers, { [eager]: { allowedCallers: ['programmatic'], deferLoading: false }, [configured]: { deferLoading: true } });
+  const servers = [eager, configured, inherited].map(endpoint => ({ record: { title: new URL(endpoint).hostname, endpoint } }));
+  const descriptors = servers.map(({ record }) => ({ type: 'mcp', server_label: record.title, server_url: record.endpoint }));
+  const first = { ...descriptors[0], allowed_callers: ['programmatic'] };
+  const deferred = { ...descriptors[1], defer_loading: true };
+  const resourceSearch = { type: 'resource_search' };
+  assert.deepEqual(chatHostedMcp(modelContext, servers), [first, deferred, { ...descriptors[2], defer_loading: true },
+    { type: 'tool_search' }, resourceSearch]);
+  assert.deepEqual(chatHostedMcp({ ...modelContext, toolSearch: undefined }, servers), [first, deferred, descriptors[2], resourceSearch]);
+  assert.deepEqual(chatHostedMcp(modelContext, servers, true), [first, ...descriptors.slice(1), resourceSearch]);
+  assert.deepEqual(chatHostedMcp({ ...modelContext, execution: 'client' }, servers), []);
 });
 
 test('browser tool choice, maximum and stop tools persist only in their profile', (t) => {

@@ -2,11 +2,16 @@ import type { ChatRoute, HostedMcpTool } from '@streaik/gateway';
 import { agentMcpPolicy } from './agentMcpClient.ts';
 import type { McpTool } from './mcp.ts';
 import { isObject, maxMcpServers, mcpEndpoint } from './mcpConfiguration.ts';
+import { toolOptions } from './toolConfiguration.ts';
+import type { ToolCaller } from './toolConfiguration.ts';
 
 export type ChatExecution = 'client' | 'hosted';
 export type McpPolicyFlag = keyof typeof agentMcpPolicy;
 export type McpPolicy = Partial<Record<McpPolicyFlag, boolean>>;
-export type ChatMcpServerOptions = { allowedTools?: readonly string[]; requireApproval?: 'always' | 'never' };
+export type ChatMcpServerOptions = {
+  allowedTools?: readonly string[]; requireApproval?: 'always' | 'never';
+  allowedCallers?: readonly ToolCaller[]; deferLoading?: boolean;
+};
 export type ChatModelContext = {
   execution?: ChatExecution;
   policy?: McpPolicy;
@@ -32,7 +37,10 @@ export function normalizeChatModelContext(value: unknown): ChatModelContext | un
     const allowed = Array.isArray(allowedTools) ? [...new Set(allowedTools.filter((name): name is string =>
       typeof name === 'string' && /^[\w-]{1,64}$/.test(name)))].slice(0, 64) : undefined;
     const approval = requireApproval === 'always' || requireApproval === 'never' ? requireApproval : undefined;
-    return allowed || approval ? [[endpoint, { ...(allowed && { allowedTools: allowed }), ...(approval && { requireApproval: approval }) }]] : [];
+    const { allowed_callers, defer_loading } = toolOptions({ allowed_callers: options.allowedCallers, defer_loading: options.deferLoading });
+    const server: ChatMcpServerOptions = { ...(allowed && { allowedTools: allowed }), ...(approval && { requireApproval: approval }),
+      ...(allowed_callers?.length && { allowedCallers: allowed_callers }), ...(defer_loading !== undefined && { deferLoading: defer_loading }) };
+    return Object.keys(server).length ? [[endpoint, server] as const] : [];
   });
   const { execution, toolSearch, resourceSearch } = value;
   const settings: ChatModelContext = {
@@ -61,8 +69,15 @@ export function hostedMcpRoute(route: ChatRoute) {
   return route.mode === 'gateway' && (route.endpoint === '/api/chat' || route.endpoint === '/v1/responses') ? route.endpoint : undefined;
 }
 
-export function chatHostedMcp(settings: ChatModelContext | undefined, servers: readonly { record: { title: string; endpoint: string } }[]): HostedMcpTool[] {
+export function hostedMcpDefers(options: ChatMcpServerOptions | undefined, hostedToolSearch: boolean, localToolSearch: boolean) {
+  // Existing servers follow the global switch until explicitly configured.
+  return !localToolSearch && (options?.deferLoading ?? hostedToolSearch);
+}
+
+export function chatHostedMcp(settings: ChatModelContext | undefined, servers: readonly { record: { title: string; endpoint: string } }[],
+  localToolSearch = false): HostedMcpTool[] {
   if (settings?.execution !== 'hosted' || !servers.length) return [];
+  const hostedToolSearch = settings.toolSearch === true && !localToolSearch;
   const labels = new Set<string>();
   const tools: HostedMcpTool[] = servers.map(({ record: { title, endpoint } }) => {
     let label = title;
@@ -70,12 +85,12 @@ export function chatHostedMcp(settings: ChatModelContext | undefined, servers: r
     labels.add(label.toLowerCase());
     const options = settings.servers?.[endpoint];
     return { type: 'mcp', server_label: label, server_url: endpoint,
-      // Search discovers deferred hosted tools, not the tools already offered to the model.
-      ...(settings.toolSearch && { defer_loading: true }),
+      ...(hostedMcpDefers(options, hostedToolSearch, localToolSearch) && { defer_loading: true }),
+      ...(options?.allowedCallers?.length && { allowed_callers: options.allowedCallers }),
       ...(options?.allowedTools && { allowed_tools: options.allowedTools }),
       ...(options?.requireApproval && { require_approval: options.requireApproval }) };
   });
-  if (settings.toolSearch) tools.push({ type: 'tool_search' });
+  if (hostedToolSearch) tools.push({ type: 'tool_search' });
   if (settings.resourceSearch) tools.push({ type: 'resource_search' });
   return tools;
 }

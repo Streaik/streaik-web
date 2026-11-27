@@ -48,7 +48,7 @@ import type { ProviderChatSettings } from './providerChat/settings';
 import { filterToolOutputContent } from './toolOutputContent';
 import { buildRequestContext, requestContextText, withRequestContext } from './chatContext';
 import type { RequestContext } from './chatContext';
-import { activeChatTools, filterLocalToolReplay, localPlugins, runLocalTool, toolPartName } from './localPlugins';
+import { activeChatTools, filterLocalToolReplay, localPlugins, localToolSearchPluginId, runLocalTool, toolPartName } from './localPlugins';
 import type { ChatTool } from './localPlugins';
 import { agentMcpAllows, agentMcpServers, agentSkillsTool } from './agentTools';
 import { apiChatTools, chatRequestTools, chatToolCapabilities, configureChatTools } from './chatToolRequest';
@@ -730,8 +730,10 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const hostedSkillsSupported = gatewayRoute && !agentMode && !voiceProtocol;
   const useHostedSkills = view === 'chat' && hostedSkillsSupported && preferences.skillExecution === 'hosted';
   const mcpRoute = hostedSkillsSupported ? hostedMcpRoute(runRoute) : undefined;
-  const hostedMcp = view === 'chat' && mcpRoute ? chatHostedMcp(preferences.modelContext, connectedMcp) : [];
+  const localToolSearch = preferences.plugins.includes(localToolSearchPluginId);
+  const hostedMcp = view === 'chat' && mcpRoute ? chatHostedMcp(preferences.modelContext, connectedMcp, localToolSearch) : [];
   const useHostedMcp = hostedMcp.length > 0;
+  const hostedToolSearch = hostedMcp.some(({ type }) => type === 'tool_search');
   const appAgentContext = useMemo(() => buildRequestContext(appName, language, darkMode), [appName, language, darkMode]);
   const appAgentTransport = useMemo(() => route.mode === 'direct' ? direct?.chatTransport(route.endpoint)
     : gateway.chatTransport(route.endpoint), [gateway, direct, route]);
@@ -758,7 +760,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const enabledTools = hostedRoute ? hostedRoute.endpoint === '/api/chat'
     ? activeChatTools({ mode: 'gateway', endpoint: '/api/chat' }, preferences.plugins, hasHistory, []).filter(tool => tool.source === 'local') : []
     : activeChatTools(runRoute, preferences.plugins, hasHistory, mcpTools, hasSkills, mcpCatalog ? readResourceTool : undefined);
-  const configuredTools = configureChatTools(enabledTools, preferences.toolRequestConfig, preferences.useToolNamespaces, chatAgent);
+  const configuredTools = configureChatTools(enabledTools, preferences.toolRequestConfig, preferences.useToolNamespaces, chatAgent, hostedToolSearch);
   const baseContext = useMemo(() => gatewayRoute || hasSkills ? buildRequestContext(appName, language, darkMode, chatSkills.local, chatSkills.archives) : undefined,
     [gatewayRoute, hasSkills, appName, language, darkMode, chatSkills]);
   const chatInstructions = hostedRoute ? undefined : chatAgent?.instructions;
@@ -1366,6 +1368,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         </div>
       </main>
       <ChatSettingsDialog dialog={chatSettings} value={preferences} onChange={onPreferences} gateway={gatewayRoute} hostedSkillsSupported={hostedSkillsSupported}
+        hostedToolSearch={hostedToolSearch} localToolSearch={localToolSearch}
         modelContext={{ servers: connectedMcp, registry: connection.mcp, route: mcpRoute,
           descriptions: new Map(declaredMcp.flatMap(({ endpoint, server }) => endpoint && typeof server.server_description === 'string'
             ? [[endpoint, server.server_description]] : [])) }}

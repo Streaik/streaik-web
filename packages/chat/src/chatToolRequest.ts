@@ -10,7 +10,8 @@ export type Namespace = { id: string; name: string };
 export type ConfiguredChatTool = { tool: ChatTool; source: string; options: ToolOptions; namespace?: Namespace };
 export type ChatRequestTool = ToolDefinition & ToolOptions & { namespace?: Namespace };
 
-export function configureChatTools(tools: readonly ChatTool[], config: ToolConfiguration, useNamespaces: boolean, agent?: AgentDefinition): ConfiguredChatTool[] {
+export function configureChatTools(tools: readonly ChatTool[], config: ToolConfiguration, useNamespaces: boolean,
+  agent?: AgentDefinition, deferLoadingDisabled = false): ConfiguredChatTool[] {
   const declarations = agentMcpServers(agent?.tools).filter(({ server }) => server.execution !== 'server');
   return tools.map(tool => {
     const mcp = tool.source === 'mcp' ? tool.tool : undefined;
@@ -19,6 +20,7 @@ export function configureChatTools(tools: readonly ChatTool[], config: ToolConfi
       ...(mcp ? agentToolOptions(agent?.tools, { type: 'function', name: mcp.remoteName })
         : tool.source === 'mcp-resource' ? agentToolOptions(agent?.tools, { type: 'read_resource' }) : {}),
       ...(Object.hasOwn(config, tool.definition.name) ? config[tool.definition.name] : {}) };
+    if (deferLoadingDisabled) delete options.defer_loading;
     const source = declaration?.key ?? mcp?.server.title ?? (tool.source === 'local' ? tool.plugin.id : tool.source === 'skill' ? 'Skills' : 'MCP');
     const namespace = useNamespaces || declaration?.server.namespace === true
       ? mcp ? { id: `mcp:${mcp.server.id}`, name: source } : { id: 'local', name: 'local' } : undefined;
