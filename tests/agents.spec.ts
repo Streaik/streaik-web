@@ -99,12 +99,12 @@ test('agent Skills keeps Local copies and Central links separate and saves only 
   await attachment.selectOption('inline');
   await expect(attachment).toHaveValue('inline');
   expect(downloads).toBe(2);
-  await editor.getByRole('button', { name: 'Save agent', exact: true }).click();
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(card(page, 'Skill Agent')).toBeVisible();
 
   await page.reload();
   await expect(card(page, 'Skill Agent')).toBeVisible();
-  const dialog = page.getByRole('dialog', { name: 'Edit agent', exact: true });
+  const dialog = page.getByRole('dialog', { name: 'Agent', exact: true });
   await card(page, 'Skill Agent').getByRole('button', { name: 'Edit', exact: true }).click();
   const reopened = await openSkills(dialog);
   const reopenedLocal = reopened.local.getByRole('switch', { name: 'local-notes', exact: true });
@@ -127,7 +127,7 @@ test('agent Skills keeps Local copies and Central links separate and saves only 
   await openSkills(dialog);
   await expect(reopened.central.getByRole('switch', { name: remote.name, exact: true })).toBeChecked();
   await reopened.central.getByLabel(`Attachment for ${remote.name}`, { exact: true }).selectOption('reference');
-  await dialog.getByRole('button', { name: 'Save agent', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   const saved = await page.evaluate(() => {
     const key = Object.keys(localStorage).find(key => key.startsWith('streaik.agents.v1:'))!;
     return JSON.parse(localStorage.getItem(key)!).local[0].definition.skills;
@@ -172,7 +172,7 @@ test('agent tool configuration preserves portable fields and auto-attaches only 
   await configuration.getByRole('switch', { name: 'Search for lookup', exact: true }).uncheck();
   await configuration.locator('summary[aria-label="Usage method for lookup"]').click();
   await configuration.getByRole('checkbox', { name: 'Direct', exact: true }).check();
-  await editor.getByRole('button', { name: 'Save agent' }).click();
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(card(page, 'Inventory helper')).toBeVisible();
   const saved = await page.evaluate(() => {
     const key = Object.keys(localStorage).find(value => value.startsWith('streaik.agents.v1:'));
@@ -376,11 +376,11 @@ test('browser-only agent creation, search, deletion and assignments', async ({ p
   await editor.getByLabel('Owner').fill('Local owner');
   await editor.getByLabel('Tag', { exact: true }).fill('offline-tag');
   await editor.getByLabel('Tag', { exact: true }).press('Enter');
-  await editor.getByRole('button', { name: 'Save agent' }).click();
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(editor.getByRole('alert')).toHaveText('Name, description, and instructions are required.');
   await expect(editor.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'true');
   await editor.getByLabel('Description', { exact: true }).fill('A local definition.');
-  await editor.getByRole('button', { name: 'Save agent' }).click();
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(editor).toBeHidden();
   const search = page.getByRole('searchbox', { name: 'Search agents' });
   await search.fill('TAG defin');
@@ -410,7 +410,7 @@ test('browser-only agent creation, search, deletion and assignments', async ({ p
   const editButton = local.locator('header').getByRole('button', { name: 'Edit', exact: true });
   await expect(editButton).toHaveText('');
   await editButton.click();
-  const edit = page.getByRole('dialog', { name: 'Edit agent', exact: true });
+  const edit = page.getByRole('dialog', { name: 'Agent', exact: true });
   await edit.getByRole('tab', { name: 'Details' }).click();
   await expect(edit.getByLabel('Owner')).toHaveValue('Local owner');
   await expect(edit.getByRole('button', { name: 'Remove tag offline-tag' })).toBeVisible();
@@ -501,11 +501,11 @@ test('catalog-backed models and Realtime settings persist without starting audio
   await editor.getByLabel('Audio format', { exact: true }).fill('audio/pcm');
   await editor.getByLabel('Sample rate (Hz)').fill('24000');
   await editor.getByRole('tab', { name: 'Details', exact: true }).click();
-  await editor.getByRole('button', { name: 'Save agent' }).click();
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(realtime).toHaveAttribute('aria-selected', 'true');
   await expect(editor.getByRole('alert')).toHaveText('Speech speed must be a positive number.');
   await editor.getByLabel('Speed', { exact: true }).fill('1.15');
-  await editor.getByRole('button', { name: 'Save agent' }).click();
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
   const local = card(page, 'Audio agent');
   await expect(local.locator('.catalog-mark img')).toHaveAttribute('src', openAiFavicon);
 
@@ -513,7 +513,7 @@ test('catalog-backed models and Realtime settings persist without starting audio
   await page.reload();
   await agents(page).click();
   await local.getByRole('button', { name: 'Edit', exact: true }).click();
-  const edit = page.getByRole('dialog', { name: 'Edit agent', exact: true });
+  const edit = page.getByRole('dialog', { name: 'Agent', exact: true });
   await expect(edit.getByLabel('Argument hint')).toHaveValue('Describe the result');
   await expect(edit.getByRole('listitem')).toHaveText([/anthropic\/router/, /openai\/chat-example/]);
   await edit.getByRole('tab', { name: 'Realtime' }).click();
@@ -521,7 +521,7 @@ test('catalog-backed models and Realtime settings persist without starting audio
   await expect(edit.getByRole('button', { name: 'Speech model' })).toContainText('openai/example-tts (saved, unavailable)');
   for (const [label, value] of [['Voice', 'alloy'], ['Speech instructions', 'Speak clearly.'], ['Language', 'en'], ['Speed', '1.15'],
     ['Audio format', 'audio/pcm'], ['Sample rate (Hz)', '24000']]) await expect(edit.getByLabel(label, { exact: true })).toHaveValue(value);
-  await edit.getByRole('button', { name: 'Save agent' }).click();
+  await edit.getByRole('button', { name: 'Save', exact: true }).click();
   expect(calls.length).toBeGreaterThan(0);
   expect(calls.every((method) => method === 'GET')).toBe(true);
 });
@@ -568,7 +568,7 @@ test('Agents share provider forms and use the selected model’s saved native se
   await agents(page).click();
   const openEditor = () => card(page, agentName).getByRole('button', { name: 'Edit', exact: true }).click();
   await openEditor();
-  const editor = page.getByRole('dialog', { name: 'Edit agent', exact: true });
+  const editor = page.getByRole('dialog', { name: 'Agent', exact: true });
   const tab = (name: string) => editor.getByRole('tab', { name, exact: true });
   const modelPicker = editor.getByRole('combobox', { name: 'Model', exact: true });
   const tier = editor.getByRole('combobox', { name: 'Service tier', exact: true });
@@ -596,7 +596,7 @@ test('Agents share provider forms and use the selected model’s saved native se
   await expect(tier).toHaveValue('priority');
   await modelPicker.selectOption({ label: `Text agent model (${textAgentModel})` });
   await expect(tier).toHaveValue('scale');
-  await editor.getByRole('button', { name: 'Save agent' }).click();
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
 
   const native = { openai: {
     service_tier: 'priority', future_field: unknownOption,
@@ -636,7 +636,7 @@ test('agent cards share provider icons and fall back when themed icons fail or a
   const icon = sample.locator('.catalog-mark img');
   await expect(icon).toHaveAttribute('src', openAiFavicon);
   await sample.getByRole('button', { name: 'Edit', exact: true }).click();
-  const edit = page.getByRole('dialog', { name: 'Edit agent', exact: true });
+  const edit = page.getByRole('dialog', { name: 'Agent', exact: true });
   const details = edit.getByRole('tab', { name: 'Details', exact: true });
   await details.click();
   await edit.getByLabel('Icon URL', { exact: true }).fill('/agent-mark.svg');
@@ -647,7 +647,7 @@ test('agent cards share provider icons and fall back when themed icons fail or a
     await edit.getByRole('option', { name: theme, exact: true }).click();
     await edit.getByRole('button', { name: 'Add icon', exact: true }).click();
   }
-  await edit.getByRole('button', { name: 'Save agent' }).click();
+  await edit.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(icon).toHaveAttribute('src', '/agent-light.svg');
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(icon).toHaveAttribute('src', '/agent-mark.svg');
@@ -655,7 +655,7 @@ test('agent cards share provider icons and fall back when themed icons fail or a
   await sample.getByRole('button', { name: 'Edit', exact: true }).click();
   await details.click();
   await edit.getByRole('button', { name: 'Remove icon 1', exact: true }).click();
-  await edit.getByRole('button', { name: 'Save agent' }).click();
+  await edit.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(icon).toHaveAttribute('src', openAiFavicon);
 });
 
@@ -671,10 +671,10 @@ test('sample overrides persist and reset without changing explicit role choices'
   await dialog.getByRole('button', { name: 'Close', exact: true }).click();
   await agents(page).click();
   await card(page, welcome).getByRole('button', { name: 'Edit', exact: true }).click();
-  const editor = page.getByRole('dialog', { name: 'Edit agent', exact: true });
+  const editor = page.getByRole('dialog', { name: 'Agent', exact: true });
   await expect(editor.getByLabel('Name', { exact: true })).toHaveAttribute('readonly', '');
   await editor.getByLabel('Description', { exact: true }).fill('Custom sample description.');
-  await editor.getByRole('button', { name: 'Save agent' }).click();
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
 
   await page.reload();
   await agents(page).click();
@@ -705,12 +705,12 @@ test('only the active Entra profile sees its agent overrides, definitions and ch
   await page.route('**/gateway/v1/models', (route) => route.fulfill({ json: { data: [] } }));
   await page.goto('http://localhost:15174');
   await agents(page).click();
-  await (await create(page, 'Alpha only')).getByRole('button', { name: 'Save agent' }).click();
+  await (await create(page, 'Alpha only')).getByRole('button', { name: 'Save', exact: true }).click();
   await expect(card(page, 'Alpha only')).toBeVisible();
   await card(page, welcome).getByRole('button', { name: 'Edit', exact: true }).click();
-  const editor = page.getByRole('dialog', { name: 'Edit agent', exact: true });
+  const editor = page.getByRole('dialog', { name: 'Agent', exact: true });
   await editor.getByLabel('Description', { exact: true }).fill('Alpha override.');
-  await editor.getByRole('button', { name: 'Save agent' }).click();
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(card(page, welcome)).toContainText('Alpha override.');
   const dialog = await settings(page);
   const select = dialog.getByRole('combobox', { name: 'Welcome message', exact: true });

@@ -1,6 +1,18 @@
 import { expect, test } from '@playwright/test';
 import { faviconEndpoint, iconResponse } from './icon-fixtures';
 
+test('Model Context navigation uses /model-context and /mcp is unavailable', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Model Context', exact: true }).click();
+  await expect(page).toHaveURL(/\/model-context$/);
+  const heading = page.getByRole('heading', { name: 'Model Context', level: 1, exact: true });
+  await expect(heading).toBeVisible();
+  await page.goto('/mcp');
+  await expect(page.getByText('This page is not available.', { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/mcp$/);
+  await expect(heading).toHaveCount(0);
+});
+
 test('MCP search stays within the current tab and indexes loaded registry pages', async ({ page }) => {
   const cursors: (string | null)[] = [];
   await page.route('**/test-mcp-registry*', route => {
@@ -11,7 +23,7 @@ test('MCP search stays within the current tab and indexes loaded registry pages'
       : { name: 'example/forecast', title: 'Weather Forecast', description: 'Look up local forecasts.' };
     return route.fulfill({ json: { servers: [{ server }], metadata: cursor ? {} : { nextCursor: 'page-2' } } });
   });
-  await page.goto('http://localhost:15175/mcp');
+  await page.goto('http://localhost:15175/model-context');
   await expect(page.getByRole('heading', { name: 'Model Context', level: 1, exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Model Context', exact: true }).hover();
   await expect(page.getByRole('tooltip', { name: 'Model Context', exact: true })).toBeVisible();
@@ -69,7 +81,7 @@ test('the Installed overview finds registry descriptions and logos on later page
       metadata: { nextCursor: 'page-2' } } });
   });
   await page.emulateMedia({ colorScheme: 'dark' });
-  await page.goto('http://localhost:15175/mcp');
+  await page.goto('http://localhost:15175/model-context');
 
   async function addServer(title: string, url: string) {
     await page.getByRole('button', { name: 'Add by URL', exact: true }).click();
@@ -135,7 +147,7 @@ test('MCP registry icons prefer themed external images, then website favicons, t
     return route.fulfill(iconResponse);
   });
   await page.emulateMedia({ colorScheme: 'light' });
-  await page.goto('http://localhost:15175/mcp');
+  await page.goto('http://localhost:15175/model-context');
   await page.getByRole('tab', { name: 'Registry', exact: true }).click();
   const mark = (title: string) => page.getByRole('article').filter({ has: page.getByRole('heading', { name: title, exact: true }) }).locator('.catalog-mark');
   const themed = mark('Themed server').locator('img');

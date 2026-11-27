@@ -12,7 +12,8 @@ test('old profiles get Chat defaults; only explicit, valid booleans override eac
   assert.deepEqual(normalizeChatPreferences(null), defaultChatPreferences);
   const { dictate, showContextSize, showMessageTokens, showProviderLogo, showMetrics, showDecisions, toolOutput } = normalizeChatPreferences({ delay: 50 });
   assert.deepEqual({ dictate, showContextSize, showMessageTokens, showProviderLogo, showMetrics, showDecisions, toolOutput },
-    { dictate: true, showContextSize: true, showMessageTokens: true, showProviderLogo: true, showMetrics: false, showDecisions: true, toolOutput: defaults });
+    { dictate: true, showContextSize: true, showMessageTokens: true, showProviderLogo: true, showMetrics: false, showDecisions: false, toolOutput: defaults });
+  assert.equal(normalizeChatPreferences({ showDecisions: true }).showDecisions, true);
   assert.deepEqual(normalizeChatPreferences({ dictate: false, showContextSize: 'false', showMetrics: true, showDecisions: false,
     toolOutput: { text: false, links: 0, images: true, documents: 'true', extra: true } }),
   { ...defaultChatPreferences, dictate: false, showMetrics: true, showDecisions: false, toolOutput: { ...defaults, text: false, images: true } });

@@ -1,0 +1,1 @@
+import config from './playwright.config'; export default { ...config, webServer: (Array.isArray(config.webServer) ? config.webServer : [config.webServer]).filter(Boolean).map(server => ({ ...server, command: server.command + ' --bypass-lock' })) };

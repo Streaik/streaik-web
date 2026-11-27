@@ -153,7 +153,7 @@ async function exerciseChat(page: Page, approve: boolean, manual = false, reject
     await editor.getByLabel('Instructions', { exact: true }).fill(instructions);
     await editor.getByRole('button', { name: 'Add model', exact: true }).click();
     await editor.getByRole('option', { name: `Test router (${router})`, exact: true }).click();
-    await editor.getByRole('button', { name: 'Save agent', exact: true }).click();
+    await editor.getByRole('button', { name: 'Save', exact: true }).click();
     await page.getByRole('button', { name: 'New chat', exact: true }).click();
     await page.getByRole('button', { name: 'Account menu' }).click();
     await page.getByRole('menuitem', { name: 'Settings' }).click();
@@ -397,7 +397,7 @@ test('manual headers are not persisted, and the disabled toggle has a separate c
 });
 
 test('registry install renders secret template fields when an app credential is unavailable', async ({ page }) => {
-  await page.goto('/mcp');
+  await page.goto('/model-context');
   await page.getByRole('tab', { name: 'Registry', exact: true }).click();
   await page.getByRole('button', { name: 'Install OpenAI Images' }).click();
   const editor = page.getByRole('dialog', { name: 'Install MCP server' });

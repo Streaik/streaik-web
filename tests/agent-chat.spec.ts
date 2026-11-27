@@ -184,6 +184,11 @@ test('browser Gateway agents route dual-use IDs once per turn and keep the winni
   await send(page, 'Route this agent turn');
   await page.getByRole('dialog', { name: 'Review tool result' }).getByRole('button', { name: 'Approve and share', exact: true }).click();
   await expect(page.getByText('Routed reply', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const outputSettings = page.getByRole('dialog', { name: 'Settings', exact: true });
+  await outputSettings.getByRole('tab', { name: 'Chat', exact: true }).click();
+  await outputSettings.getByRole('switch', { name: 'Show decisions', exact: true }).check();
+  await outputSettings.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(page.getByText('Decision', { exact: true })).toHaveCount(1);
   expect(sequence).toEqual(['v1 decision', 'chat', 'continuation']);
 
@@ -203,10 +208,10 @@ test('browser Gateway agents route dual-use IDs once per turn and keep the winni
 
   await page.getByRole('button', { name: 'Agents', exact: true }).click();
   await page.getByRole('article', { name: agent.name, exact: true }).getByRole('button', { name: 'Edit', exact: true }).click();
-  const editor = page.getByRole('dialog', { name: 'Edit agent', exact: true });
+  const editor = page.getByRole('dialog', { name: 'Agent', exact: true });
   await editor.getByRole('button', { name: 'Add model', exact: true }).click();
   await editor.getByRole('option', { name: `Luna router (${model})`, exact: true }).click();
-  await editor.getByRole('button', { name: 'Save agent', exact: true }).click();
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(editor).toBeHidden();
   const { origins } = await page.context().storageState();
   const saved = origins.flatMap(({ localStorage }) => localStorage).find(({ name }) => name.startsWith('streaik.agents.v1:'));
@@ -276,7 +281,7 @@ for (const mode of ['Gateway', 'Direct', 'Agents'] as const) test(`saved agent s
   await start(page);
   await page.getByRole('button', { name: 'Agents', exact: true }).click();
   await page.getByRole('article', { name: 'ChatAgent', exact: true }).getByRole('button', { name: 'Edit', exact: true }).click();
-  const editor = page.getByRole('dialog', { name: 'Edit agent' });
+  const editor = page.getByRole('dialog', { name: 'Agent', exact: true });
   await editor.getByRole('tab', { name: 'Skills', exact: true }).click();
   await editor.getByRole('switch', { name: skill.name, exact: true }).check();
   if (mode === 'Agents') {
@@ -286,7 +291,7 @@ for (const mode of ['Gateway', 'Direct', 'Agents'] as const) test(`saved agent s
     await execution.selectOption({ label: 'Client' });
     await execution.selectOption({ label: 'Default' });
   }
-  await editor.getByRole('button', { name: 'Save agent', exact: true }).click();
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(editor).toBeHidden();
   await page.getByRole('button', { name: 'New chat', exact: true }).click();
   if (await chatMode(page, 'Agent').getAttribute('aria-pressed') !== 'true') await chatMode(page, 'Agent').click();

@@ -36,6 +36,15 @@ test('localizes the link dialog and the unselected agent picker', async ({ page 
   await expect(page.getByRole('button', { name: 'Agent', exact: true })).toHaveText('Selecteer een agent');
 });
 
+test('uses the localized Agent title and Save label in the agent editor', async ({ page }) => {
+  await page.goto('/agents');
+  await page.getByRole('article', { name: 'ChatAgent', exact: true })
+    .getByRole('button', { name: 'Bewerken', exact: true }).click();
+  const editor = page.getByRole('dialog', { name: 'Agent', exact: true });
+  await expect(editor.getByRole('heading', { name: 'Agent', exact: true })).toBeVisible();
+  await expect(editor.getByRole('button', { name: 'Opslaan', exact: true })).toBeVisible();
+});
+
 test('localizes the MCP overview tabs and uses matching cards for registry and installed servers', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   const description = 'Published server description';
@@ -52,7 +61,7 @@ test('localizes the MCP overview tabs and uses matching cards for registry and i
       { server: { name: 'example/unsupported' } },
     ] } });
   });
-  await page.goto('http://localhost:15175/mcp');
+  await page.goto('http://localhost:15175/model-context');
   await expectProtocolLinks(page, 'Model Context', 'Model Context Protocol', ['https://modelcontextprotocol.io/', 'https://modelcontextprotocol.io/specification']);
   await expect(page.getByText(/^Installeer servers uit het register/)).toHaveCount(0);
   const tabs = page.getByRole('tablist', { name: 'Model Context' });

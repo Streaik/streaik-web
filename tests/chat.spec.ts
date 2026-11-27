@@ -1017,7 +1017,8 @@ test('chat Skills Execution switches between browser and hosted and is hidden on
     const number = ++gatewayRequests;
     const body = route.request().postDataJSON();
     expect(body.messages[0].parts.map((part: { text: string }) => part.text).join('\n')).toContain('systemInformation');
-    if (number === 2) {
+    expect(JSON.stringify(body.messages)).not.toContain('call_hosted_skill');
+    if (number === 2 || number === 3) {
       expect(body.tools).toEqual([{ name: 'skills', inputSchema: { type: 'object', skills: {
         skills: [{ type: 'skill_reference', skill_id: skill.id }],
       } } }]);
@@ -1026,7 +1027,14 @@ test('chat Skills Execution switches between browser and hosted and is hidden on
       expect(body.tools.map((tool: { name: string }) => tool.name)).toEqual(['activate_skill', 'read_skill_resource']);
       expect(body.messages[0].parts[0].text).toContain(skill.id);
     }
-    const events = [{ type: 'start', messageId: `skills-response-${number}` }, { type: 'text-start', id: 'text' },
+    const activity = number !== 2 ? [] : [
+      { type: 'start-step' },
+      { type: 'tool-input-available', toolCallId: 'call_hosted_skill', toolName: 'streaik_activate_skill', input: { skill_id: skill.id },
+        providerExecuted: true, dynamic: true, toolMetadata: { streaikHosted: true } },
+      { type: 'tool-output-available', toolCallId: 'call_hosted_skill', output: { content: [{ type: 'text', text: 'Loaded digest' }] },
+        providerExecuted: true, dynamic: true },
+    ];
+    const events = [{ type: 'start', messageId: `skills-response-${number}` }, ...activity, { type: 'text-start', id: 'text' },
       { type: 'text-delta', id: 'text', delta: `Skill reply ${number}` }, { type: 'text-end', id: 'text' }, { type: 'finish', finishReason: 'stop' }];
     await route.fulfill({ headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' },
       body: events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n' });
@@ -1056,6 +1064,12 @@ test('chat Skills Execution switches between browser and hosted and is hidden on
   await execution.selectOption({ label: 'Hosted' });
   await close.click();
   await send('Use the gateway', 'Skill reply 2');
+  const activity = page.getByRole('region', { name: 'Assistant activity' });
+  await expect(activity.getByText('streaik_activate_skill', { exact: true })).toBeVisible();
+  await expect(activity.getByText('Completed', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Approve and share' })).toHaveCount(0);
+  await send('Continue with the gateway', 'Skill reply 3');
+  expect(gatewayRequests).toBe(3);
 
   await openRoute(page, 'Direct');
   await page.getByRole('menuitemradio', { name: '/v1/chat/completions', exact: true }).click();
@@ -1073,7 +1087,7 @@ test('chat Skills Execution switches between browser and hosted and is hidden on
   await expect(enabled).toBeChecked();
   await execution.selectOption({ label: 'Client' });
   await close.click();
-  await send('Back to the browser', 'Skill reply 3');
+  await send('Back to the browser', 'Skill reply 4');
 });
 
 test('a pinned remote skill can be downloaded, saved locally, and uploaded using BYOK destination selection', async ({ page }) => {
@@ -1610,8 +1624,8 @@ test('global Chat preferences persist and control badges and context independent
   const toggle = (name: string) => panel.getByRole('switch', { name, exact: true });
   await expect(panel.getByRole('heading')).toHaveText(['Input', 'Output', 'Tool output']);
   await expect(panel.getByRole('switch')).toHaveCount(12);
-  for (const name of ['Dictate', 'Show context size', 'Show tokens per message', 'Show provider logo', 'Show decisions', 'Text', 'Links']) await expect(toggle(name)).toBeChecked();
-  for (const name of ['Show metrics', 'Images', 'Audio', 'Video', 'Documents']) await expect(toggle(name)).not.toBeChecked();
+  for (const name of ['Dictate', 'Show context size', 'Show tokens per message', 'Show provider logo', 'Text', 'Links']) await expect(toggle(name)).toBeChecked();
+  for (const name of ['Show metrics', 'Show decisions', 'Images', 'Audio', 'Video', 'Documents']) await expect(toggle(name)).not.toBeChecked();
   await toggle('Dictate').uncheck();
   await closeSettings(page);
   await chooseChatModel(page);
@@ -3241,6 +3255,8 @@ test('long shadcn conversations scroll without moving the composer or the page',
   await page.route('**/gateway/api/chat', route => route.fulfill({ contentType: 'text/event-stream',
     headers: { 'x-vercel-ai-ui-message-stream': 'v1' }, body: sse('End of the conversation.', 1, candidate) }));
   await prepareModelDecisions(page);
+  await (await showSettings(page, 'Chat')).getByRole('switch', { name: 'Show decisions', exact: true }).check();
+  await closeSettings(page);
   await selectTwoModels(page);
 
   const transcript = page.getByRole('region', { name: 'Conversation', exact: true });
@@ -3348,6 +3364,12 @@ test('BYOK chooses between chat models through the selected Decisions route, or 
   await expect(decisions).toHaveCount(0);
   await selectTwoModels(page);
   await send('Send through /v1/decisions', 1);
+  await expect(decisions).toHaveCount(0);
+  const outputSettings = await showSettings(page, 'Chat');
+  const toggle = outputSettings.getByRole('switch', { name: 'Show decisions', exact: true });
+  await expect(toggle).not.toBeChecked();
+  await toggle.check();
+  await closeSettings(page);
   const card = page.getByRole('article').filter({ hasText: 'Reply 1' }).getByRole('region', { name: 'Assistant activity' });
   await expect(card.getByText('Decision', { exact: true })).toBeVisible();
   const input = card.getByRole('tabpanel', { name: 'Input', exact: true });
@@ -3362,8 +3384,7 @@ test('BYOK chooses between chat models through the selected Decisions route, or 
   await output.getByRole('button', { name: 'Expand all' }).click();
   await expect(output).toContainText('0.78');
 
-  const outputSettings = await showSettings(page, 'Chat');
-  const toggle = outputSettings.getByRole('switch', { name: 'Show decisions', exact: true });
+  await showSettings(page, 'Chat');
   await expect(toggle).toBeChecked();
   await toggle.uncheck();
   await closeSettings(page);
@@ -3604,6 +3625,8 @@ test('invalid or stopped decisions do not submit a chat request', async ({ page 
     }
   });
   await prepareModelDecisions(page);
+  await (await showSettings(page, 'Chat')).getByRole('switch', { name: 'Show decisions', exact: true }).check();
+  await closeSettings(page);
   await selectTwoModels(page);
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   await composer.fill('Route once'); await composer.press('Enter');
