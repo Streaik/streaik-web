@@ -283,6 +283,14 @@ export const chatMessages = {
   'Selected tools': ['Geselecteerde tools', 'Herramientas seleccionadas'],
   'Allowed callers': ['Toegestane aanroepers', 'Invocadores permitidos'],
   'Require approval': ['Goedkeuring vereisen', 'Requerir aprobación'],
+  'Select Always to review hosted tool results before sharing them with the model.': [
+    'Kies Altijd om resultaten van gehoste tools te beoordelen voordat je ze met het model deelt.',
+    'Selecciona Siempre para revisar los resultados de las herramientas alojadas antes de compartirlos con el modelo.',
+  ],
+  'Gateway-hosted MCP on Responses requires Never for each server. Use API Chat to review hosted results.': [
+    'Voor gehoste MCP op Responses moet elke server op Nooit staan. Gebruik API Chat om gehoste resultaten te beoordelen.',
+    'En Responses, el MCP alojado en la puerta de enlace requiere Nunca para cada servidor. Usa API Chat para revisar los resultados alojados.',
+  ],
   'Always': ['Altijd', 'Siempre'],
   'Never': ['Nooit', 'Nunca'],
   'Custom filter': ['Aangepast filter', 'Filtro personalizado'],

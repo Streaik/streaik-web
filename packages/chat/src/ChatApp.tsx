@@ -1,6 +1,6 @@
 import { useChat } from '@ai-sdk/react';
 import { GatewayError, gatewayChatEndpoints, isVoiceCatalogModel, nativeChatEndpoints, voiceProtocolForModel, pickChatCatalogModels } from '@streaik/gateway';
-import type { AgentBackend, ChatRoute, DirectChat, GatewayChatEndpoint, HostedAgentSelection } from '@streaik/gateway';
+import type { AgentBackend, ChatRoute, DirectChat, GatewayChatEndpoint, HostedAgentSelection, HostedMcpTool } from '@streaik/gateway';
 import type { CatalogModel, ChatMessage, ChatReasoning, ChatToolChoice, DecisionChoiceResult, Gateway, GatewaySpeechEndpoint } from '@streaik/gateway';
 import { Button, ThemeRoot, useColorScheme } from '@streaik/themes';
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -42,6 +42,7 @@ import { ChatActivity, groupMessageParts, invocationName } from './ChatActivity'
 import type { Invocation } from './ChatActivity';
 import { loadChatPreferences, saveChatPreferences } from './chatPreferences';
 import type { ChatPreferences } from './chatPreferences';
+import { browserMcpAllows, chatHostedMcp, hostedMcpResponsesNotice, hostedMcpRoute } from './chatModelContext';
 import { chatProviderForModel, chatProviderRequest } from './providerChat/settings';
 import type { ProviderChatSettings } from './providerChat/settings';
 import { filterToolOutputContent } from './toolOutputContent';
@@ -429,6 +430,7 @@ type Turn = { model: string; route: ChatRoute; tools: ChatTool[]; context?: Requ
   voiceMessage?: string; liveClient?: { id: string; lastId?: string; finished: boolean };
   catalog: readonly CatalogModel[]; skills: readonly LocalSkill[]; skillArchives?: TurnSkillArchives;
   loadHostedSkills?: ReturnType<typeof hostedChatSkills>;
+  hostedMcp: HostedMcpTool[];
   providerSettings?: ProviderChatSettings; reasoning?: ChatReasoning; toolSearchAgent?: TextAppRequest;
   toolPolicy: ChatToolPolicy; toolChoice?: ChatToolChoice; toolProgress: ToolProgress; resolved: Set<string> };
 const isApiChat = (route: ChatRoute | undefined) => !route || (route.mode === 'gateway' && route.endpoint === '/api/chat');
@@ -521,7 +523,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         const { route, decision, context, providerSettings: initialSettings, clientToolSearch, hosted, loadHostedSkills, ...body } = (request.body ?? {}) as {
           model?: string; route?: ChatRoute; decision?: TurnDecision; context?: RequestContext; tools?: ChatRequestTool[];
           providerSettings?: ProviderChatSettings; hosted?: HostedTurn; reasoning?: ChatReasoning; toolChoice?: ChatToolChoice;
-          clientToolSearch?: boolean; loadHostedSkills?: Turn['loadHostedSkills'];
+          clientToolSearch?: boolean; loadHostedSkills?: Turn['loadHostedSkills']; hostedMcp?: HostedMcpTool[];
         };
         if (hosted?.endpoint === '/v1/responses' || (!hosted && route?.mode === 'gateway' && route.endpoint === '/v1/responses')) {
           request = { ...request, messages: request.messages.map(message => ({ ...message, parts: message.parts.filter(part => {
@@ -571,7 +573,10 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         };
         const enabledSkillIds = new Set(context?.skills?.skills.map(({ skill_id }) => skill_id));
         const resourceServers = new Set(context?.mcp?.mcpResourceCatalog.servers.map(({ serverId }) => serverId));
-        const replay = filterLocalToolReplay(request.messages, body.tools ?? [], isApiChat(route), enabledSkillIds, resourceServers,
+        const history = request.messages.map(message => message.id === previous?.id && body.hostedMcp?.length ? message : {
+          ...message, parts: message.parts.filter(part => !('toolCallId' in part && part.toolMetadata?.streaikGatewayHostedMcp === true)),
+        }).filter(message => message.parts.some(part => part.type !== 'step-start'));
+        const replay = filterLocalToolReplay(history, body.tools ?? [], isApiChat(route), enabledSkillIds, resourceServers,
           route?.mode === 'gateway' && route.endpoint === '/v1/responses');
         request = { ...request, body, messages: filterToolOutputContent(replay, preferences.toolOutput) };
         if (route?.mode === 'gateway' && decision) {
@@ -621,11 +626,16 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           const openai = providerMetadata?.openai;
           const existing = Array.isArray(openai?.tools) ? openai.tools : [];
           const metadata = namespaces.length ? { ...providerMetadata, openai: { ...openai, tools: [...existing, ...namespaces] } } : providerMetadata;
-          const hasTools = tools.length || hostedSkills?.length || Object.values(metadata ?? {}).some(options => Array.isArray(options?.tools) && options.tools.length > 0);
+          const hasTools = tools.length || body.hostedMcp?.length || hostedSkills?.length || Object.values(metadata ?? {}).some(options => Array.isArray(options?.tools) && options.tools.length > 0);
           const toolChoice = body.toolChoice === 'required' && !hasTools ? undefined : body.toolChoice;
-          return reply(apiChat.sendMessages({ ...request, headers, body: { ...request.body,
+          const sent = apiChat.sendMessages({ ...request, headers, body: { ...request.body,
             tools, toolChoice, ...hostedOptions, ...(metadata && { providerMetadata: metadata }) },
-            messages: withRequestContext(request.messages, context) }));
+            messages: withRequestContext(request.messages, context) });
+          // Review tokens bind to the hosted descriptor; never replay them on a new turn with changed settings.
+          return reply(body.hostedMcp?.length ? sent.then(stream => stream.pipeThrough(new TransformStream({ transform(chunk, controller) {
+            controller.enqueue(chunk.type === 'tool-input-available' && chunk.toolName === 'streaik_mcp_result_review'
+              ? { ...chunk, toolMetadata: { ...chunk.toolMetadata, streaikGatewayHostedMcp: true } } : chunk);
+          } }))) : sent);
         }
         const nativeOptions = provider?.providerMetadata.anthropic || (route?.endpoint === '/v1/responses' && provider?.providerMetadata.openai)
           ? { providerMetadata: provider.providerMetadata } : {};
@@ -678,6 +688,10 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     ? voiceProtocolForModel(selected[0].id) : undefined;
   const hostedSkillsSupported = gatewayRoute && !agentMode && !voiceProtocol;
   const useHostedSkills = view === 'chat' && hostedSkillsSupported && preferences.skillExecution === 'hosted';
+  const mcpRoute = hostedSkillsSupported ? hostedMcpRoute(runRoute) : undefined;
+  const hostedMcp = view === 'chat' && mcpRoute ? chatHostedMcp(preferences.modelContext, connectedMcp) : [];
+  const useHostedMcp = hostedMcp.length > 0;
+  const hostedMcpNeedsApproval = mcpRoute === '/v1/responses' && hostedMcp.some(tool => tool.type === 'mcp' && tool.require_approval !== 'never');
   const appAgentContext = useMemo(() => buildRequestContext(appName, language, darkMode), [appName, language, darkMode]);
   const appAgentTransport = useMemo(() => route.mode === 'direct' ? direct?.chatTransport(route.endpoint)
     : gateway.chatTransport(route.endpoint), [gateway, direct, route]);
@@ -696,10 +710,10 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     if (restoringSkills && !skillsBusy) loadSkills(skillCursor);
   }, [restoringSkills, skillsBusy, loadSkills, skillCursor]);
   const hasSkills = chatSkills.archives.length > 0 || chatSkills.local.some(({ enabled }) => enabled);
-  const mcpCatalog = mcpResourceCatalog(connectedMcp);
-  const mcpTools = connectedMcp.flatMap(({ record, discovery }) => {
+  const mcpCatalog = useHostedMcp ? undefined : mcpResourceCatalog(connectedMcp);
+  const mcpTools = (useHostedMcp ? [] : connectedMcp).flatMap(({ record, discovery }) => {
     const declaration = declaredMcp.find(entry => entry.endpoint === record.endpoint);
-    return declaration ? discovery.tools.filter(tool => agentMcpAllows(declaration.server, tool.remoteName)) : discovery.tools;
+    return discovery.tools.filter(tool => (!declaration || agentMcpAllows(declaration.server, tool.remoteName)) && browserMcpAllows(tool, preferences.modelContext));
   }).filter((tool, index, all) => all.findIndex(other => other.name === tool.name) === index);
   const enabledTools = hostedRoute ? hostedRoute.endpoint === '/api/chat'
     ? activeChatTools({ mode: 'gateway', endpoint: '/api/chat' }, preferences.plugins, hasHistory, []).filter(tool => tool.source === 'local') : []
@@ -747,7 +761,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
 
   function requestBody(turn: Turn) {
     return { model: turn.model, route: turn.route, context: turn.context, providerSettings: turn.providerSettings, hosted: turn.hosted,
-      loadHostedSkills: turn.loadHostedSkills,
+      loadHostedSkills: turn.loadHostedSkills, ...(turn.hostedMcp.length > 0 && { hostedMcp: turn.hostedMcp }),
       tools: turn.requestTools, toolChoice: turn.toolChoice, clientToolSearch: !!turn.toolSearchAgent, ...(turn.reasoning && { reasoning: turn.reasoning }) };
   }
 
@@ -949,6 +963,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         provider: chatProviderRequest(undefined, searchModel.id) } : undefined;
     return { model, route: runRoute, tools: enabledTools, context, catalog: runCatalog, skills: chatSkills.local,
       loadHostedSkills: useHostedSkills ? hostedChatSkills(localSkills.skills, chatSkills.preferenceSkills) : undefined,
+      hostedMcp,
       toolPolicy, toolChoice: hostedRoute ? undefined : toolPolicy.toolChoice, toolProgress: { seen, completed: 0 }, resolved: new Set(),
       requestTools: chatRequestTools(configuredTools), toolSearchAgent,
       hosted: hostedRoute && hostedSelection ? { endpoint: hostedRoute.endpoint, selection: hostedSelection } : undefined,
@@ -1078,7 +1093,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     : modelChoice && { choice: modelChoice };
   const routesLocked = busy || !!voicePhase || toolBusy || (status === 'ready' && toolParts.length > 0);
   const toolCapabilities = chatToolCapabilities(runRoute, modelId);
-  const canSend = connection.ready && !!modelId && !routesLocked && !restoringSkills && !connectingMcp &&
+  const canSend = connection.ready && !!modelId && !routesLocked && !restoringSkills && !connectingMcp && !hostedMcpNeedsApproval &&
     (!agentMode || (!!agentRoute && !agentChat.checking && !agentChat.loadingDefinition)) &&
     !missingMcp.some(({ server }) => server.required === true) && (!voiceProtocol || canUseVoice);
 
@@ -1276,6 +1291,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
             <Button disabled={!canSend} onClick={() => { if (modelId && canSend) void regenerate({ body: beginTurn(modelId) }); }}>{t('Retry')}</Button>
           </div>}
           {toolNotice && <p className="chat-notice" role="status">{t(toolNotice)}</p>}
+          {hostedMcpNeedsApproval && <p className="chat-notice" role="status">{t(hostedMcpResponsesNotice)}</p>}
           {voiceProtocol && voiceNotice && <p className="chat-notice chat-error" role="alert">{t(voiceNotice)}</p>}
           {voiceProtocol && !canUseVoice && <p className="chat-notice" role="status">{t(socketVoice
             ? 'Voice requires microphone access, WebSocket, and Web Audio.' : 'Voice requires microphone access and WebRTC.')}</p>}
@@ -1302,6 +1318,9 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         </div>
       </main>
       <ChatSettingsDialog dialog={chatSettings} value={preferences} onChange={onPreferences} gateway={gatewayRoute} hostedSkillsSupported={hostedSkillsSupported}
+        modelContext={{ servers: connectedMcp, registry: connection.mcp, route: mcpRoute,
+          descriptions: new Map(declaredMcp.flatMap(({ endpoint, server }) => endpoint && typeof server.server_description === 'string'
+            ? [[endpoint, server.server_description]] : [])) }}
         voice={voiceProtocol ? { protocol: voiceProtocol, models: textCatalog, agents: voiceAgents.map(({ key, definition }) => ({ id: key, name: definition.name })) } : undefined}
         browserToolsSupported={!hostedRoute} hasHistory={hasHistory} locked={routesLocked} localSkills={localSkills} remoteSkills={remoteSkills}
         providerModels={agentMode ? [] : selected.filter(model => !isVoiceCatalogModel(model) &&

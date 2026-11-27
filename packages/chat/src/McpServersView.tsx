@@ -162,7 +162,7 @@ function registrySearchDocument({ title, name, description, remotes }: McpCatalo
 
 export function McpServerCard({ title, version, registryEntry, description = registryEntry?.description, endpoint, actions, inDialog, children }: {
   title: string; version?: string; registryEntry?: McpCatalogServer;
-  description?: string; endpoint?: ReactNode; actions: ReactNode; inDialog?: boolean; children?: ReactNode;
+  description?: string; endpoint?: ReactNode; actions?: ReactNode; inDialog?: boolean; children?: ReactNode;
 }) {
   const scheme = useColorScheme();
   const registryIcons = registryEntry?.icons ?? [];
@@ -177,10 +177,10 @@ export function McpServerCard({ title, version, registryEntry, description = reg
       </div></div>
     {description && <p>{description}</p>}
     {children}
-    <div className="mcp-card-footer">
+    {(endpoint || actions) && <div className="mcp-card-footer">
       {endpoint}
       <div className="mcp-actions">{actions}</div>
-    </div>
+    </div>}
   </article>;
 }
 

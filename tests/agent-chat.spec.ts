@@ -303,10 +303,12 @@ for (const mode of ['Gateway', 'Direct', 'Agents'] as const) test(`saved agent s
   await editor.getByRole('switch', { name: skill.name, exact: true }).check();
   if (mode === 'Agents') {
     const execution = editor.getByRole('combobox', { name: 'Execution', exact: true });
-    await expect(execution).toHaveValue('');
-    await execution.selectOption({ label: 'Hosted' });
-    await execution.selectOption({ label: 'Client' });
-    await execution.selectOption({ label: 'Default' });
+    await expect(execution).toHaveText('Default');
+    for (const name of ['Hosted', 'Client', 'Default']) {
+      await execution.click();
+      await page.getByRole('option', { name, exact: true }).click();
+      await expect(execution).toHaveText(name);
+    }
   }
   await editor.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(editor).toBeHidden();

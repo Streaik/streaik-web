@@ -7,7 +7,9 @@ import { DialogTabs } from './DialogTabs';
 import { ToolDetails, ToolValue } from './ToolDetails';
 import { describeToolOutput } from './toolOutputContent';
 import { composerToolDefaults, toolConfigurationDefaults } from './chatPreferences';
-import { SkillExecutionField } from './SkillExecutionField';
+import { ChatExecutionField } from './ChatExecutionField';
+import { ChatModelContextFields } from './ChatModelContextFields';
+import type { ChatModelContextServers } from './ChatModelContextFields';
 import type { ChatPreferences } from './chatPreferences';
 import { normalizeToolPolicy, toolPolicyForTurn } from './chatToolPolicy';
 import type { ChatToolPolicy } from './chatToolPolicy';
@@ -31,7 +33,7 @@ import { normalizeRealtimeSettings } from './realtimeSettings';
 import type { RealtimeSettings } from './realtimeSettings';
 
 type DialogRef = RefObject<HTMLDialogElement | null>;
-type ChatSettingsTab = 'general' | 'tools' | 'tool-configuration' | 'skills' | 'realtime' | ChatProviderId;
+type ChatSettingsTab = 'general' | 'model-context' | 'tools' | 'tool-configuration' | 'skills' | 'realtime' | ChatProviderId;
 
 function ToolPolicyFields({ value, onChange, rows, disabled }: {
   value: ChatToolPolicy; onChange: (policy: ChatToolPolicy) => void; rows: readonly ToolConfigurationRow[]; disabled: boolean;
@@ -71,13 +73,14 @@ function ToolPolicyFields({ value, onChange, rows, disabled }: {
   </section>;
 }
 
-export function ChatSettingsDialog({ dialog, value, onChange, gateway, hostedSkillsSupported, browserToolsSupported, hasHistory, locked, localSkills, remoteSkills, providerModels, toolRows, namespaceSupported, toolOptionsSupported, voice }: {
+export function ChatSettingsDialog({ dialog, value, onChange, gateway, hostedSkillsSupported, browserToolsSupported, hasHistory, locked, localSkills, remoteSkills, providerModels, toolRows, namespaceSupported, toolOptionsSupported, voice, modelContext }: {
   dialog: DialogRef; value: ChatPreferences; onChange: (preferences: ChatPreferences) => void;
   hostedSkillsSupported: boolean;
   gateway: boolean; browserToolsSupported: boolean; hasHistory: boolean; locked: boolean; localSkills: LocalSkills; remoteSkills: RemoteSkills;
   providerModels: readonly ChatModel[];
   voice?: { protocol: VoiceProtocol; models: readonly ChatModel[]; agents: readonly LiveClientAgent[] };
   toolRows: readonly ToolConfigurationRow[]; namespaceSupported: boolean; toolOptionsSupported: boolean;
+  modelContext: ChatModelContextServers;
 }) {
   const { t } = useAppTranslation();
   const id = useId();
@@ -89,11 +92,15 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hostedSki
   if (voice) providers.delete('openai');
   const voiceLabel = voice?.protocol === 'google' ? 'Google' : voice?.protocol === 'xai' ? 'xAI' : chatProviders.openai.label;
   const voiceSettings = voiceDraft ?? value.realtimeSettings ?? {};
-  const tabs: [ChatSettingsTab, string][] = [['general', t('General')], ['tools', t('Tools')],
-    ['tool-configuration', t('Tool configuration')], ['skills', t('Skills')], ...(voice ? [['realtime', voiceLabel] as [ChatSettingsTab, string]] : []),
-    ...[...providers.keys()].map((provider): [ChatProviderId, string] => [provider, chatProviders[provider].label])];
+  const hasModelContext = modelContext.servers.length > 0;
+  const tabs: [ChatSettingsTab, string][] = [['general', t('General')]];
+  if (hasModelContext) tabs.push(['model-context', t('Model Context')]);
+  tabs.push(['tools', t('Tools')], ['tool-configuration', t('Tool configuration')], ['skills', t('Skills')]);
+  if (voice) tabs.push(['realtime', voiceLabel]);
+  for (const provider of providers.keys()) tabs.push([provider, chatProviders[provider].label]);
   const tab = tabs.some(([key]) => key === requestedTab) ? requestedTab : 'general';
-  const providerTab = tab !== 'general' && tab !== 'tools' && tab !== 'skills' && tab !== 'tool-configuration' && tab !== 'realtime' ? tab : undefined;
+  if (tab !== requestedTab) setTab(tab);
+  const providerTab = [...providers.keys()].find(provider => provider === tab);
   const providerSettings = draft ?? value.providerSettings;
   const { online, needsLoad, load, cursor, busy, error, skills } = remoteSkills;
   useEffect(() => {
@@ -119,6 +126,10 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hostedSki
           onChange={toolPolicy => onChange({ ...value, toolPolicy })} />}
       </div>
     </div>
+    {hasModelContext && <div id={`${id}-model-context-panel`} role="tabpanel" aria-labelledby={`${id}-model-context-tab`} hidden={tab !== 'model-context'}>
+      {tab === 'model-context' && <ChatModelContextFields {...modelContext} locked={locked} value={value.modelContext}
+        onChange={modelContext => onChange({ ...value, modelContext })} />}
+    </div>}
     <div id={`${id}-tools-panel`} role="tabpanel" aria-labelledby={`${id}-tools-tab`} hidden={tab !== 'tools'}>
       <section className="chat-tool-card">
         <h3>{t('Local')}</h3>
@@ -147,7 +158,7 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hostedSki
     </div>
     <div id={`${id}-skills-panel`} className="chat-skill-cards" role="tabpanel" aria-labelledby={`${id}-skills-tab`} hidden={tab !== 'skills'}>
       {hostedSkillsSupported && <section className="chat-tool-card">
-        <SkillExecutionField value={value.skillExecution} disabled={locked}
+        <ChatExecutionField value={value.skillExecution} disabled={locked}
           onChange={skillExecution => onChange({ ...value, skillExecution })} />
       </section>}
       <section className="chat-tool-card" aria-labelledby={`${id}-local-skills`}>
@@ -211,7 +222,8 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hostedSki
         } else if (providerTab) {
           setDraft(current => ({ ...(current ?? value.providerSettings), [providerTab]: undefined }));
           setResetKey(key => key + 1);
-        } else onChange({ ...value, ...(tab === 'tool-configuration' ? toolConfigurationDefaults : composerToolDefaults),
+        } else if (tab === 'model-context') onChange({ ...value, modelContext: undefined });
+        else onChange({ ...value, ...(tab === 'tool-configuration' ? toolConfigurationDefaults : composerToolDefaults),
           ...(tab === 'skills' && hostedSkillsSupported && { skillExecution: undefined }) });
       }}>{t(providerTab ? 'Reset provider settings' : 'Defaults')}</Button>
       <Button variant={draft || voiceDraft ? 'subtle' : undefined} onClick={() => dialog.current?.close()}>{t(draft || voiceDraft ? 'Cancel' : 'Close')}</Button>

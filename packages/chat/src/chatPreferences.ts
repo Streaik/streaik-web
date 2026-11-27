@@ -13,6 +13,8 @@ import { normalizeRealtimeSettings } from './realtimeSettings.ts';
 import type { RealtimeSettings } from './realtimeSettings.ts';
 import { defaultTranscriptionSplit, legacyTranscriptionSplit, normalizeTranscriptionSplit } from './transcriptionSplitPreferences.ts';
 import type { TranscriptionSplitPreferences } from './transcriptionSplitPreferences.ts';
+import { normalizeChatModelContext } from './chatModelContext.ts';
+import type { ChatExecution, ChatModelContext } from './chatModelContext.ts';
 
 export const pinnableViews = ['models', 'providers'] as const;
 export type PinnableView = (typeof pinnableViews)[number];
@@ -21,13 +23,14 @@ export type ReasoningLevel = (typeof reasoningLevels)[number];
 
 const toolOutputDefaults = { text: true, links: true, images: false, audio: false, video: false, documents: false };
 export type ToolOutputPreferences = typeof toolOutputDefaults;
-export type SkillExecution = 'hosted' | 'client';
+export type SkillExecution = ChatExecution;
 
 export type ChatPreferences = {
   delay: number;
   plugins: LocalPluginId[];
   remoteSkillIds: string[];
   skillExecution?: SkillExecution;
+  modelContext?: ChatModelContext;
   convertAttachmentsToText: boolean;
   pinnedViews: PinnableView[];
   dictate: boolean;
@@ -67,6 +70,7 @@ export function normalizeChatPreferences(value: StoredPreferences | null | undef
   const plugins = value?.plugins;
   const pinned = value?.pinnedViews;
   const timeout = value?.mcp?.toolTimeoutMinutes;
+  const modelContext = normalizeChatModelContext(value?.modelContext);
   const toolOutput = { ...toolOutputDefaults };
   for (const key of Object.keys(toolOutput) as (keyof ToolOutputPreferences)[]) {
     toolOutput[key] = booleanPreference(value?.toolOutput?.[key], toolOutputDefaults[key]);
@@ -76,6 +80,7 @@ export function normalizeChatPreferences(value: StoredPreferences | null | undef
     plugins: localPlugins.filter(({ id }) => Array.isArray(plugins) && plugins.includes(id)).map(({ id }) => id),
     remoteSkillIds: Array.isArray(value?.remoteSkillIds) ? [...new Set(value.remoteSkillIds.filter(id => typeof id === 'string' && id.trim()))] : [],
     ...(value?.skillExecution === 'hosted' || value?.skillExecution === 'client' ? { skillExecution: value.skillExecution } : {}),
+    ...(modelContext && { modelContext }),
     convertAttachmentsToText: value?.convertAttachmentsToText === true,
     pinnedViews: pinnableViews.filter(view => Array.isArray(pinned) && pinned.includes(view)),
     dictate: booleanPreference(value?.dictate, defaultChatPreferences.dictate),

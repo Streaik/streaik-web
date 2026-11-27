@@ -1,6 +1,7 @@
 import { Button } from '@streaik/themes';
 import type { Gateway, RemoteSkill } from '@streaik/gateway';
 import { useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import type { JsonValue } from './agentDefinition';
 import { agentSkillEntries, downloadAgentSkill, embedAgentSkill, embeddedSkillOrigin, isAgentSkillReference, isCentralSkillId,
   isInlineAgentSkill, latestSkillVersion, linkAgentSkill } from './agentSkills';
@@ -11,7 +12,7 @@ import type { LocalSkills } from './useLocalSkills';
 import type { RemoteSkills } from './useRemoteSkills';
 
 type Props = { active: boolean; skills?: JsonValue; onChange: (skills?: JsonValue) => void; onBusyChange: (busy: boolean) => void;
-  local: LocalSkills; remote: RemoteSkills; gateway: Gateway };
+  local: LocalSkills; remote: RemoteSkills; gateway: Gateway; execution: ReactNode };
 type Selection = { origin?: SkillOrigin; entry: AgentSkillReference | InlineAgentSkill; index: number };
 
 function AgentSkillSwitch({ name, checked, disabled, onChange }: {
@@ -23,7 +24,7 @@ function AgentSkillSwitch({ name, checked, disabled, onChange }: {
   </div>;
 }
 
-export function AgentSkillFields({ active, skills, onChange, onBusyChange, local, remote, gateway }: Props) {
+export function AgentSkillFields({ active, skills, onChange, onBusyChange, local, remote, gateway, execution }: Props) {
   const { t } = useAppTranslation();
   const [query, setQuery] = useState('');
   const [error, setError] = useState('');
@@ -84,7 +85,7 @@ export function AgentSkillFields({ active, skills, onChange, onBusyChange, local
   }
 
   if (!active) return null;
-  if (skills != null && !Array.isArray(skills)) return <p>{t('This agent has an unsupported skills format. Its saved skills will not be changed.')}</p>;
+  if (skills != null && !Array.isArray(skills)) return <>{execution}<p>{t('This agent has an unsupported skills format. Its saved skills will not be changed.')}</p></>;
 
   const selected = entries.flatMap<Selection>((entry, index) => isAgentSkillReference(entry)
     ? [{ origin: { id: entry.skill_id, version: entry.version }, entry, index }]
@@ -107,9 +108,12 @@ export function AgentSkillFields({ active, skills, onChange, onBusyChange, local
   const disabled = busy || inspecting;
 
   return <>
-    <input type="search" className="ui-input agent-input" aria-label={t('Search skills')}
-      placeholder={t('Search skills...')} value={query} onChange={event => setQuery(event.currentTarget.value)}
-      onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) event.preventDefault(); }} />
+    <div className="agent-skills-toolbar">
+      {execution}
+      <input type="search" className="ui-input agent-input" aria-label={t('Search skills')}
+        placeholder={t('Search skills...')} value={query} onChange={event => setQuery(event.currentTarget.value)}
+        onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) event.preventDefault(); }} />
+    </div>
     {inspecting && <p role="status">{t('Checking saved skill attachments…')}</p>}
     {busy && <p role="status">{t('Preparing skill archive…')}</p>}
     {error && <p className="chat-error" role="alert">{t(error)}</p>}

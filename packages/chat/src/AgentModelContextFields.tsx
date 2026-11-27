@@ -5,21 +5,20 @@ import { createPortal } from 'react-dom';
 import type { AgentDraft } from './agentDraft';
 import { isObject } from './agentDefinition';
 import type { JsonObject, JsonValue } from './agentDefinition';
-import { agentMcpClientSettings, agentMcpPolicy, setAgentElicitation, setAgentMcpPolicy } from './agentMcpClient';
+import { agentMcpClientSettings, setAgentElicitation, setAgentMcpPolicy } from './agentMcpClient';
 import { agentMcpServers, agentMcpToolNames, patchAgentMcp } from './agentTools';
 import { AgentExecutionField, AgentSelectField, AgentSwitch } from './AgentToolControls';
 import { ChatIcon } from './ChatIcon';
 import { useAppTranslation } from './i18n';
 import type { McpCatalogServer, McpOptions } from './mcp';
 import { AgentMcpCatalogDialog, CopyServerUrl, McpEndpointEditor, McpServerCard } from './McpServersView';
+import { McpAllowedToolsField, McpApprovalField, McpPolicyCard } from './McpToolControls';
 import { toolCallers, toolOptions } from './toolConfiguration';
 import { useMcpRegistry } from './useMcpRegistry';
 import type { McpSelection, McpServers } from './useMcpServers';
 
 type Server = ReturnType<typeof agentMcpServers>[number];
 type ServerPatch = Readonly<Record<string, JsonValue | undefined>>;
-const policyFlags = Object.keys(agentMcpPolicy) as (keyof typeof agentMcpPolicy)[];
-const toolValue = (name: string) => `tool:${name}`;
 
 function AgentMcpServerFields({ entry, change, installed, discovery, registryEntry, onEdit, onRemove }: {
   entry: Server; change: (patch: ServerPatch) => void; installed: McpServers; discovery: McpSelection;
@@ -34,17 +33,11 @@ function AgentMcpServerFields({ entry, change, installed, discovery, registryEnt
   const filter = isObject(server.allowed_tools) ? server.allowed_tools as JsonObject : undefined;
   const connected = status?.state === 'ready';
   const discoveredNames = connected ? status.discovery.tools.map(tool => tool.remoteName) : [];
-  // Retain existing tool names even if the server is offline or no longer lists them.
-  const availableNames = [...new Set([...discoveredNames, ...(names ?? [])])].sort();
-  const selectedTools = names?.length ? names.map(toolValue) : [names ? 'none' : filter ? 'custom' : 'all'];
-  const approval = server.require_approval;
-  const approvalMode = approval === 'always' || approval === 'never' ? approval : approval == null ? 'default' : 'custom';
   const canConnect = record && installed.connection(record);
   const connecting = status?.state === 'loading';
   const connectLabel = t(connecting ? 'Connecting...' : connected ? 'Connected' : status?.state === 'error' ? 'Retry connection' : 'Connect Model Context');
   const editLabel = t('Edit MCP URL');
   const removeLabel = t('Remove {{name}}', { name: key });
-  const changeNames = (next: readonly string[]) => change({ allowed_tools: filter ? { ...filter, tool_names: next } : next });
 
   return <McpServerCard title={key} registryEntry={registryEntry} inDialog
     description={typeof server.server_description === 'string' ? server.server_description : undefined}
@@ -74,25 +67,9 @@ function AgentMcpServerFields({ entry, change, installed, discovery, registryEnt
         <AgentSwitch label={t('Namespace')} checked={server.namespace === true} onChange={checked => change({ namespace: checked || undefined })} />
       </div>
       <div className="agent-mcp-columns">
-        <AgentSelectField multiple label={t('Allowed tools')} value={selectedTools} disabled={!connected} options={[
-          { value: 'all', label: t('All tools') }, { value: 'none', label: t('No tools') },
-          ...(selectedTools.includes('custom') ? [{ value: 'custom', label: t('Custom filter') }] : []),
-          ...availableNames.map(name => ({ value: toolValue(name), label: name })),
-        ]} onValueChange={next => {
-          if (next.includes('all') && !selectedTools.includes('all')) change({ allowed_tools: undefined });
-          else if (next.includes('none') && !selectedTools.includes('none')) changeNames([]);
-          else {
-            const picked = next.filter(value => value.startsWith('tool:')).map(value => value.slice('tool:'.length));
-            // Toggling the current All/No/Custom mode does not change the allowlist.
-            if (picked.length || names?.length) changeNames(picked);
-          }
-        }} />
-        <AgentSelectField label={t('Require approval')} value={approvalMode} options={[
-          { value: 'default', label: t('Default') }, { value: 'always', label: t('Always') }, { value: 'never', label: t('Never') },
-          ...(approvalMode === 'custom' ? [{ value: 'custom', label: t('Custom filter') }] : []),
-        ]} onValueChange={value => {
-          if (value !== 'custom') change({ require_approval: value === 'default' ? undefined : value });
-        }} />
+        <McpAllowedToolsField available={discoveredNames} names={names} custom={!!filter} disabled={!connected}
+          onChange={next => change({ allowed_tools: next && filter ? { ...filter, tool_names: next } : next })} />
+        <McpApprovalField approval={server.require_approval} onChange={require_approval => change({ require_approval })} />
       </div>
     </div>
   </McpServerCard>;
@@ -121,11 +98,7 @@ export function AgentModelContextFields({ draft, patch, store, discovery, option
   }
 
   return <>
-    <section className="agent-field-group">
-      <h3>{t('Policy')}</h3>
-      <div className="agent-mcp-columns">{policyFlags.map(flag => <AgentSwitch key={flag} label={t(agentMcpPolicy[flag])} checked={policy?.[flag] === true}
-        onChange={checked => patch({ mcpClient: setAgentMcpPolicy(draft.mcpClient, flag, checked) })} />)}</div>
-    </section>
+    <McpPolicyCard policy={policy} onChange={(flag, checked) => patch({ mcpClient: setAgentMcpPolicy(draft.mcpClient, flag, checked) })} />
     <section className="agent-field-group">
       <div className="agent-mcp-heading"><h3>{t('Capabilities')}</h3>
         <AgentSwitch label={t('Elicitation')} hideLabel checked={!!elicitation} onChange={checked =>

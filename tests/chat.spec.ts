@@ -47,6 +47,10 @@ async function showChatSkills(page: Page) {
   await dialog.getByRole('tab', { name: 'Skills', exact: true }).click();
   return dialog;
 }
+async function selectOptionByName(page: Page, field: ReturnType<Page['getByRole']>, name: string) {
+  await field.click();
+  await page.getByRole('option', { name, exact: true }).click();
+}
 const modelPicker = (page: Page) => page.getByRole('button', { name: 'Model', exact: true });
 async function chooseModel(page: Page, name: string) {
   const picker = modelPicker(page);
@@ -1051,7 +1055,7 @@ test('chat Skills Execution switches between browser and hosted and is hidden on
   const execution = settings.getByRole('combobox', { name: 'Execution', exact: true });
   const close = settings.getByRole('button', { name: 'Close', exact: true });
   const enabled = settings.getByRole('switch', { name: skill.name, exact: true });
-  await expect(execution).toHaveValue('');
+  await expect(execution).toHaveText('Default');
   await enabled.check();
   await close.click();
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
@@ -1061,7 +1065,7 @@ test('chat Skills Execution switches between browser and hosted and is hidden on
   };
   await send('Default execution', 'Skill reply 1');
   await showChatSkills(page);
-  await execution.selectOption({ label: 'Hosted' });
+  await selectOptionByName(page, execution, 'Hosted');
   await close.click();
   await send('Use the gateway', 'Skill reply 2');
   const activity = page.getByRole('region', { name: 'Assistant activity' });
@@ -1083,9 +1087,9 @@ test('chat Skills Execution switches between browser and hosted and is hidden on
   await page.getByRole('menuitemradio', { name: '/api/chat', exact: true }).click();
   await chooseChatModel(page);
   await showChatSkills(page);
-  await expect(execution).toHaveValue('hosted');
+  await expect(execution).toHaveText('Hosted');
   await expect(enabled).toBeChecked();
-  await execution.selectOption({ label: 'Client' });
+  await selectOptionByName(page, execution, 'Client');
   await close.click();
   await send('Back to the browser', 'Skill reply 4');
 });
@@ -1515,6 +1519,146 @@ function sse(text: string, turn: number, answerModel = model) {
     { type: 'finish', finishReason: 'stop', messageMetadata: { model: answerModel } },
   ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n';
 }
+
+test('chat Model Context opts into Gateway-hosted MCP and preserves per-route approvals', async ({ page }) => {
+  await mockModels(page);
+  const methods: string[] = [];
+  await page.route('**/mcp-chat-context-fixture', route => {
+    const { id, method } = route.request().postDataJSON();
+    const reply = (result: unknown) => route.fulfill({ json: { jsonrpc: '2.0', id, result } });
+    methods.push(method);
+    if (method === 'server/discover') return reply({ supportedVersions: ['2026-07-28'], capabilities: { tools: {} } });
+    expect(method).toBe('tools/list');
+    return reply({ resultType: 'complete', ttlMs: 0, cacheScope: 'private', tools: [
+      { name: 'lookup', annotations: { readOnlyHint: true }, inputSchema: { type: 'object' } },
+      { name: 'update', inputSchema: { type: 'object' } },
+    ] });
+  });
+  const requests: { tools?: { name: string }[]; id?: string; messages: unknown }[] = [];
+  let responsesTools: unknown;
+  const output = { content: [{ type: 'text', text: 'Hosted inventory result' }] };
+  await page.route('**/gateway/api/chat', route => {
+    requests.push(route.request().postDataJSON());
+    const turn = requests.length;
+    const events = [
+      { type: 'start', messageId: 'hosted-inventory-reply' }, { type: 'start-step' },
+      { type: 'tool-input-available', toolCallId: 'hosted-review', toolName: 'streaik_mcp_result_review', input: { item: 'abc' },
+        providerExecuted: true, dynamic: true, toolMetadata: { mcpReviewOutput: output } },
+      { type: 'tool-approval-request', toolCallId: 'hosted-review', approvalId: 'hosted-review' },
+      { type: 'finish-step' }, { type: 'finish', finishReason: 'tool-calls' },
+    ];
+    return route.fulfill({ headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' },
+      body: turn === 3 ? events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n' : sse(`MCP reply ${turn}`, turn) });
+  });
+  await page.route('**/gateway/v1/responses', route => {
+    responsesTools = route.request().postDataJSON().tools;
+    return route.fulfill({ contentType: 'text/event-stream', body: nativeToolSse('/v1/responses', model, [], 'Responses hosted reply') });
+  });
+
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await chooseChatModel(page);
+  const endpoint = new URL('/mcp-chat-context-fixture', page.url()).href;
+  const settings = page.getByRole('dialog', { name: 'Chat settings', exact: true });
+  const openSettings = () => page.getByRole('button', { name: 'Chat settings', exact: true }).click();
+  const closeSettingsDialog = () => settings.getByRole('button', { name: 'Close', exact: true }).click();
+  const tab = settings.getByRole('tab', { name: 'Model Context', exact: true });
+  const panel = settings.getByRole('tabpanel', { name: 'Model Context', exact: true });
+  const execution = panel.getByRole('combobox', { name: 'Execution', exact: true });
+  const approval = panel.getByRole('combobox', { name: 'Require approval', exact: true });
+  const allowed = panel.getByRole('combobox', { name: 'Allowed tools', exact: true });
+  const toolSearch = panel.getByRole('switch', { name: 'Tool search', exact: true });
+  const resourceSearch = panel.getByRole('switch', { name: 'Resource search', exact: true });
+  const readOnly = panel.getByRole('switch', { name: 'Read-only', exact: true });
+  const openContext = async () => { await openSettings(); await tab.click(); };
+  await openSettings();
+  await expect(tab).toHaveCount(0);
+  await closeSettingsDialog();
+  await page.getByRole('button', { name: 'Add to message', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Model Context', exact: true }).click();
+  const context = page.getByRole('dialog', { name: 'Model Context', exact: true });
+  await context.getByRole('tab', { name: 'Installed', exact: true }).click();
+  await context.getByRole('button', { name: 'Add by URL', exact: true }).click();
+  const editor = page.getByRole('dialog', { name: 'Add MCP server' });
+  await editor.getByLabel('Name', { exact: true }).fill('Inventory fixture');
+  await editor.getByLabel('URL', { exact: true }).fill(endpoint);
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
+  await context.getByRole('switch', { name: 'Inventory fixture', exact: true }).check();
+  await expect(context.getByRole('status')).toHaveText('2 tools available');
+  await context.getByRole('button', { name: 'Close', exact: true }).click();
+
+  await openContext();
+  await expect(panel.getByRole('heading')).toHaveText(['Policy', 'Inventory fixture']);
+  await expect(panel.getByRole('combobox')).toHaveCount(3);
+  await expect(execution).toHaveText('Default');
+  await expect(approval).toBeDisabled();
+  await expect(toolSearch).toHaveCount(0);
+  await closeSettingsDialog();
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  const submit = async (text: string, reply: string) => {
+    await composer.fill(text); await composer.press('Enter');
+    await expect(page.getByText(reply, { exact: true })).toBeVisible();
+  };
+  await submit('Use default execution', 'MCP reply 1');
+  expect(requests[0].tools?.map(({ name }) => name)).toEqual([expect.stringMatching(/_lookup$/), expect.stringMatching(/_update$/)]);
+  await openContext();
+  await readOnly.check();
+  await closeSettingsDialog();
+  await submit('Use read-only browser policy', 'MCP reply 2');
+  expect(requests[1].tools?.map(({ name }) => name)).toEqual([expect.stringMatching(/_lookup$/)]);
+
+  await openContext();
+  await selectOptionByName(page, execution, 'Hosted');
+  await expect(readOnly).toBeChecked();
+  await expect(readOnly).toBeDisabled();
+  await selectOptionByName(page, approval, 'Always');
+  await selectOptionByName(page, allowed, 'update');
+  await page.keyboard.press('Escape');
+  await toolSearch.check(); await resourceSearch.check();
+  await closeSettingsDialog();
+  await composer.fill('Use hosted execution'); await composer.press('Enter');
+  const review = page.getByRole('dialog', { name: 'Review tool result', exact: true });
+  await expect(review).toBeVisible();
+  await review.getByRole('tab', { name: 'Text', exact: true }).click();
+  await expect(review.getByRole('tabpanel', { name: 'Text' })).toHaveText('Hosted inventory result');
+  const descriptor = { server_label: 'Inventory fixture', server_url: endpoint, allowed_tools: ['update'], defer_loading: true };
+  const searches = ['tool_search', 'resource_search'];
+  const expectedTools = [{ name: 'mcp', inputSchema: { type: 'object', mcp: { ...descriptor, require_approval: 'always' } } },
+    ...searches.map(name => ({ name, inputSchema: { type: 'object', [name]: {} } }))];
+  expect(requests[2].tools).toEqual(expectedTools);
+  expect(requests[2].id).toBeTruthy();
+  await review.getByRole('button', { name: 'Approve and share', exact: true }).click();
+  await expect(page.getByText('MCP reply 4', { exact: true })).toBeVisible();
+  expect(requests[3].tools).toEqual(expectedTools);
+  expect(requests[3].id).toBe(requests[2].id);
+  expect(JSON.stringify(requests[3].messages)).toContain('Hosted inventory result');
+
+  await openRoute(page, 'Gateway');
+  await page.getByRole('menuitemradio', { name: '/v1/responses', exact: true }).click();
+  await expect(page.getByText('Gateway-hosted MCP on Responses requires Never for each server. Use API Chat to review hosted results.')).toBeVisible();
+  await openContext();
+  await selectOptionByName(page, approval, 'Never');
+  await closeSettingsDialog();
+  await submit('Use hosted Responses with no approval', 'Responses hosted reply');
+  expect(responsesTools).toEqual([{ type: 'mcp', name: 'mcp', ...descriptor, require_approval: 'never' },
+    ...searches.map(type => ({ type, name: type }))]);
+  expect(methods).toEqual(['server/discover', 'tools/list']);
+
+  await openContext();
+  await selectOptionByName(page, execution, 'Client');
+  await expect(readOnly).toBeEnabled();
+  await expect(approval).toBeDisabled();
+  await expect(resourceSearch).toHaveCount(0);
+  await panel.getByRole('combobox', { name: 'Execution', exact: true }).click();
+  await page.getByRole('option', { name: 'Default', exact: true }).click();
+  const preferences = await page.evaluate(() => JSON.parse(localStorage.getItem(Object.keys(localStorage)
+    .find(key => key.startsWith('streaik-chat-preferences:'))!)!));
+  expect(preferences.modelContext).not.toHaveProperty('execution');
+  await closeSettingsDialog();
+  await page.getByRole('button', { name: 'Remove Inventory fixture', exact: true }).click();
+  await openSettings();
+  await expect(tab).toHaveCount(0);
+});
 
 test('chat charts preview with the plugin off and follow the active theme', async ({ page }) => {
   await mockModels(page);

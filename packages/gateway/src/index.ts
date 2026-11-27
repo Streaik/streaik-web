@@ -4,6 +4,9 @@ import { nativeChatTransport } from './nativeChat.ts';
 import { apiChatHostedSkillProviders, apiChatHostedSkills, hostedSkillProviders } from './hostedSkills.ts';
 import type { HostedSkill } from './hostedSkills.ts';
 export type { HostedSkill, HostedSkillReference, HostedInlineSkill } from './hostedSkills.ts';
+import { apiChatHostedMcp } from './hostedMcp.ts';
+import type { HostedMcpTool } from './hostedMcp.ts';
+export type { HostedMcpTool } from './hostedMcp.ts';
 import { anthropicChatProtocolHeaders } from './nativeToolOptions.ts';
 import { decisionChoiceBody, gatewayDecisionEndpoints, readDecisionChoice } from './decisionChoice.ts';
 import type { DecisionChoice, DecisionChoiceResult, GatewayDecisionEndpoint } from './decisionChoice.ts';
@@ -521,11 +524,13 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
       });
       return new DefaultChatTransport<ChatMessage>({
         api: chatUrl,
-        prepareSendMessagesRequest: ({ messages, body }) => {
-          const tools = Array.isArray(body?.tools) ? body.tools : [];
+        prepareSendMessagesRequest: ({ id, messages, body }) => {
+          const hostedMcp = Array.isArray(body?.hostedMcp) ? body.hostedMcp as HostedMcpTool[] : [];
           const skills = Array.isArray(body?.hostedSkills) ? body.hostedSkills as HostedSkill[] : [];
+          const tools = [...(Array.isArray(body?.tools) ? body.tools : []), ...hostedMcp.map(apiChatHostedMcp),
+            ...(skills.length ? [apiChatHostedSkills(skills)] : [])];
           return { body: {
-            model: body?.model, messages, ...(skills.length ? { tools: [...tools, apiChatHostedSkills(skills)] } : tools.length ? { tools } : {}),
+            model: body?.model, messages, ...(hostedMcp.length && { id }), ...(tools.length ? { tools } : {}),
             ...(body?.providerMetadata && { providerMetadata: body.providerMetadata }),
             reasoning: chatReasoning(body?.reasoning),
             toolChoice: chatToolChoice(body?.toolChoice),
