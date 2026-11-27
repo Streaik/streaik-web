@@ -73,8 +73,8 @@ function TranscriptionSplitSettings({ value, onChange }: { value: TranscriptionS
   return <section className="chat-tool-card">
     <div className="chat-tool-switches"><SettingSwitch label={t('Split large audio files')} checked={value.enabled}
       onChange={enabled => onChange({ ...value, enabled })} /></div>
-    {slider('overlap', 'Chunk overlap (seconds)', 's')}
-    {slider('maxChunkSizeMb', 'Max chunk size (MB)', 'MB')}
+    {slider('overlap', 'Chunk overlap', 's')}
+    {slider('maxChunkSizeMb', 'Max chunk size', 'MB')}
   </section>;
 }
 

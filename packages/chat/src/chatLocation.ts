@@ -11,7 +11,7 @@ export const pagePaths = {
   speech: '/speech',
   agents: '/agents',
   skills: '/skills',
-  mcp: '/mcp',
+  mcp: '/model-context',
 } as const satisfies Record<PageView, string>;
 
 const home = { kind: 'home' } as const;

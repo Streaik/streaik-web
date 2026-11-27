@@ -213,6 +213,10 @@ export function filterLocalToolReplay(messages: ChatMessage[], definitions: read
     const parts = message.parts.flatMap((part): ChatMessage['parts'] => {
       const name = toolPartName(part);
       if (!name || !('toolCallId' in part)) return [part];
+      if (part.providerExecuted && !part.approval && part.toolMetadata?.streaikHosted === true) {
+        changed = true;
+        return [];
+      }
       if (part.providerExecuted && part.approval && typeof part.approval.approved === 'boolean') {
         if (nativeMcp && part.state === 'approval-responded' && name.startsWith('mcp.')) return [part];
         if (apiChat && name === 'streaik_mcp_result_review' && (part.state === 'approval-responded' || part.state === 'output-available')) {

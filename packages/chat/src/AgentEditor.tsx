@@ -89,7 +89,7 @@ export function AgentEditor({ entry, seed, catalog, catalogStatus, tags, mcpServ
     }
   }
 
-  return <AgentDialog title={t(entry ? 'Edit agent' : 'Create agent')} onClose={onClose}>{(close) =>
+  return <AgentDialog title={t(entry ? 'Agent' : 'Create agent')} onClose={onClose}>{(close) =>
     <form className="agent-form" noValidate onSubmit={(event) => save(event, close)}>
       <div className="catalog-tabs" role="tablist" aria-label={t('Agent settings')}>
         {tabs.map(([key, label], index) => <button key={key} id={`${id}-${key}-tab`} type="button" role="tab"
@@ -127,7 +127,7 @@ export function AgentEditor({ entry, seed, catalog, catalogStatus, tags, mcpServ
       </div>
       {error && <p ref={alert} className="chat-error agent-save-error" role="alert" tabIndex={-1}>{t(error.message)}</p>}
       <div className="agent-actions">
-        <Button onClick={close}>{t('Cancel')}</Button><Button type="submit" variant="primary" disabled={skillBusy}>{t('Save agent')}</Button>
+        <Button onClick={close}>{t('Cancel')}</Button><Button type="submit" variant="primary" disabled={skillBusy}>{t('Save')}</Button>
       </div>
     </form>}
   </AgentDialog>;

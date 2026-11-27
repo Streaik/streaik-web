@@ -303,6 +303,9 @@ body { margin: 0; }
 .chat-tool-footer { display: flex; justify-content: flex-end; gap: .45rem; padding-top: .65rem; border-top: 1px solid var(--border); }
 .chat-settings-section { display: grid; gap: .55rem; border-top: 1px solid var(--border); padding-top: .85rem; margin-top: .85rem; }
 .chat-settings-section p { margin: 0; color: var(--muted); }
+.transcription-split-slider { display: grid; gap: .35rem; }
+.transcription-split-slider > div { display: flex; justify-content: space-between; gap: .75rem; }
+.transcription-split-slider > div > span { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .chat-settings-dialog {
   box-sizing: border-box; width: min(49rem, calc(100% - 1.5rem)); height: min(37rem, calc(100dvh - 1.5rem));
   overflow: hidden; padding: clamp(.75rem, 3vw, 1.25rem);
