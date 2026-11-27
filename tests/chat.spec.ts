@@ -3246,6 +3246,73 @@ test('BYOK chooses between chat models through the selected Decisions route, or 
   await expect(page.getByRole('menuitemradio', { name: 'Off', exact: true })).toHaveAttribute('aria-checked', 'true');
 });
 
+test('Anthropic chat settings send native fields and headers, persist edits, and restore explicit defaults', async ({ page }) => {
+  const claude = 'anthropic/claude-example';
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: claude, name: 'Claude Example', type: 'language' }] } }));
+  const requests: { headers: Record<string, string>; metadata: unknown }[] = [];
+  await page.route('**/gateway/api/chat', async route => {
+    const request = route.request();
+    const payload = request.postDataJSON();
+    expect(payload.model).toBe(claude);
+    requests.push({ headers: request.headers(), metadata: payload.providerMetadata });
+    await route.fulfill({ contentType: 'text/event-stream', headers: { 'x-vercel-ai-ui-message-stream': 'v1' },
+      body: sse(`Anthropic reply ${requests.length}`, requests.length, claude) });
+  });
+  await page.goto('/');
+  const connect = async () => { await showSettings(page); await addKey(page, 'Anthropic', 'test-anthropic-key'); await closeSettings(page); };
+  await connect();
+  await modelPicker(page).click();
+  const option = page.getByRole('option', { name: 'Claude Example', exact: true });
+  if (await option.getAttribute('aria-selected') !== 'true') await option.click();
+  await page.keyboard.press('Escape');
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  const send = async (next: number) => {
+    await composer.fill(`Message ${next}`); await composer.press('Enter');
+    await expect(page.getByText(`Anthropic reply ${next}`, { exact: true })).toBeVisible();
+  };
+  await send(1);
+  expect(requests[0].headers['anthropic-version']).toBe('2026-10-21');
+  expect(requests[0].metadata).toEqual({ anthropic: { max_tokens: 128000 } });
+
+  const settings = page.getByRole('dialog', { name: 'Chat settings', exact: true });
+  const open = async () => {
+    await page.getByRole('button', { name: 'Chat settings', exact: true }).click();
+    await settings.getByRole('tab', { name: 'Anthropic', exact: true }).click();
+  };
+  const limit = settings.getByRole('spinbutton', { name: 'Maximum output tokens', exact: true });
+  const version = settings.getByLabel('Anthropic API version', { exact: true });
+  const save = settings.getByRole('button', { name: 'Save', exact: true });
+  await open();
+  await expect(limit).toHaveValue('128000');
+  await limit.fill('2048');
+  await version.selectOption('2023-06-01');
+  await settings.getByRole('switch', { name: 'Enable Cache', exact: true }).check();
+  await settings.getByLabel('Cache duration', { exact: true }).selectOption('1h');
+  await settings.getByRole('switch', { name: 'Enable Web fetch', exact: true }).check();
+  await settings.getByLabel('Additional beta headers', { exact: true }).fill('fixture-beta');
+  await save.click();
+  await send(2);
+  expect(requests[1].headers['anthropic-version']).toBe('2023-06-01');
+  expect(requests[1].headers['anthropic-beta']).toBe('fixture-beta');
+  expect(requests[1].metadata).toEqual({ anthropic: { max_tokens: 2048, cache_control: { type: 'ephemeral', ttl: '1h' },
+    tools: [{ type: 'web_fetch_20260318', name: 'web_fetch', max_uses: 5, allowed_callers: ['direct'], citations: { enabled: true } }] } });
+
+  await expect.poll(() => page.evaluate(() => Object.keys(localStorage)
+    .filter(key => key.startsWith('streaik-chat-preferences:'))
+    .some(key => JSON.parse(localStorage.getItem(key)!).providerSettings?.anthropic?.max_tokens === 2048))).toBe(true);
+  await open();
+  await expect(limit).toHaveValue('2048');
+  await expect(version).toHaveValue('2023-06-01');
+  await settings.getByRole('button', { name: 'Reset provider settings', exact: true }).click();
+  await expect(limit).toHaveValue('128000');
+  await expect(version).toHaveValue('2026-10-21');
+  await save.click();
+  await send(3);
+  expect(requests[2].headers['anthropic-version']).toBe('2026-10-21');
+  expect(requests[2].headers['anthropic-beta']).toBeUndefined();
+  expect(requests[2].metadata).toEqual({ anthropic: { max_tokens: 128000 } });
+});
+
 test('native provider settings match active chat models and send only the Decisions winner’s options', async ({ page }) => {
   const cerebras = 'cerebras/gpt-oss-120b';
   const together = 'together/openai/gpt-oss-120b';

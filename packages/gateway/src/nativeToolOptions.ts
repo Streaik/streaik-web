@@ -1,5 +1,46 @@
 import type { NativeChatEndpoint } from './index.ts';
 import { asRecord } from './directMetrics.ts';
+import { anthropicToolSearchBeta } from './toolSearch.ts';
+
+const anthropicHeaders = ['anthropic-version', 'anthropic-beta'] as const;
+
+export function anthropicChatProtocolHeaders(source: Headers, toolSearch = false): Headers {
+  const result = new Headers();
+  for (const name of anthropicHeaders) {
+    const value = source.get(name);
+    if (value) result.set(name, value);
+  }
+  if (toolSearch) {
+    const betas = new Set(result.get('anthropic-beta')?.split(',').map(value => value.trim()).filter(Boolean));
+    betas.add(anthropicToolSearchBeta);
+    result.set('anthropic-beta', [...betas].join(','));
+  }
+  return result;
+}
+
+const ownedMessagesFields = new Set([
+  'model', 'messages', 'system', 'stream', 'tools', 'tool_choice', 'authorization', 'api_key', 'apikey', 'x-api-key',
+  'headers', 'anthropic-version', 'anthropic-beta', 'anthropic',
+]);
+
+export function mergeAnthropicMessagesOptions(body: BodyInit | null | undefined, options: Record<string, unknown> | undefined,
+  choice: unknown) {
+  if (!options || typeof body !== 'string') return body;
+  const request = asRecord(JSON.parse(body));
+  if (!request) return body;
+  for (const [key, value] of Object.entries(options)) {
+    if (!ownedMessagesFields.has(key.toLowerCase())) Object.defineProperty(request, key, { value, enumerable: true, configurable: true, writable: true });
+  }
+  if (choice !== 'none' && Array.isArray(options.tools) && options.tools.length) {
+    const generated = Array.isArray(request.tools) ? request.tools : [];
+    const names = new Set(generated.map(tool => asRecord(tool)?.name).filter(name => typeof name === 'string'));
+    request.tools = [...generated, ...options.tools.filter(tool => !names.has(asRecord(tool)?.name as string))];
+    if (!request.tool_choice && typeof choice === 'string') {
+      request.tool_choice = choice === 'auto' ? { type: 'auto' } : choice === 'required' ? { type: 'any' } : { type: 'tool', name: choice };
+    }
+  }
+  return JSON.stringify(request);
+}
 
 const ownedResponsesFields = new Set([
   'model', 'input', 'messages', 'instructions', 'prompt', 'stream', 'stream_options', 'store', 'background',

@@ -4,8 +4,8 @@ import { asRecord, createDirectMetrics } from './directMetrics.ts';
 import type { DirectMetricsOptions } from './directMetrics.ts';
 import { chatToolChoice, GatewayError } from './index.ts';
 import type { ChatMessage, ChatMessageMetadata, NativeChatEndpoint } from './index.ts';
-import { extendNativeTools, mergeOpenAIResponsesOptions } from './nativeToolOptions.ts';
-import { anthropicToolSearchBeta, clientToolSearchName, deferredToolReferences } from './toolSearch.ts';
+import { anthropicChatProtocolHeaders, extendNativeTools, mergeAnthropicMessagesOptions, mergeOpenAIResponsesOptions } from './nativeToolOptions.ts';
+import { clientToolSearchName, deferredToolReferences } from './toolSearch.ts';
 
 type NativeTarget = {
   url: string;
@@ -47,6 +47,9 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
       if (typeof model !== 'string') throw new GatewayError('Choose a model for this route.');
       const target = resolve(model);
       const openAIResponses = !target.requestBody && endpoint === '/v1/responses' && model.startsWith('openai/');
+      const anthropic = !target.requestBody && model.startsWith('anthropic/');
+      const anthropicOptions = anthropic ? asRecord(asRecord(providerMetadata)?.anthropic) : undefined;
+      const anthropicLimit = anthropicOptions?.max_tokens;
       const nativeOptions = openAIResponses ? asRecord(asRecord(providerMetadata)?.openai) : undefined;
       const nativeTools = Array.isArray(nativeOptions?.tools) ? nativeOptions.tools : [];
       const search = nativeTools.map(asRecord).find(tool => tool?.type === 'tool_search');
@@ -55,7 +58,7 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
         typeof part.callProviderMetadata?.openai?.itemId === 'string')));
       const beta = openAIResponses ? new Headers(headers).get('openai-beta') : null;
       const definitionsList = Array.isArray(definitions) ? definitions : [];
-      const anthropicSearch = !target.requestBody && endpoint === '/v1/messages' && model.startsWith('anthropic/') &&
+      const anthropicSearch = anthropic && endpoint === '/v1/messages' &&
         definitionsList.some(definition => asRecord(definition)?.name === clientToolSearchName);
       const deferred = new Set<string>();
       if (anthropicSearch) for (const definition of definitionsList) {
@@ -75,10 +78,15 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
         direct?.start();
         let body = target.requestBody ? target.requestBody(init.body) : extendNativeTools(init.body, definitions, endpoint, model);
         if (openAIResponses) body = mergeOpenAIResponsesOptions(body, nativeOptions, registerSearch);
-        if (!beta && !deferred.size) return target.fetch(input, body === init.body ? init : { ...init, body });
+        if (anthropic && endpoint === '/v1/messages') body = mergeAnthropicMessagesOptions(body, anthropicOptions, toolChoice);
+        if (!beta && !anthropic) return target.fetch(input, body === init.body ? init : { ...init, body });
         const outgoing = new Headers(init.headers);
         if (beta) outgoing.set('OpenAI-Beta', beta);
-        if (deferred.size) outgoing.set('anthropic-beta', anthropicToolSearchBeta);
+        if (anthropic) {
+          outgoing.delete('anthropic-version');
+          outgoing.delete('anthropic-beta');
+          anthropicChatProtocolHeaders(new Headers(headers), deferred.size > 0).forEach((value, name) => outgoing.set(name, value));
+        }
         return target.fetch(input, { ...init, body, headers: outgoing });
       };
       const sdk = { baseURL, apiKey: 'supplied-by-scoped-fetch', fetch: fetcher };
@@ -103,6 +111,7 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
       const result = streamText({
         model: adapter, messages: await convertToModelMessages(nativeAttachmentMessages(messages, endpoint), { tools, ignoreIncompleteToolCalls: true }),
         instructions, tools, toolChoice: Object.keys(tools).length || nativeTools.length ? chatToolChoice(toolChoice) : undefined,
+        ...(typeof anthropicLimit === 'number' && { maxOutputTokens: anthropicLimit }),
         abortSignal, maxRetries: 0, includeRawChunks: target.gateway || !!direct,
         ...(endpoint === '/v1/responses' ? { providerOptions: { openai: { store: false, passThroughUnsupportedFiles: true } } }
           : endpoint === '/v1/chat/completions' && (target.gateway || model.startsWith('openai/'))

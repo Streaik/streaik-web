@@ -1,5 +1,6 @@
 import type { ChatModel } from '@streaik/gateway';
 import { openAIChatHeaders, openAIChatOptions, persistOpenAIOptions } from './openai/options.ts';
+import { anthropicChatHeaders, anthropicChatOptions } from './anthropic/options.ts';
 
 export type NativeValue = string | number | boolean | null | NativeOptions | readonly NativeValue[];
 export type NativeOptions = { readonly [key: string]: NativeValue | undefined };
@@ -16,10 +17,11 @@ function reasoningForModel(options: NativeOptions, key: string, supported: boole
 // apply both when editing and when a saved preference is replayed for another model.
 export const chatProviders = {
   openai: { label: 'OpenAI', options: (value: NativeOptions) => openAIChatOptions(value), headers: openAIChatHeaders, persist: persistOpenAIOptions },
+  anthropic: { label: 'Anthropic', options: anthropicChatOptions, headers: anthropicChatHeaders },
   cerebras: { label: 'Cerebras', options: (value, id) => reasoningForModel(value, 'reasoning_effort', supportsGptOssEffort(id)) },
   together: { label: 'Together AI', options: (value, id) => reasoningForModel(value, 'reasoning_effort', supportsGptOssEffort(id)) },
 } satisfies Record<string, { label: string; options: (value: NativeOptions, modelId: string) => NativeOptions;
-  headers?: (value: NativeOptions) => Record<string, string> | undefined; persist?: (value: NativeOptions) => NativeOptions }>;
+  headers?: (value: NativeOptions, body: NativeOptions) => Record<string, string> | undefined; persist?: (value: NativeOptions) => NativeOptions }>;
 
 export type ChatProviderId = keyof typeof chatProviders;
 export type ProviderChatSettings = Readonly<Partial<Record<ChatProviderId, NativeOptions>>>;
@@ -67,14 +69,15 @@ export function activeChatProviders(models: readonly ChatModel[]) {
 }
 
 export function chatProviderRequest(settings: ProviderChatSettings | undefined, modelId: string | undefined, allowClientSearch = false) {
-  if (!settings || !modelId) return;
+  if (!modelId) return;
   const provider = chatProviderForModel(modelId);
   if (!provider) return;
-  const saved = settings[provider];
+  const saved = settings?.[provider] ?? (provider === 'anthropic' ? {} : undefined);
   if (!saved) return;
   const adapter = chatProviders[provider];
   const options = provider === 'openai' ? openAIChatOptions(saved, allowClientSearch) : adapter.options(saved, modelId);
   if (Object.values(options).some(value => value !== undefined)) return {
-    providerMetadata: { [provider]: options }, headers: 'headers' in adapter ? adapter.headers(options) : undefined,
+    providerMetadata: { [provider]: options }, headers: provider === 'anthropic' ? anthropicChatHeaders(saved, options)
+      : provider === 'openai' ? openAIChatHeaders(options) : undefined,
   };
 }

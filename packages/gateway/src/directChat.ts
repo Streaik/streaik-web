@@ -1,6 +1,6 @@
 import { expectEventStream, GatewayError, isTextModel, nativeChatEndpoints, readModelCatalog, requestHttp } from './index.ts';
 import type { NativeChatEndpoint } from './index.ts';
-import { anthropicToolSearchBeta } from './toolSearch.ts';
+import { anthropicChatProtocolHeaders } from './nativeToolOptions.ts';
 import { nativeChatTransport } from './nativeChat.ts';
 import type { TokenRates } from './tokenPricing.ts';
 
@@ -84,8 +84,10 @@ export function createDirectChat(catalog: readonly CatalogProvider[], getKey: (p
             const beta = endpoint === '/v1/responses' && provider === 'openai' && supplied.get('openai-beta');
             const selected = new Headers(auth);
             if (beta) selected.set('OpenAI-Beta', beta);
-            if (endpoint === '/v1/messages' && provider === 'anthropic' && supplied.get('anthropic-beta') === anthropicToolSearchBeta)
-              selected.set('Anthropic-Beta', anthropicToolSearchBeta);
+            if (endpoint === '/v1/messages' && provider === 'anthropic') {
+              selected.delete('anthropic-version'); // The fixed catalog version is not a chat default.
+              anthropicChatProtocolHeaders(supplied).forEach((value, name) => selected.set(name, value));
+            }
             return expectEventStream(await requestHttp(url, selected, init, fetcher, 'provider'));
           },
         };

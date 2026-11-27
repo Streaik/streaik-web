@@ -1,7 +1,7 @@
 import { DefaultChatTransport } from 'ai';
 import type { UIMessage } from 'ai';
 import { nativeChatTransport } from './nativeChat.ts';
-import { anthropicToolSearchBeta } from './toolSearch.ts';
+import { anthropicChatProtocolHeaders } from './nativeToolOptions.ts';
 import { decisionChoiceBody, gatewayDecisionEndpoints, readDecisionChoice } from './decisionChoice.ts';
 import type { DecisionChoice, GatewayDecisionEndpoint } from './decisionChoice.ts';
 import { imageRequestBody, isImageEndpoint, readImageResponse } from './images.ts';
@@ -272,7 +272,8 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
     init.signal?.throwIfAborted();
     const selected = new Headers(await credentials(auth));
     if (protocolHeaders) new Headers(protocolHeaders).forEach((value, name) => {
-      if (!selected.has(name)) selected.set(name, value);
+      if (!selected.has(name) || (auth.kind === 'chat' && auth.provider === 'anthropic'
+        && (name === 'anthropic-version' || name === 'anthropic-beta'))) selected.set(name, value);
     });
     return requestHttp(destination, selected, init, fetcher);
   }
@@ -496,9 +497,8 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
         return { url, model, gateway: true, fetch: async (_input, init) => {
           const headers = new Headers(init?.headers);
           const beta = endpoint === '/v1/responses' && provider === 'openai' && headers.get('openai-beta');
-          const search = endpoint === '/v1/messages' && provider === 'anthropic' && headers.get('anthropic-beta') === anthropicToolSearchBeta;
           return expectEventStream(await request(url, { kind: 'chat', provider }, init,
-            beta ? { 'OpenAI-Beta': beta } : search ? { 'Anthropic-Beta': anthropicToolSearchBeta } : undefined));
+            provider === 'anthropic' ? anthropicChatProtocolHeaders(headers) : beta ? { 'OpenAI-Beta': beta } : undefined));
         } };
       });
       return new DefaultChatTransport<ChatMessage>({
@@ -519,8 +519,10 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
             throw new GatewayError('Choose a model that supports API Chat.');
           }
           // An explicit protocol opt-in passes through this transport, never arbitrary SDK or body headers.
-          const beta = new Headers(init.headers).get('openai-beta');
-          return expectEventStream(await request(chatUrl, { kind: 'chat', provider }, init, beta ? { 'OpenAI-Beta': beta } : undefined));
+          const headers = new Headers(init.headers);
+          const beta = headers.get('openai-beta');
+          return expectEventStream(await request(chatUrl, { kind: 'chat', provider }, init,
+            provider === 'anthropic' ? anthropicChatProtocolHeaders(headers) : beta ? { 'OpenAI-Beta': beta } : undefined));
         },
       });
     },

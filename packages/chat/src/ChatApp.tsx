@@ -548,7 +548,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           const parts = message.parts.filter(part => !('toolCallId' in part && isEchoInputCall(part)));
           return parts.length === message.parts.length ? [message] : parts.some(part => part.type !== 'step-start') ? [{ ...message, parts }] : [];
         }) };
-        const provider = chatProviderRequest(providerSettings, model, clientToolSearch === true);
+        const provider = isApiChat(route) || route?.endpoint === '/v1/responses' || model?.startsWith('anthropic/')
+          ? chatProviderRequest(providerSettings, model, clientToolSearch === true) : undefined;
         const headers = new Headers(request.headers);
         for (const [key, value] of Object.entries(provider?.headers ?? {})) headers.set(key, value);
         if (isApiChat(route)) {
@@ -564,7 +565,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
             messages: withRequestContext(request.messages, context) });
           return withReplyMetadata(stream, model, previous);
         }
-        const nativeOptions = route?.endpoint === '/v1/responses' && provider?.providerMetadata.openai
+        const nativeOptions = provider?.providerMetadata.anthropic || (route?.endpoint === '/v1/responses' && provider?.providerMetadata.openai)
           ? { providerMetadata: provider.providerMetadata } : {};
         if (route?.mode === 'gateway' && gatewayChatEndpoints.includes(route.endpoint)) {
           const stream = await gateway.chatTransport(route.endpoint).sendMessages({ ...request, headers,
@@ -852,12 +853,13 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     const searchAgent = assignedAgent(agents, toolSearchRoleId);
     const searchModel = configuredAgentModels(searchAgent).find(({ id, type }) => type !== 'decision' && compatibleById.has(id));
     const toolSearchAgent = !hostedRoute && searchModel && searchAgent && appAgentTransport
-      ? { model: searchModel.id, instructions: searchAgent.instructions, transport: appAgentTransport, context: appAgentContext } : undefined;
+      ? { model: searchModel.id, instructions: searchAgent.instructions, transport: appAgentTransport, context: appAgentContext,
+        provider: chatProviderRequest(undefined, searchModel.id) } : undefined;
     return { model, route: runRoute, tools: enabledTools, context, catalog: runCatalog, skills: chatSkills.local,
       toolPolicy, toolChoice: hostedRoute ? undefined : toolPolicy.toolChoice, toolProgress: { seen, completed: 0 }, resolved: new Set(),
       requestTools: chatRequestTools(configuredTools), toolSearchAgent,
       hosted: hostedRoute && hostedSelection ? { endpoint: hostedRoute.endpoint, selection: hostedSelection } : undefined,
-      providerSettings: !hostedRoute && (isApiChat(runRoute) || runRoute.endpoint === '/v1/responses') ? turnProviderSettings : undefined,
+      providerSettings: !hostedRoute ? turnProviderSettings : undefined,
       reasoning: !hostedRoute && isApiChat(runRoute) && preferences.reasoning !== 'none' ? preferences.reasoning : undefined,
       skillArchives: chatSkills.archives.length ? { skills: chatSkills.archives, bundles: new Map() } : undefined };
   }
@@ -954,7 +956,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const apiChatAgent = isApiChat(route);
   const welcomeRequest = useMemo(() => !agentMode && welcomeModel && welcomeInstructions && appAgentTransport
     ? { model: welcomeModel.id, instructions: welcomeInstructions, transport: appAgentTransport, context: appAgentContext,
-      provider: apiChatAgent ? agentProviderRequest(welcomeModel) : undefined }
+      provider: apiChatAgent || welcomeModel.id.startsWith('anthropic/') ? agentProviderRequest(welcomeModel) : undefined }
     : undefined, [agentMode, welcomeModel, welcomeInstructions, appAgentTransport, appAgentContext, apiChatAgent]);
 
   function prepareName() {
@@ -962,7 +964,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     const model = configuredAgentModels(agent).find(({ id, type }) => type !== 'decision' && compatibleById.has(id));
     if (agent && model && appAgentTransport) {
       nameRequest.current = { model: model.id, instructions: agent.instructions, transport: appAgentTransport, context: appAgentContext,
-        provider: apiChatAgent ? agentProviderRequest(model) : undefined };
+        provider: apiChatAgent || model.id.startsWith('anthropic/') ? agentProviderRequest(model) : undefined };
     }
   }
   useEffect(() => {
@@ -1204,7 +1206,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         voice={voiceProtocol ? { protocol: voiceProtocol, models: textCatalog, agents: voiceAgents.map(({ key, definition }) => ({ id: key, name: definition.name })) } : undefined}
         browserToolsSupported={!hostedRoute} hasHistory={hasHistory} locked={routesLocked} localSkills={localSkills} remoteSkills={remoteSkills}
         providerModels={agentMode ? [] : selected.filter(model => !isVoiceCatalogModel(model) &&
-          (isApiChat(route) || route.endpoint === '/v1/responses' && model.provider === 'openai'))} namespaceSupported={toolCapabilities.namespaces} toolOptionsSupported={toolCapabilities.options}
+          (isApiChat(route) || route.endpoint === '/v1/responses' && model.provider === 'openai' ||
+            route.endpoint === '/v1/messages' && model.provider === 'anthropic'))} namespaceSupported={toolCapabilities.namespaces} toolOptionsSupported={toolCapabilities.options}
         toolRows={configuredTools.map(({ tool, source, options, namespace }) => ({ key: tool.definition.name, label: tool.definition.name, source,
           options, namespace: toolCapabilities.namespaces ? namespace?.name : undefined }))} />
       {contextOpen && <ViewContextDialog onClose={() => setContextOpen(false)} context={(busy || toolParts.length > 0) && turn ? turn.context : context}

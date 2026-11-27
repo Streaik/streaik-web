@@ -6,6 +6,8 @@ import { createDirectChat, createGateway, nativeChatEndpoints } from '../package
 import { isClientToolSearch, searchClientTools, searchLocalToolCatalog } from '../packages/chat/src/clientToolSearch.ts';
 import { activeChatTools, runLocalTool } from '../packages/chat/src/localPlugins.ts';
 import { chatRequestTools, configureChatTools } from '../packages/chat/src/chatToolRequest.ts';
+import { chatProviderRequest } from '../packages/chat/src/providerChat/settings.ts';
+import { agentProviderRequest, withAgentProviderOptions } from '../packages/chat/src/agentProviderSettings.ts';
 
 const { providers } = JSON.parse(readFileSync(new URL('../packages/chat/src/provider-directory.json', import.meta.url)));
 const root = new URL('https://gateway.example.test/prefix/');
@@ -75,6 +77,39 @@ test('Local Tool search is opt-in, stays eager, and searches the current catalog
 });
 
 for (const direct of [false, true]) {
+  test(`${direct ? 'Direct' : 'Gateway'} Anthropic Messages sends explicit version, tokens and opaque native settings`, async () => {
+    const model = 'anthropic/claude-sonnet-4-6';
+    const request = chatProviderRequest(undefined, model);
+    assert.deepEqual(request, { headers: { 'anthropic-version': '2026-10-21' }, providerMetadata: { anthropic: { max_tokens: 128000 } } });
+    const nativeTool = { type: 'web_fetch_20260318', name: 'web_fetch', response_inclusion: 'excluded', future_tool_setting: null };
+    const future = { flags: [null, false, 0], shape: {} };
+    const agent = withAgentProviderOptions({ id: model }, { 'anthropic-version': '2023-06-01', 'anthropic-beta': 'custom-beta',
+      max_tokens: 512, tools: [nativeTool], budget: future });
+    assert.deepEqual(agent.providerHeaders, { 'anthropic-version': '2023-06-01', 'anthropic-beta': 'custom-beta' });
+    assert.deepEqual(agent.providerMetadata, { max_tokens: 512, tools: [nativeTool], budget: future });
+    const edited = agentProviderRequest(agent);
+    const requests = [];
+    const fetcher = async (_url, init) => {
+      const body = JSON.parse(init.body);
+      requests.push({ body, version: init.headers.get('anthropic-version'), beta: init.headers.get('anthropic-beta') });
+      return response(messagesApi, body.model);
+    };
+    const client = direct ? createDirectChat(providers, id => keys[id], fetcher) : createGateway(root, () => ({}), fetcher);
+    for (const settings of [request, edited]) {
+      const chunks = await send(client.chatTransport(messagesApi), model, { headers: settings.headers,
+        body: { model, providerMetadata: settings.providerMetadata } });
+      assert.deepEqual(chunks.filter(chunk => chunk.type === 'error'), []);
+    }
+    assert.equal(requests[0].version, '2026-10-21');
+    assert.equal(requests[0].body.max_tokens, 128000);
+    assert.equal(requests[1].version, '2023-06-01');
+    assert.equal(requests[1].beta, 'custom-beta');
+    assert.equal(requests[1].body.max_tokens, 512);
+    assert.deepEqual(requests[1].body.tools, [nativeTool]);
+    assert.deepEqual(requests[1].body.budget, future);
+    assert.equal(requests[1].body.providerMetadata, undefined);
+  });
+
   test(`${direct ? 'Direct' : 'Gateway'} Anthropic Messages replays Local Tool search as native references`, async () => {
     const model = 'anthropic/claude-sonnet-4-6';
     const inputSchema = { type: 'object', properties: {} };
