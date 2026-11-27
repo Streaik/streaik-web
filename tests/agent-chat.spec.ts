@@ -184,7 +184,8 @@ test('browser Gateway agents route dual-use IDs once per turn and keep the winni
   await send(page, 'Route this agent turn');
   await page.getByRole('dialog', { name: 'Review tool result' }).getByRole('button', { name: 'Approve and share', exact: true }).click();
   await expect(page.getByText('Routed reply', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Account menu', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
   const outputSettings = page.getByRole('dialog', { name: 'Settings', exact: true });
   await outputSettings.getByRole('tab', { name: 'Chat', exact: true }).click();
   await outputSettings.getByRole('switch', { name: 'Show decisions', exact: true }).check();
