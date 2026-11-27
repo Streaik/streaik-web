@@ -62,12 +62,13 @@ function AgentCardActions({ entry, container, onAction }: {
 }
 
 import type { McpServers } from './useMcpServers';
+import type { McpOptions } from './mcp';
 import type { LocalSkills } from './useLocalSkills';
 import type { RemoteSkills } from './useRemoteSkills';
 
-export function AgentsView({ catalog, catalogStatus, toolbar, menuContainer, mcpServers, localSkills, remoteSkills, gateway }: {
+export function AgentsView({ catalog, catalogStatus, toolbar, menuContainer, mcpServers, mcpOptions, localSkills, remoteSkills, gateway }: {
   catalog: readonly CatalogModel[]; catalogStatus?: string; toolbar: HTMLDivElement | null; menuContainer: HTMLDivElement | null;
-  mcpServers: McpServers; localSkills: LocalSkills; remoteSkills: RemoteSkills; gateway: Gateway;
+  mcpServers: McpServers; mcpOptions?: McpOptions; localSkills: LocalSkills; remoteSkills: RemoteSkills; gateway: Gateway;
 }) {
   const { t } = useAppTranslation();
   const store = useAgents();
@@ -123,6 +124,6 @@ export function AgentsView({ catalog, catalogStatus, toolbar, menuContainer, mcp
       })}</div>}
     {action?.kind === 'remove' ? <ConfirmAgentChange entry={action.entry} onConfirm={() => store.removeChange(action.entry)} onClose={end} />
       : action && <AgentEditor entry={action.kind === 'edit' ? action.entry : undefined} seed={action.kind === 'create' ? action.seed : undefined}
-        {...{ catalog, catalogStatus, mcpServers, localSkills, remoteSkills, gateway }} tags={tagOptions} onSave={store.save} onClose={end} />}
+        {...{ catalog, catalogStatus, mcpServers, mcpOptions, localSkills, remoteSkills, gateway }} tags={tagOptions} onSave={store.save} onClose={end} />}
   </section>;
 }

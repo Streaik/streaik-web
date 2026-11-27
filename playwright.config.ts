@@ -14,8 +14,8 @@ export default defineConfig({
         VITE_ENTRA_API_SCOPE: 'api://33333333-3333-3333-3333-333333333333/access_as_user',
       },
     },
-    // Keep optional services separate from the default BYOK fixture.
-    { command: 'npm run dev -w @streaik/sample-byok -- --port 15175', url: 'http://localhost:15175',
+    // The optional services fixture deliberately runs a second Vite process for the same BYOK project.
+    { command: 'npm run dev -w @streaik/sample-byok -- --port 15175 --bypass-lock', url: 'http://localhost:15175',
       env: { VITE_MCP_REGISTRY_URL: '/test-mcp-registry', VITE_AGENT_BASE: '/test-agents' } },
   ],
 });

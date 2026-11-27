@@ -1333,7 +1333,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           : view === 'models' ? <ModelsView models={result?.error ? undefined : result?.catalog}
           status={!connection.ready ? connection.emptyMessage : !result ? t('Loading models…') : result.error}
            refresh={connection.ready && result ? reload : undefined} /> : view === 'agents'
-          ? <AgentsView catalog={agentModels?.catalog ?? []} catalogStatus={agentModelStatus} {...{ mcpServers, localSkills, remoteSkills, gateway }}
+          ? <AgentsView catalog={agentModels?.catalog ?? []} catalogStatus={agentModelStatus} mcpOptions={connection.mcp} {...{ mcpServers, localSkills, remoteSkills, gateway }}
             toolbar={catalogToolbar} menuContainer={menuContainer} /> : view === 'skills'
           ? <SkillsView store={localSkills} gateway={gateway} remote={remoteSkills} toolbar={catalogToolbar} menuContainer={menuContainer} />
           : <ProvidersView appName={appName} />}

@@ -14,7 +14,7 @@ export function configureChatTools(tools: readonly ChatTool[], config: ToolConfi
   const declarations = agentMcpServers(agent?.tools).filter(({ server }) => server.execution !== 'server');
   return tools.map(tool => {
     const mcp = tool.source === 'mcp' ? tool.tool : undefined;
-    const declaration = mcp && declarations.find(entry => entry.endpoint === mcp.server.endpoint && entry.server.disabled !== true);
+    const declaration = mcp && declarations.find(entry => entry.endpoint === mcp.server.endpoint);
     const options = { ...toolOptions(declaration?.server),
       ...(mcp ? agentToolOptions(agent?.tools, { type: 'function', name: mcp.remoteName })
         : tool.source === 'mcp-resource' ? agentToolOptions(agent?.tools, { type: 'read_resource' }) : {}),

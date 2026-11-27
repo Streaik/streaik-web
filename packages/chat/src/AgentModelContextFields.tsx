@@ -1,0 +1,160 @@
+import { Button, Textarea } from '@streaik/themes';
+import { useState } from 'react';
+import type { RefObject } from 'react';
+import { createPortal } from 'react-dom';
+import type { AgentDraft } from './agentDraft';
+import { isObject } from './agentDefinition';
+import type { JsonObject, JsonValue } from './agentDefinition';
+import { agentMcpClientSettings, agentMcpPolicy, setAgentElicitation, setAgentMcpPolicy } from './agentMcpClient';
+import { agentMcpServers, agentMcpToolNames, patchAgentMcp } from './agentTools';
+import { AgentSelectField, AgentSwitch } from './AgentToolControls';
+import { ChatIcon } from './ChatIcon';
+import { useAppTranslation } from './i18n';
+import type { McpCatalogServer, McpOptions } from './mcp';
+import { AgentMcpCatalogDialog, CopyServerUrl, McpEndpointEditor, McpServerCard } from './McpServersView';
+import { toolCallers, toolOptions } from './toolConfiguration';
+import { useMcpRegistry } from './useMcpRegistry';
+import type { McpSelection, McpServers } from './useMcpServers';
+
+type Server = ReturnType<typeof agentMcpServers>[number];
+type ServerPatch = Readonly<Record<string, JsonValue | undefined>>;
+const policyFlags = Object.keys(agentMcpPolicy) as (keyof typeof agentMcpPolicy)[];
+
+function AgentMcpServerFields({ entry, change, installed, discovery, registryEntry, onEdit, onRemove }: {
+  entry: Server; change: (patch: ServerPatch) => void; installed: McpServers; discovery: McpSelection;
+  registryEntry?: McpCatalogServer; onEdit: () => void; onRemove: () => void;
+}) {
+  const { t } = useAppTranslation();
+  const { key, server, endpoint } = entry;
+  const record = installed.records.find(item => item.endpoint === endpoint);
+  const status = discovery.entries.find(item => item.record === record);
+  const callers = toolOptions(server).allowed_callers ?? [...toolCallers];
+  const names = agentMcpToolNames(server);
+  const filter = isObject(server.allowed_tools) ? server.allowed_tools as JsonObject : undefined;
+  const selected = !!names?.length;
+  // Keep the name editor open while entering the first name, or clearing the last one.
+  const [editingNames, setEditingNames] = useState(false);
+  const toolsMode = editingNames || selected ? 'selected' : names ? 'none' : filter ? 'custom' : 'all';
+  const availableNames = status?.state === 'ready' ? [...new Set([...status.discovery.tools.map(tool => tool.remoteName), ...names ?? []])].sort() : undefined;
+  const approval = server.require_approval;
+  const approvalMode = approval === 'always' || approval === 'never' ? approval : approval == null ? 'default' : 'custom';
+  const execution = server.execution === 'server' || server.execution === 'provider' ? server.execution : 'client';
+  const editLabel = t('Edit MCP URL');
+  const removeLabel = t('Remove {{name}}', { name: key });
+  const changeNames = (next: readonly string[]) => change({ allowed_tools: filter ? { ...filter, tool_names: next } : next });
+
+  return <McpServerCard title={key} registryEntry={registryEntry} inDialog
+    description={typeof server.server_description === 'string' ? server.server_description : undefined}
+    actions={<>
+      {endpoint && <CopyServerUrl key={endpoint} endpoint={endpoint} />}
+      <Button type="button" variant="subtle" className="chat-composer-icon" title={editLabel} aria-label={editLabel} aria-haspopup="dialog" onClick={onEdit}>
+        <ChatIcon name="link" />
+      </Button>
+      <Button type="button" variant="subtle" className="chat-composer-icon" title={removeLabel} aria-label={removeLabel} onClick={onRemove}>
+        <ChatIcon name="trash" />
+      </Button>
+    </>}>
+    <div className="agent-mcp-server-fields">
+      <AgentSelectField label={t('Execution')} value={execution} options={[
+        { value: 'client', label: t('Agent backend') }, { value: 'server', label: t('Gateway') },
+        ...(execution === 'provider' ? [{ value: 'provider', label: t('Provider') }] : []),
+      ]} onValueChange={value => change({ execution: value })} />
+      <div className="agent-mcp-usage">
+        <AgentSelectField multiple label={t('Allowed callers')} value={callers} options={toolCallers.map(caller => ({
+          value: caller, label: t(caller === 'direct' ? 'Direct' : 'Programmatic'),
+        }))} onValueChange={next => {
+          if (next.length) change({ allowed_callers: next.length === toolCallers.length ? undefined : next });
+        }} />
+        <AgentSwitch label={t('Search')} checked={server.defer_loading === true} onChange={checked => change({ defer_loading: checked || undefined })} />
+        <AgentSwitch label={t('Namespace')} checked={server.namespace === true} onChange={checked => change({ namespace: checked || undefined })} />
+      </div>
+      <div className="agent-mcp-columns">
+        <AgentSelectField label={t('Allowed tools')} value={toolsMode} options={[
+          { value: 'all', label: t('All tools') }, { value: 'none', label: t('No tools') }, { value: 'selected', label: t('Selected tools') },
+          ...(toolsMode === 'custom' ? [{ value: 'custom', label: t('Custom filter') }] : []),
+        ]} onValueChange={value => {
+          if (value === 'custom') return;
+          setEditingNames(value === 'selected');
+          if (value === 'all') change({ allowed_tools: undefined });
+          else if (value === 'none' || !names) changeNames([]);
+        }} />
+        <AgentSelectField label={t('Require approval')} value={approvalMode} options={[
+          { value: 'default', label: t('Default') }, { value: 'always', label: t('Always') }, { value: 'never', label: t('Never') },
+          ...(approvalMode === 'custom' ? [{ value: 'custom', label: t('Custom filter') }] : []),
+        ]} onValueChange={value => {
+          if (value !== 'custom') change({ require_approval: value === 'default' ? undefined : value });
+        }} />
+      </div>
+      {toolsMode === 'selected' && (availableNames?.length
+        ? <AgentSelectField multiple label={t('Selected tools')} value={names ?? []}
+          options={availableNames.map(name => ({ value: name, label: name }))} onValueChange={changeNames} />
+        : <label className="agent-field">{t('Allowed tool names (one per line)')}<Textarea defaultValue={names?.join('\n')} onChange={event =>
+          changeNames([...new Set(event.currentTarget.value.split(/\r?\n/).map(name => name.trim()).filter(Boolean))])} /></label>)}
+      {record && installed.connection(record)
+        ? <Button type="button" variant="subtle" className="agent-mcp-discover" disabled={status?.state === 'loading' || status?.state === 'ready'}
+          onClick={() => discovery.set(record, true)}>{t(status?.state === 'loading' ? 'Connecting to MCP servers…'
+            : status?.state === 'ready' ? 'Tools discovered' : status?.state === 'error' ? 'Retry' : 'Discover tools')}</Button>
+        : <small>{t('Install and authorize this MCP server in Streaik to discover its tools.')}</small>}
+    </div>
+  </McpServerCard>;
+}
+
+export function AgentModelContextFields({ draft, patch, store, discovery, options, dialogHost }: {
+  draft: AgentDraft; patch: (change: Partial<AgentDraft>) => void; store: McpServers; discovery: McpSelection;
+  options?: McpOptions; dialogHost: RefObject<HTMLDivElement | null>;
+}) {
+  const { t } = useAppTranslation();
+  const [dialog, setDialog] = useState<{ type: 'catalog' } | { type: 'url'; entry?: Server }>();
+  const registry = useMcpRegistry(options, dialog?.type === 'catalog');
+  const servers = agentMcpServers(draft.tools);
+  const endpoints = new Set(servers.flatMap(({ endpoint }) => endpoint ?? []));
+  const { policy, elicitation } = agentMcpClientSettings(draft.mcpClient);
+  const addLabel = t('Add by URL');
+  const close = () => setDialog(undefined);
+  const change = (key: string, patchFields?: ServerPatch) => patch({ tools: patchAgentMcp(draft.tools, key, patchFields) });
+
+  function addServer(name: string, endpoint: string, description?: string) {
+    const labels = new Set(servers.map(({ key }) => key.toLowerCase()));
+    let key = name;
+    for (let i = 2; labels.has(key.toLowerCase()); i++) key = `${name} (${i})`;
+    change(key, { server_url: endpoint, ...(description && { server_description: description }) });
+  }
+
+  return <>
+    <section className="agent-field-group">
+      <h3>{t('Policy')}</h3>
+      <div className="agent-mcp-columns">{policyFlags.map(flag => <AgentSwitch key={flag} label={t(agentMcpPolicy[flag])} checked={policy?.[flag] === true}
+        onChange={checked => patch({ mcpClient: setAgentMcpPolicy(draft.mcpClient, flag, checked) })} />)}</div>
+    </section>
+    <section className="agent-field-group">
+      <div className="agent-mcp-heading"><h3>{t('Capabilities')}</h3>
+        <AgentSwitch label={t('Elicitation')} checked={!!elicitation} onChange={checked =>
+          patch({ mcpClient: setAgentElicitation(draft.mcpClient, 'elicitation', checked) })} /></div>
+      <div className="agent-mcp-columns">
+        <AgentSwitch label={t('Form')} checked={elicitation?.form != null} onChange={elicitation ? checked =>
+          patch({ mcpClient: setAgentElicitation(draft.mcpClient, 'form', checked) }) : undefined} />
+        <AgentSwitch label={t('URL')} checked={elicitation?.url != null} title={t('URL elicitation is not supported yet.')} />
+      </div>
+    </section>
+    {servers.map(entry => <AgentMcpServerFields key={entry.key} entry={entry} change={fields => change(entry.key, fields)} installed={store} discovery={discovery}
+      registryEntry={entry.endpoint ? registry.byEndpoint.get(entry.endpoint) : undefined}
+      onEdit={() => setDialog({ type: 'url', entry })} onRemove={() => change(entry.key)} />)}
+    <div className="agent-mcp-actions">
+      <Button type="button" variant="subtle" aria-haspopup="dialog" onClick={() => setDialog({ type: 'catalog' })}>
+        <ChatIcon name="tool" />{t('Catalog')}
+      </Button>
+      <Button type="button" variant="subtle" className="chat-composer-icon" title={addLabel} aria-label={addLabel} aria-haspopup="dialog"
+        onClick={() => setDialog({ type: 'url' })}><ChatIcon name="link" /></Button>
+    </div>
+    {dialog && dialogHost.current && createPortal(dialog.type === 'catalog'
+      ? <AgentMcpCatalogDialog options={options} registry={registry} close={close} picker={{ endpoints, add: (item, endpoint) =>
+        addServer(item.title, endpoint, item.description) }} />
+      : <McpEndpointEditor close={close} initial={dialog.entry && { name: dialog.entry.key,
+        url: typeof dialog.entry.server.server_url === 'string' ? dialog.entry.server.server_url : '' }} save={(name, endpoint) => {
+        if (endpoint !== dialog.entry?.endpoint && endpoints.has(endpoint)) throw new Error('This MCP URL is already on this agent.');
+        if (dialog.entry) change(dialog.entry.key, { server_url: endpoint,
+          ...(dialog.entry.endpoint !== endpoint && { headers: undefined, authorization: undefined }) });
+        else addServer(name, endpoint);
+      }} />, dialogHost.current)}
+  </>;
+}

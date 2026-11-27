@@ -41,16 +41,39 @@ export function agentMcpServers(value?: JsonValue) {
 }
 
 export function agentMcpAllows(server: JsonObject, toolName: string) {
-  const names = Array.isArray(server.allowed_tools) ? server.allowed_tools : object(server.allowed_tools)?.tool_names;
-  return !Array.isArray(names) || names.includes(toolName);
+  return agentMcpToolNames(server)?.includes(toolName) ?? true;
 }
 
-export function patchAgentMcp(tools: JsonValue | undefined, key: string, patch?: JsonObject): readonly JsonValue[] {
+export function agentMcpToolNames(server: JsonObject) {
+  const names = Array.isArray(server.allowed_tools) ? server.allowed_tools : object(server.allowed_tools)?.tool_names;
+  return Array.isArray(names) ? names.filter((name): name is string => typeof name === 'string') : undefined;
+}
+
+function omitLegacyMcpFlags(server: JsonObject) {
+  const { disabled, required, ...current } = server;
+  return current;
+}
+
+export function withoutLegacyAgentMcpFlags(tools?: JsonValue) {
+  const list = agentToolList(tools);
+  const next = list.map(entry => {
+    const server = object(entry);
+    return server?.type === 'mcp' && ('disabled' in server || 'required' in server) ? omitLegacyMcpFlags(server) : entry;
+  });
+  return next.some((entry, i) => entry !== list[i]) ? next : tools;
+}
+
+export function patchAgentMcp(tools: JsonValue | undefined, key: string, patch?: Readonly<Record<string, JsonValue | undefined>>): readonly JsonValue[] {
   const list = agentToolList(tools);
   const index = list.findIndex(tool => object(tool)?.type === 'mcp' && object(tool)?.server_label === key);
   if (!patch) return list.filter((_, i) => i !== index);
-  const descriptor = { ...object(list[index]), ...patch, type: 'mcp', server_label: key };
-  return index < 0 ? [...list, descriptor] : list.map((tool, i) => index === i ? descriptor : tool);
+  const descriptor: Record<string, JsonValue> = { ...object(list[index]) };
+  for (const [field, value] of Object.entries(patch)) {
+    if (value === undefined) delete descriptor[field];
+    else descriptor[field] = value;
+  }
+  const current = omitLegacyMcpFlags({ ...descriptor, type: 'mcp', server_label: key });
+  return index < 0 ? [...list, current] : list.map((tool, i) => index === i ? current : tool);
 }
 
 export function agentSkillsTool(tools?: JsonValue) {

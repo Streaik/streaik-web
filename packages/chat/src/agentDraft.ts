@@ -1,8 +1,8 @@
 import { agentModels, isAgentDefinition, isModel, isObject } from './agentDefinition.ts';
 import type { AgentDefinition, AgentModel, JsonObject, JsonValue } from './agentDefinition.ts';
-import { agentMcpServers } from './agentTools.ts';
+import { agentMcpServers, withoutLegacyAgentMcpFlags } from './agentTools.ts';
 
-export type AgentTab = 'general' | 'details' | 'realtime' | 'skills' | 'tools' | 'tool-configuration';
+export type AgentTab = 'general' | 'details' | 'realtime' | 'model-context' | 'skills' | 'tools' | 'tool-configuration';
 type IconScheme = 'light' | 'dark';
 export type IconDraft = { key: number; original?: JsonValue; src: string; theme: string };
 const speechTextFields = ['voice', 'instructions', 'language'] as const;
@@ -11,6 +11,7 @@ export type AgentDraft = {
   name: string; description: string; instructions: string; argumentHint: string; models: readonly AgentModel[];
   owner: string; tags: readonly string[]; icons: readonly IconDraft[];
   transcription?: AgentModel; speech: SpeechDraft;
+  mcpClient?: JsonValue;
   tools?: JsonValue;
 };
 
@@ -57,7 +58,7 @@ export function createAgentDraft(agent?: AgentDefinition): AgentDraft {
     name: agent?.name ?? '', description: agent?.description ?? '', instructions: agent?.instructions ?? '',
     argumentHint: text(agent?.argumentHint), models: agentModels(agent), owner: text(agent?.owned_by),
     tags: agent?.tags ?? [], icons: readIconDrafts(agent?.icons), transcription: readModel(agent?.transcription),
-    tools: agent?.tools,
+    mcpClient: agent?.mcpClient, tools: agent?.tools,
     speech: { model: readModel(speech?.model), voice: text(speech?.voice), instructions: text(speech?.instructions),
       language: text(speech?.language), speed: numberText(speech?.speed), mime: text(format?.type), rate: numberText(format?.rate) },
   };
@@ -113,13 +114,15 @@ export function saveAgentDraft(draft: AgentDraft, agent?: AgentDefinition) {
   if (draft.argumentHint !== initial.argumentHint) assign(definition, 'argumentHint', draft.argumentHint.trim() || undefined);
   delete definition.skills;
   delete definition.mcpServers;
+  if (draft.mcpClient !== initial.mcpClient) assign(definition, 'mcpClient', draft.mcpClient);
   if (draft.tools !== initial.tools) {
     const original = agentMcpServers(initial.tools);
-    if (agentMcpServers(draft.tools).some(({ key, server, endpoint }) => !endpoint && original.find(entry => entry.key === key)?.server.server_url !== server.server_url)) {
-      throw new AgentDraftError('tools', 'Enter a valid MCP URL for each new or changed server.');
+    if (agentMcpServers(draft.tools).some(({ key, server, endpoint }) => !endpoint && !original.some(entry => entry.key === key && entry.server.server_url === server.server_url))) {
+      throw new AgentDraftError('model-context', 'Enter a valid MCP URL for each new or changed server.');
     }
-    assign(definition, 'tools', draft.tools);
   }
+  const tools = withoutLegacyAgentMcpFlags(draft.tools);
+  if (tools !== initial.tools) assign(definition, 'tools', tools);
   if (!sameList(draft.models, initial.models)) {
     const primary = draft.models.find((model) => model.type !== 'decision') ?? draft.models[0];
     // Keep the legacy configuration separate: it may have different metadata

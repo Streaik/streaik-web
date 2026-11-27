@@ -158,14 +158,27 @@ test('agent tool configuration preserves portable fields and auto-attaches only 
   const editor = await create(page, 'Inventory helper');
   await editor.getByRole('tab', { name: 'Tools', exact: true }).click();
   const tools = editor.getByRole('tabpanel', { name: 'Tools', exact: true });
-  await tools.getByRole('checkbox', { name: 'Tool search', exact: true }).check();
-  const addServer = tools.getByRole('group', { name: 'Add MCP server', exact: true });
-  await addServer.getByLabel('Server name').fill('Inventory');
-  await addServer.getByLabel('MCP URL').fill(url);
+  await expect(tools.getByRole('button', { name: 'Add by URL' })).toHaveCount(0);
+  const toolSearch = tools.getByRole('switch', { name: 'Tool search', exact: true });
+  const resourceSearch = tools.getByRole('switch', { name: 'Resource search', exact: true });
+  await expect(toolSearch).toHaveCSS('appearance', 'none');
+  await resourceSearch.check();
+  await resourceSearch.uncheck();
+  await toolSearch.check();
+  await editor.getByRole('tab', { name: 'Model Context', exact: true }).click();
+  const contextPanel = editor.getByRole('tabpanel', { name: 'Model Context', exact: true });
+  const addByUrl = contextPanel.getByRole('button', { name: 'Add by URL' });
+  await expect(addByUrl).toHaveText('');
+  await addByUrl.click();
+  const addServer = page.getByRole('dialog', { name: 'Add MCP server', exact: true });
+  await addServer.getByLabel('Name', { exact: true }).fill('Inventory');
+  await addServer.getByLabel('URL', { exact: true }).fill(url);
   await addServer.getByRole('button', { name: 'Add MCP server' }).click();
-  const server = tools.getByRole('group', { name: 'Inventory', exact: true });
-  await server.getByRole('checkbox', { name: 'Search', exact: true }).check();
-  await server.getByRole('checkbox', { name: 'Restrict allowed tools' }).check();
+  await expect(addServer).toBeHidden();
+  const server = contextPanel.getByRole('article').filter({ has: page.getByRole('heading', { name: 'Inventory', exact: true }) });
+  await server.getByRole('switch', { name: 'Search', exact: true }).check();
+  await server.getByRole('combobox', { name: 'Allowed tools', exact: true }).click();
+  await page.getByRole('option', { name: 'Selected tools', exact: true }).click();
   await server.getByLabel('Allowed tool names (one per line)').fill('lookup');
   await editor.getByRole('tab', { name: 'Tool configuration', exact: true }).click();
   const configuration = editor.getByRole('tabpanel', { name: 'Tool configuration' });
@@ -218,6 +231,63 @@ test('agent tool configuration preserves portable fields and auto-attaches only 
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   await expect(page.getByText('Inventory attached', { exact: true })).toBeVisible();
   expect(discoveries).toBeGreaterThan(0);
+});
+
+test('agent Model Context saves portable settings and catalog selections only on agent save', async ({ page }) => {
+  const endpoint = 'https://inventory.example.test/mcp';
+  await page.route('**/test-mcp-registry*', route => route.fulfill({ json: { servers: [{ server: {
+    name: 'example/catalog-inventory', title: 'Catalog Inventory', description: 'Find inventory in a catalog.',
+    remotes: [{ type: 'streamable-http', url: endpoint, headers: [{ name: 'Authorization', isRequired: true, isSecret: true }] }],
+  } }] } }));
+  await page.goto('http://localhost:15175/');
+  await agents(page).click();
+  const editor = await create(page, 'Model Context sample');
+  await editor.getByRole('tab', { name: 'Model Context', exact: true }).click();
+  const panel = editor.getByRole('tabpanel', { name: 'Model Context', exact: true });
+  await expect(panel.getByRole('heading')).toHaveText(['Policy', 'Capabilities']);
+  await panel.getByRole('switch', { name: 'Open world', exact: true }).check();
+  const form = panel.getByRole('switch', { name: 'Form', exact: true });
+  const url = panel.getByRole('switch', { name: 'URL', exact: true });
+  await expect(form).toBeDisabled();
+  await panel.getByRole('switch', { name: 'Elicitation' }).check();
+  await form.check();
+  await expect(url).toBeDisabled();
+
+  await panel.getByRole('button', { name: 'Catalog', exact: true }).click();
+  const catalog = page.getByRole('dialog', { name: 'MCP catalog', exact: true });
+  await catalog.getByRole('button', { name: 'Add Catalog Inventory to agent', exact: true }).click();
+  await expect(catalog.getByRole('button', { name: 'Already on this agent', exact: true })).toBeDisabled();
+  await catalog.getByRole('button', { name: 'Close', exact: true }).click();
+  const server = panel.getByRole('article').filter({ hasText: 'Catalog Inventory' });
+  await expect(server).toContainText('Find inventory in a catalog.');
+  await server.getByRole('switch', { name: 'Namespace', exact: true }).check();
+  const approval = server.getByRole('combobox', { name: 'Require approval', exact: true });
+  await expect(approval).toHaveText('Default');
+  await approval.click();
+  await page.getByRole('option', { name: 'Always', exact: true }).click();
+  const saved = () => page.evaluate(() => {
+    const key = Object.keys(localStorage).find(value => value.startsWith('streaik.agents.v1:'));
+    return key ? JSON.parse(localStorage.getItem(key)!).local[0]?.definition : undefined;
+  });
+  expect(await saved()).toBeUndefined();
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
+  const item = card(page, 'Model Context sample');
+  await expect(item).toBeVisible();
+  expect(await saved()).toMatchObject({ mcpClient: { policy: { openWorldHint: true }, capabilities: { elicitation: { form: {} } } }, tools: [{
+    type: 'mcp', server_label: 'Catalog Inventory', server_url: endpoint, namespace: true, require_approval: 'always',
+  }] });
+  expect((await saved()).tools[0]).not.toHaveProperty('headers');
+
+  await item.getByRole('button', { name: 'Edit', exact: true }).click();
+  const reopened = page.getByRole('dialog', { name: 'Agent', exact: true });
+  await reopened.getByRole('tab', { name: 'Model Context', exact: true }).click();
+  const reopenedApproval = reopened.getByRole('combobox', { name: 'Require approval', exact: true });
+  await expect(reopenedApproval).toHaveText('Always');
+  await reopenedApproval.click();
+  await page.getByRole('option', { name: 'Default', exact: true }).click();
+  await reopened.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(reopened).toBeHidden();
+  expect((await saved()).tools[0]).not.toHaveProperty('require_approval');
 });
 
 const textAgentModel = 'openai/gpt-6-luna';
