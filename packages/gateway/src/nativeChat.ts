@@ -1,9 +1,10 @@
-import { convertToModelMessages, jsonSchema, streamText, tool } from 'ai';
+import { APICallError, convertToModelMessages, jsonSchema, streamText, StreamProviderError, tool } from 'ai';
 import type { ChatTransport, JSONSchema7, ToolSet } from 'ai';
 import { asRecord, createDirectMetrics } from './directMetrics.ts';
 import type { DirectMetricsOptions } from './directMetrics.ts';
 import { chatToolChoice, GatewayError } from './index.ts';
 import type { ChatMessage, ChatMessageMetadata, NativeChatEndpoint } from './index.ts';
+import { nativeStreamError, safeMessage } from './errorDetails.ts';
 import { anthropicChatProtocolHeaders, extendNativeTools, mergeAnthropicMessagesOptions, mergeOpenAIResponsesOptions } from './nativeToolOptions.ts';
 import { clientToolSearchName, deferredToolReferences } from './toolSearch.ts';
 import { withNativeHostedSkills } from './hostedSkills.ts';
@@ -122,6 +123,7 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
       ));
       if (registerSearch && openai) tools.tool_search = openai.tools.toolSearch({ execution: search?.execution === 'client' ? 'client' : 'server' });
       let gateway: ChatMessageMetadata['gateway'];
+      let diagnostic: string | undefined;
       const result = streamText({
         model: adapter, messages: await convertToModelMessages(nativeAttachmentMessages(mcpReplay?.messages ?? messages, endpoint), { tools, ignoreIncompleteToolCalls: true }),
         instructions, tools, toolChoice: Object.keys(tools).length || nativeTools.length || target.gateway && skills.length || mcp.length
@@ -137,11 +139,23 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
       });
       return result.toUIMessageStream<ChatMessage>({
         originalMessages: messages,
-        onError: (error) => error instanceof GatewayError ? error.message : 'The selected chat route could not complete the request.',
+        onError: (error) => {
+          if (error instanceof GatewayError) return error.message;
+          if (target.gateway) {
+            // SDKs can promote early error events to an API error before yielding raw chunks.
+            const message = StreamProviderError.isInstance(error) ? safeMessage(error.message)
+              : APICallError.isInstance(error) ? nativeStreamError(error.data) : undefined;
+            if (message ?? diagnostic) return (message ?? diagnostic)!;
+          }
+          return 'The selected chat route could not complete the request.';
+        },
         messageMetadata: ({ part }) => {
           if (part.type === 'raw') mcpOutput?.observe(part.rawValue);
           if (direct) direct.observe(part);
-          else if (part.type === 'raw') gateway = readGatewayMetrics(part.rawValue) ?? gateway;
+          else if (part.type === 'raw') {
+            gateway = readGatewayMetrics(part.rawValue) ?? gateway;
+            if (target.gateway) diagnostic = nativeStreamError(part.rawValue) ?? diagnostic;
+          }
           if (part.type !== 'finish') return;
           const { inputTokens, outputTokens, totalTokens } = part.totalUsage;
           const observed = direct?.finish(part.totalUsage);

@@ -521,6 +521,23 @@ test('native transport replays a completed client tool inline and never exposes 
   assert.doesNotMatch(JSON.stringify(parts), /private-upstream/);
 });
 
+test('native gateway returns a readable error part for structured HTTP and SSE failures', async () => {
+  const model = 'openai/gpt-4.1-mini';
+  const message = 'Unsupported parameter: reasoning.effort is not supported with this model.';
+  const failed = { type: 'response.failed', sequence_number: 2, response: { error: { code: 'invalid_request_error', message } } };
+  for (const [endpoint, upstream] of [
+    [responses, Response.json({ error: { message } }, { status: 400 })],
+    [responses, sse([failed])],
+    [responses, sse([{ type: 'error', sequence_number: 1, code: 'upstream_error', message }])],
+    [chat, sse([{ error: { type: 'api_error', message } }, '[DONE]'])],
+    [messagesApi, sse([{ type: 'error', error: { type: 'api_error', message } }])],
+  ]) {
+    const gateway = createGateway(root, () => ({}), async () => upstream);
+    const parts = await send(gateway.chatTransport(endpoint), endpoint === messagesApi ? 'anthropic/claude-sonnet-4-6' : model);
+    assert.equal(parts.find(part => part.type === 'error')?.errorText, message, endpoint);
+  }
+});
+
 for (const endpoint of nativeChatEndpoints) test(`Direct ${endpoint} translates the tool choice to the native protocol`, async () => {
   const model = endpoint === messagesApi ? 'anthropic/claude-sonnet-4-6' : 'openai/gpt-4.1-mini';
   const requests = [];

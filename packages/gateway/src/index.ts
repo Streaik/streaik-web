@@ -1,5 +1,6 @@
 import { DefaultChatTransport } from 'ai';
 import type { UIMessage } from 'ai';
+import { readGatewayError, sanitizeChatErrors } from './errorDetails.ts';
 import { nativeChatTransport } from './nativeChat.ts';
 import { apiChatHostedSkillProviders, apiChatHostedSkills, hostedSkillProviders } from './hostedSkills.ts';
 import type { HostedSkill } from './hostedSkills.ts';
@@ -86,6 +87,12 @@ export class GatewayError extends Error {
   constructor(message?: string, httpStatus?: number) {
     super(message);
     this.httpStatus = httpStatus;
+  }
+}
+
+class GatewayChatTransport extends DefaultChatTransport<ChatMessage> {
+  protected override processResponseStream(stream: ReadableStream<Uint8Array>) {
+    return sanitizeChatErrors(super.processResponseStream(stream));
   }
 }
 
@@ -251,8 +258,11 @@ export async function requestHttp(destination: string, credentials: HeadersInit,
     throw new GatewayError(`Could not reach the configured ${target}. Check its address and that it is running.`);
   }
   if (!response.ok) {
-    await response.body?.cancel();
-    throw new GatewayError(statusMessage(response.status, target), response.status);
+    let diagnostic: string | undefined;
+    if (target === 'gateway') diagnostic = await readGatewayError(response, new Headers(credentials), init.signal);
+    else await response.body?.cancel().catch(() => {});
+    init.signal?.throwIfAborted();
+    throw new GatewayError(diagnostic ?? statusMessage(response.status, target), response.status);
   }
   return response;
 }
@@ -522,7 +532,7 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
             hostedSkillProviders(skills)));
         } };
       });
-      return new DefaultChatTransport<ChatMessage>({
+      return new GatewayChatTransport({
         api: chatUrl,
         prepareSendMessagesRequest: ({ id, messages, body }) => {
           const hostedMcp = Array.isArray(body?.hostedMcp) ? body.hostedMcp as HostedMcpTool[] : [];

@@ -1,12 +1,30 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import test from 'node:test';
-import { createGateway, normalizeGatewayBase, pickChatModels, readChatModels, readModelCatalog } from '../packages/gateway/src/index.ts';
+import { createGateway, GatewayError, normalizeGatewayBase, pickChatModels, readChatModels, readModelCatalog, requestHttp } from '../packages/gateway/src/index.ts';
 import { providerHeaders } from '../samples/byok/src/providerKeys.ts';
 
 const root = normalizeGatewayBase('/gateway', 'http://localhost:5173');
 const model = 'openai/gpt-4.1-mini';
 const keys = { openai: 'test-openai', anthropic: 'test-anthropic' };
+
+test('gateway HTTP errors keep structured diagnostics and fall back for unsafe or unreadable details', async () => {
+  const exact = 'Unsupported parameter: reasoning.effort is not supported with this model.';
+  const fallback = 'The gateway could not complete the request (HTTP 400).';
+  const json = message => Response.json({ error: { message, debug: 'private debug field' } }, { status: 400 });
+  const cases = [
+    [json(exact), exact],
+    [json(`Invalid provider key ${keys.openai}`), fallback],
+    [json('x'.repeat(17 * 1024)), fallback],
+    [json('Stack trace: private server details'), fallback],
+    [new Response('private raw body', { status: 400 }), fallback],
+    [new Response('{broken', { status: 400, headers: { 'content-type': 'application/json' } }), fallback],
+  ];
+  for (const [response, message] of cases) {
+    await assert.rejects(requestHttp(root.href, { 'X-OpenAI-Key': keys.openai }, {}, async () => response),
+      error => error instanceof GatewayError && error.httpStatus === 400 && error.message === message);
+  }
+});
 const messages = [
   { id: 'first', role: 'user', parts: [{ type: 'text', text: 'Hello' }] },
   { id: 'answer', role: 'assistant', parts: [{ type: 'text', text: 'World' }], metadata: { model } },

@@ -607,7 +607,15 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         let activity: ReturnType<typeof decisionActivity> | undefined;
         const reply = async (send: ReturnType<typeof apiChat.sendMessages>) => {
           try {
-            const stream = withReplyMetadata(await send, model, previous);
+            const source = await send;
+            // The SDK turns error parts into untyped errors. Surface the gateway's
+            // validated text without displaying unrelated parser or transport errors.
+            const stream = withReplyMetadata(route?.mode === 'gateway' ? source.pipeThrough(new TransformStream({
+              transform(chunk, controller) {
+                if (chunk.type === 'error') throw new GatewayError(chunk.errorText);
+                controller.enqueue(chunk);
+              },
+            })) : source, model, previous);
             return activity ? withDecisionActivity({ stream }, activity, model) : stream;
           } catch (error) {
             if (!activity || request.abortSignal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
