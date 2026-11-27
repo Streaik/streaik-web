@@ -12,7 +12,13 @@ const revision = '2026-07-28';
 const entraProtectedRemotes = 'net.streaik/entra-protected-remotes';
 
 type RequestHeaders = (signal?: AbortSignal) => HeadersInit | Promise<HeadersInit>;
-export type McpAppAuth = { ready: boolean; headers: RequestHeaders; challengeOnly?: boolean };
+export type McpAppAuth = {
+  ready: boolean;
+  headers: RequestHeaders;
+  challengeOnly?: boolean;
+  /** Override descriptor credentials, or opt in for a challenge-only adapter. */
+  descriptorHeaders?: RequestHeaders;
+};
 export type McpOptions = {
   base?: URL;
   registryUrl?: URL;
@@ -61,6 +67,19 @@ export function isMcpRuntime(endpoint: string, base?: URL) {
 export function mcpAppAuth(options: McpOptions | undefined, server: Pick<McpServerRecord, 'source' | 'endpoint' | 'declarations'>) {
   if (server.source !== 'registry' || !isMcpRuntime(server.endpoint, options?.base) || server.declarations.some(header => header.manualOnly)) return;
   return options?.headersForRemote?.(server.declarations, server.endpoint);
+}
+
+export class McpDescriptorAuthUnsupported extends Error {}
+
+export function mcpAppDescriptorHeaders(options: McpOptions | undefined, server: McpServerRecord, signal?: AbortSignal) {
+  if (server.auth !== 'app') return;
+  const auth = mcpAppAuth(options, server);
+  if (!auth?.ready) return;
+  if (auth.descriptorHeaders) return auth.descriptorHeaders(signal);
+  // The existing adapter already supplies headers for this registry server. Do not
+  // bypass an adapter that requires a challenge before releasing its credentials.
+  if (auth.challengeOnly) throw new McpDescriptorAuthUnsupported();
+  return auth.headers(signal);
 }
 
 export function preferredMcpRemote(remotes: McpCatalogServer['remotes'], options: McpOptions | undefined) {

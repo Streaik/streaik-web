@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { defaultChatPreferences, loadChatPreferences, normalizeChatPreferences, saveChatPreferences } from '../packages/chat/src/chatPreferences.ts';
-import { chatHostedMcp } from '../packages/chat/src/chatModelContext.ts';
+import { chatHostedMcp, withMcpHeaders } from '../packages/chat/src/chatModelContext.ts';
+import { apiChatHostedMcp, withResponsesHostedMcp } from '../packages/gateway/src/hostedMcp.ts';
 import { defaultMcpPreferences } from '../packages/chat/src/mcpPreferences.ts';
 import { conversationGatewayCost, latestContextUsage } from '../packages/chat/src/messageMetadata.ts';
 import { filterToolOutputContent } from '../packages/chat/src/toolOutputContent.ts';
@@ -77,6 +78,29 @@ test('hosted MCP normalizes per-server callers and deferral, and honors a saved 
   assert.deepEqual(chatHostedMcp({ ...modelContext, toolSearch: undefined }, servers), [first, deferred, descriptors[2], resourceSearch]);
   assert.deepEqual(chatHostedMcp(modelContext, servers, true), [first, ...descriptors.slice(1), resourceSearch]);
   assert.deepEqual(chatHostedMcp({ ...modelContext, execution: 'client' }, servers), []);
+});
+
+test('provider MCP survives preference normalization and sends only the MCP descriptor with its own wire headers', async () => {
+  const endpoint = 'https://inventory.example/mcp';
+  const source = { execution: 'provider', toolSearch: true, resourceSearch: true, servers: {
+    [endpoint]: { allowedTools: ['lookup'], requireApproval: 'always', headers: { Authorization: 'must-not-be-persisted' } },
+  } };
+  const { modelContext } = normalizeChatPreferences({ modelContext: source });
+  assert.equal(modelContext.execution, 'provider');
+  assert.doesNotMatch(JSON.stringify(modelContext), /must-not-be-persisted/);
+  const servers = [{ record: { title: 'Inventory', endpoint } }];
+  const tools = chatHostedMcp(modelContext, servers);
+  const descriptor = { server_label: 'Inventory', server_url: endpoint, execution: 'server', allowed_tools: ['lookup'], require_approval: 'always' };
+  assert.deepEqual(tools, [{ type: 'mcp', ...descriptor }]);
+  assert.deepEqual(chatHostedMcp(undefined, servers), []);
+  const headers = { authorization: 'Bearer mcp-fixture', 'x-region': 'eu' };
+  const wire = await withMcpHeaders(tools, address => {
+    assert.equal(address, endpoint);
+    return new Headers(headers);
+  });
+  assert.equal(tools[0].headers, undefined);
+  assert.deepEqual(apiChatHostedMcp(wire[0]), { name: 'mcp', inputSchema: { type: 'object', mcp: { ...descriptor, headers } } });
+  assert.deepEqual(JSON.parse(withResponsesHostedMcp('{}', wire)).tools, [{ type: 'mcp', name: 'mcp', ...descriptor, headers }]);
 });
 
 test('browser tool choice, maximum and stop tools persist only in their profile', (t) => {

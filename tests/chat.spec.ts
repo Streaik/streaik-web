@@ -1520,6 +1520,252 @@ function sse(text: string, turn: number, answerModel = model) {
   ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n';
 }
 
+test('Provider Model Context sends authenticated MCP upstream without browser discovery', async ({ page }) => {
+  await mockModels(page);
+  let browserCalls = 0;
+  await page.route('**/mcp-provider-only-fixture', route => {
+    browserCalls++;
+    return route.abort();
+  });
+  const requests: { tools: unknown[]; messages: unknown[] }[] = [];
+  await page.route('**/gateway/api/chat', route => {
+    requests.push(route.request().postDataJSON());
+    const events = [
+      { type: 'start', messageId: 'provider-mcp-reply' }, { type: 'start-step' },
+      { type: 'tool-input-available', toolCallId: 'native-approval', toolName: 'streaik_mcp_execution_approval', title: 'Run MCP tool: lookup', input: { item: 'abc' },
+        toolMetadata: { streaikMcpArguments: '{"item":"abc"}' }, providerExecuted: true, dynamic: true },
+      { type: 'tool-approval-request', toolCallId: 'native-approval', approvalId: 'protected-approval', approvalDescriptor: { input: { item: 'abc' } } },
+      { type: 'finish-step' }, { type: 'finish', finishReason: 'tool-calls' },
+    ];
+    return route.fulfill({ headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' },
+      body: requests.length === 1 ? events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n' : sse('Provider MCP reply', 2) });
+  });
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await chooseChatModel(page);
+  const endpoint = new URL('/mcp-provider-only-fixture', page.url()).href;
+  const openMcp = async () => {
+    await page.getByRole('button', { name: 'Add to message', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Model Context', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Model Context', exact: true });
+    await dialog.getByRole('tab', { name: 'Installed', exact: true }).click();
+    return dialog;
+  };
+  const context = await openMcp();
+  await context.getByRole('button', { name: 'Add by URL', exact: true }).click();
+  const editor = page.getByRole('dialog', { name: 'Add MCP server' });
+  await editor.getByLabel('Name', { exact: true }).fill('Provider fixture');
+  await editor.getByLabel('URL', { exact: true }).fill(endpoint);
+  await editor.getByRole('button', { name: 'Add header' }).click();
+  await editor.getByLabel('Header name').fill('Authorization');
+  await editor.getByLabel('Header value').fill('Bearer provider-mcp-fixture-token');
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
+  await context.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.getByRole('button', { name: 'Chat settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Chat settings', exact: true });
+  await settings.getByRole('tab', { name: 'Model Context', exact: true }).click();
+  await selectOptionByName(page, settings.getByRole('combobox', { name: 'Execution', exact: true }), 'Provider');
+  await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  await openMcp();
+  await context.getByRole('switch', { name: 'Provider fixture', exact: true }).check();
+  await context.getByRole('button', { name: 'Close', exact: true }).click();
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('Call provider MCP'); await composer.press('Enter');
+  const approval = page.getByRole('dialog', { name: 'Approve tool execution', exact: true });
+  await approval.getByRole('button', { name: 'Approve and run', exact: true }).click();
+  await expect(page.getByText('Provider MCP reply', { exact: true })).toBeVisible();
+  const descriptor = { server_label: 'Provider fixture', server_url: endpoint, execution: 'server', headers: { authorization: 'Bearer provider-mcp-fixture-token' } };
+  expect(requests).toHaveLength(2);
+  for (const request of requests) {
+    expect(request.tools).toEqual([{ name: 'mcp', inputSchema: { type: 'object', mcp: descriptor } }]);
+    expect(JSON.stringify(request.messages)).not.toContain('provider-mcp-fixture-token');
+  }
+  expect(JSON.stringify(requests[1].messages)).toContain('protected-approval');
+  expect(browserCalls).toBe(0);
+});
+
+test('BYOK app-managed and public MCP reach both Gateway transports', async ({ page }) => {
+  const site = 'http://localhost:15175';
+  const appEndpoint = `${site}/byok-mcp-fixture/openai-images`;
+  const publicEndpoint = `${site}/byok-mcp-fixture/countries`;
+  await mockModels(page);
+  await page.route('**/test-mcp-registry*', route => route.fulfill({ json: { servers: [
+    { server: { name: 'test.example.mcp/byok-images', title: 'BYOK Images', remotes: [{ type: 'streamable-http', url: appEndpoint,
+      headers: [{ name: 'Authorization', value: 'Bearer {openai_api_key}', isSecret: true }] }] } },
+    { server: { name: 'test.example.mcp/countries', title: 'Public Countries', remotes: [{ type: 'streamable-http', url: publicEndpoint }] } },
+  ] } }));
+  const discoveries: string[] = [];
+  for (const endpoint of [appEndpoint, publicEndpoint]) {
+    await page.route(endpoint, async route => {
+      const { method, id } = route.request().postDataJSON();
+      expect(await route.request().headerValue('authorization')).toBe(endpoint === appEndpoint ? `Bearer ${fakeKey}` : null);
+      if (method === 'server/discover') discoveries.push(endpoint);
+      return route.fulfill({ json: { jsonrpc: '2.0', id, result: method === 'server/discover'
+        ? { supportedVersions: ['2026-07-28'], capabilities: { tools: {} } }
+        : { resultType: 'complete', ttlMs: 0, cacheScope: 'private', tools: [{ name: endpoint === appEndpoint ? 'image' : 'lookup', inputSchema: { type: 'object' } }] } } });
+    });
+  }
+  await page.route('**/gateway/api/chat', route => {
+    const body = route.request().postDataJSON();
+    const descriptors = body.tools.filter((tool: { name: string }) => tool.name === 'mcp').map((tool: { inputSchema: { mcp: unknown } }) => tool.inputSchema.mcp);
+    expect(descriptors).toEqual(expect.arrayContaining([
+      { server_label: 'BYOK Images', server_url: appEndpoint, headers: { authorization: `Bearer ${fakeKey}` } },
+      { server_label: 'Public Countries', server_url: publicEndpoint },
+    ]));
+    expect(descriptors).toHaveLength(2);
+    expect(JSON.stringify(body.messages)).not.toContain(fakeKey);
+    return route.fulfill({ headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' }, body: sse('BYOK Hosted reply', 1) });
+  });
+  await page.route('**/gateway/v1/responses', route => {
+    const body = route.request().postDataJSON();
+    expect(body.tools).toEqual(expect.arrayContaining([
+      { type: 'mcp', name: 'mcp', server_label: 'BYOK Images', server_url: appEndpoint, execution: 'server', headers: { authorization: `Bearer ${fakeKey}` } },
+      { type: 'mcp', name: 'mcp', server_label: 'Public Countries', server_url: publicEndpoint, execution: 'server' },
+    ]));
+    expect(JSON.stringify(body.input)).not.toContain(fakeKey);
+    return route.fulfill({ contentType: 'text/event-stream', body: nativeToolSse('/v1/responses', model, [], 'BYOK Provider reply') });
+  });
+  await page.goto(site);
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await chooseChatModel(page);
+  const mcp = page.getByRole('dialog', { name: 'Model Context', exact: true });
+  const openMcp = async () => {
+    await page.getByRole('button', { name: 'Add to message', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Model Context', exact: true }).click();
+  };
+  const setExecution = async (execution: string) => {
+    await page.getByRole('button', { name: 'Chat settings', exact: true }).click();
+    const settings = page.getByRole('dialog', { name: 'Chat settings', exact: true });
+    await settings.getByRole('tab', { name: 'Model Context', exact: true }).click();
+    await selectOptionByName(page, settings.getByRole('combobox', { name: 'Execution', exact: true }), execution);
+    await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  };
+  await openMcp();
+  await mcp.getByRole('tab', { name: 'Registry', exact: true }).click();
+  await mcp.getByRole('button', { name: 'Install BYOK Images', exact: true }).click();
+  await mcp.getByRole('button', { name: 'Install Public Countries', exact: true }).click();
+  await mcp.getByRole('button', { name: 'Close', exact: true }).click();
+  await setExecution('Provider');
+  await openMcp();
+  await mcp.getByRole('tab', { name: 'Installed', exact: true }).click();
+  await mcp.getByRole('switch', { name: 'BYOK Images', exact: true }).check();
+  await mcp.getByRole('switch', { name: 'Public Countries', exact: true }).check();
+  await expect(mcp.getByRole('status').filter({ hasText: 'A remote provider cannot reach localhost' })).toHaveCount(2);
+  expect(discoveries).toEqual([]);
+  await mcp.getByRole('button', { name: 'Close', exact: true }).click();
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await openRoute(page, 'Gateway');
+  await page.getByRole('menuitemradio', { name: '/v1/responses', exact: true }).click();
+  await composer.fill('Use provider tools'); await composer.press('Enter');
+  await expect(page.getByText('BYOK Provider reply', { exact: true })).toBeVisible();
+  expect(discoveries).toEqual([]);
+  await setExecution('Client');
+  await openMcp();
+  await mcp.getByRole('tab', { name: 'Installed', exact: true }).click();
+  await expect(mcp.getByRole('status').filter({ hasText: '1 tools available' })).toHaveCount(2);
+  expect(discoveries).toEqual(expect.arrayContaining([appEndpoint, publicEndpoint]));
+  await mcp.getByRole('button', { name: 'Close', exact: true }).click();
+  await setExecution('Hosted');
+  await openRoute(page, 'Gateway');
+  await page.getByRole('menuitemradio', { name: '/api/chat', exact: true }).click();
+  await composer.fill('Use hosted tools'); await composer.press('Enter');
+  await expect(page.getByText('BYOK Hosted reply', { exact: true })).toBeVisible();
+});
+
+test('Entra app-managed MCP sends only the MCP token on API Chat and Responses', async ({ page }) => {
+  const site = 'http://localhost:15174';
+  const base = `${site}/entra-mcp-fixture/`;
+  const endpoint = `${base}openai-images`;
+  const issuer = `${base}oauth/default`;
+  const scope = 'api://fixture-mcp/access_as_user';
+  await page.route(url => url.origin === site && url.pathname === '/src/auth.ts', route => route.fulfill({
+    contentType: 'application/javascript', body: `export const readMcpScopes = () => undefined;
+    export async function createEntraAuth() {
+      return {
+        getAccount: () => ({ homeAccountId: 'mcp-test-account', environment: 'test', tenantId: 'test', name: 'Test User' }),
+        headers: () => ({ Authorization: 'Bearer gateway-fixture-token' }),
+        clientId: 'fixture-spa', hasMcpScope: true, sessionVersion: () => 1,
+        mcpScopeFor: profile => profile === 'default' ? ${JSON.stringify(scope)} : undefined,
+        mcpHeaders: async () => ({ Authorization: 'Bearer entra-fixture-assertion' }),
+      };
+    }`,
+  }));
+  await page.route(`${site}/entra-mcp-registry-fixture**`, route => route.fulfill({ json: { servers: [{ server: {
+    name: 'test.example.mcp/entra-images', title: 'Entra images', remotes: [{ type: 'streamable-http', url: endpoint }],
+    _meta: { 'net.streaik/entra-protected-remotes': [endpoint] },
+  } }] } }));
+  await page.route(`${site}/.well-known/oauth-protected-resource/entra-mcp-fixture/openai-images`, route => route.fulfill({ json: {
+    resource: endpoint, authorization_servers: [issuer], scopes_supported: [scope],
+  } }));
+  await page.route(`${site}/.well-known/oauth-authorization-server/entra-mcp-fixture/oauth/default`, route => route.fulfill({ json: {
+    issuer, token_endpoint: `${issuer}/token`, grant_types_supported: ['urn:ietf:params:oauth:grant-type:token-exchange'],
+  } }));
+  let exchanges = 0;
+  await page.route(`${issuer}/token`, route => {
+    exchanges++;
+    const fields = new URLSearchParams(route.request().postData() ?? '');
+    expect(fields.get('subject_token')).toBe('entra-fixture-assertion');
+    expect(fields.get('resource')).toBe(endpoint);
+    return route.fulfill({ json: { token_type: 'Bearer', access_token: 'mcp1.hosted_fixture', expires_in: 900,
+      issued_token_type: 'urn:ietf:params:oauth:token-type:access_token' } });
+  });
+  let mcpCalls = 0;
+  await page.route(endpoint, async route => {
+    mcpCalls++;
+    const { method, id } = route.request().postDataJSON();
+    if (!await route.request().headerValue('authorization')) return route.fulfill({ status: 401, headers: { 'WWW-Authenticate': 'Bearer' } });
+    expect(await route.request().headerValue('authorization')).toBe('Bearer mcp1.hosted_fixture');
+    return route.fulfill({ json: { jsonrpc: '2.0', id, result: method === 'server/discover'
+      ? { supportedVersions: ['2026-07-28'], capabilities: { tools: {} } }
+      : { resultType: 'complete', ttlMs: 0, cacheScope: 'private', tools: [{ name: 'create', inputSchema: { type: 'object' } }] } } });
+  });
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: model, type: 'language' }] } }));
+  for (const routePath of ['/api/chat', '/v1/responses'] as const) {
+    await page.route(`**/gateway${routePath}`, async route => {
+      expect(await route.request().headerValue('authorization')).toBe('Bearer gateway-fixture-token');
+      const body = route.request().postDataJSON();
+      const descriptor = routePath === '/api/chat' ? body.tools.find((tool: { name: string }) => tool.name === 'mcp').inputSchema.mcp
+        : body.tools.find((tool: { type: string }) => tool.type === 'mcp');
+      expect(descriptor).toMatchObject({ server_url: endpoint, headers: { authorization: 'Bearer mcp1.hosted_fixture' } });
+      expect(descriptor.execution).toBe(routePath === '/v1/responses' ? 'server' : undefined);
+      expect(JSON.stringify(body.messages ?? body.input)).not.toMatch(/hosted_fixture|entra-fixture-assertion|gateway-fixture-token/);
+      return routePath === '/api/chat'
+        ? route.fulfill({ headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' }, body: sse('Entra hosted reply', 1) })
+        : route.fulfill({ contentType: 'text/event-stream', body: nativeToolSse(routePath, model, [], 'Entra provider reply') });
+    });
+  }
+  await page.goto(site);
+  await chooseChatModel(page);
+  await page.getByRole('button', { name: 'Add to message', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Model Context', exact: true }).click();
+  const mcp = page.getByRole('dialog', { name: 'Model Context', exact: true });
+  await mcp.getByRole('tab', { name: 'Registry', exact: true }).click();
+  await mcp.getByRole('button', { name: 'Install Entra images', exact: true }).click();
+  await mcp.getByRole('tab', { name: 'Installed', exact: true }).click();
+  await mcp.getByRole('switch', { name: 'Entra images', exact: true }).check();
+  await expect(mcp.getByRole('status')).toHaveText('1 tools available');
+  const browserCalls = mcpCalls;
+  await mcp.getByRole('button', { name: 'Close', exact: true }).click();
+  const setExecution = async (mode: string) => {
+    await page.getByRole('button', { name: 'Chat settings', exact: true }).click();
+    const settings = page.getByRole('dialog', { name: 'Chat settings', exact: true });
+    await settings.getByRole('tab', { name: 'Model Context', exact: true }).click();
+    await selectOptionByName(page, settings.getByRole('combobox', { name: 'Execution', exact: true }), mode);
+    await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  };
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await setExecution('Hosted');
+  await composer.fill('Call hosted image tool'); await composer.press('Enter');
+  await expect(page.getByText('Entra hosted reply', { exact: true })).toBeVisible();
+  await setExecution('Provider');
+  await openRoute(page);
+  await page.getByRole('menuitemradio', { name: '/v1/responses', exact: true }).click();
+  await composer.fill('Call provider image tool'); await composer.press('Enter');
+  await expect(page.getByText('Entra provider reply', { exact: true })).toBeVisible();
+  expect(exchanges).toBe(1);
+  expect(mcpCalls).toBe(browserCalls);
+});
+
 test('chat Model Context opts into Gateway-hosted MCP and preserves per-route approvals', async ({ page }) => {
   await mockModels(page);
   const methods: string[] = [];
@@ -1740,7 +1986,9 @@ test('chat Model Context opts into Gateway-hosted MCP and preserves per-route ap
   await closeSettingsDialog();
   await page.getByRole('button', { name: 'Remove Inventory fixture', exact: true }).click();
   await openSettings();
-  await expect(tab).toHaveCount(0);
+  await tab.click();
+  await expect(execution).toBeVisible();
+  await expect(panel.getByRole('heading', { name: 'Inventory fixture', exact: true })).toHaveCount(0);
 });
 
 test('chat charts preview with the plugin off and follow the active theme', async ({ page }) => {
@@ -5042,7 +5290,8 @@ test('signed-in Entra has only gateway routes, can browse live models, and clear
   // Stub the host auth adapter so this only exercises the UI, without real Microsoft sign-in.
   await page.route((url) => url.port === '15174' && url.pathname === '/src/auth.ts', (route) => route.fulfill({
     contentType: 'application/javascript',
-    body: `export async function createEntraAuth() {
+    body: `export const readMcpScopes = () => undefined;
+    export async function createEntraAuth() {
       const account = { homeAccountId: 'test-account', environment: 'test', tenantId: 'test', name: 'Taylor Smith', username: 'taylor@example.test' };
       return {
         getAccount: () => account,
@@ -5064,7 +5313,7 @@ test('signed-in Entra has only gateway routes, can browse live models, and clear
   await chooseChatModel(page);
   await modelPicker(page).click();
   await page.getByRole('searchbox', { name: 'Search models', exact: true }).fill('OPENAI');
-  await expect(page.getByRole('group', { name: 'OpenAI', exact: true }).getByRole('option')).toHaveText('gpt-4.1-mini');
+  await expect(page.getByRole('group', { name: 'OpenAI', exact: true }).getByRole('option', { name: 'gpt-4.1-mini', exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
   await openRoute(page);
   await expect(page.getByRole('menuitem', { name: 'Direct', exact: true })).toHaveCount(0);

@@ -1,3 +1,4 @@
+import type { McpOptions } from '@streaik/chat';
 import type { EntraAuth } from './auth';
 
 const resourceMetadata = '/.well-known/oauth-protected-resource';
@@ -7,10 +8,21 @@ const accessTokenType = 'urn:ietf:params:oauth:token-type:access_token';
 const fetchOptions = { redirect: 'error', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' } as const;
 type Auth = Pick<EntraAuth, 'getAccount' | 'sessionVersion' | 'mcpScopeFor' | 'mcpHeaders'>;
 
-async function json(url: string, init: RequestInit) {
+export function withEntraMcpAuth(config: McpOptions | undefined, auth: Auth, clientId: string): McpOptions | undefined {
+  if (!config?.base) return config;
+  const headersFor = createEntraMcpHeaders(config.base, auth, clientId);
+  return { ...config, headersForRemote: (headers, endpoint) => headers.length === 0
+    ? { ready: !!auth.getAccount(), headers: signal => headersFor(endpoint, signal), challengeOnly: true,
+        descriptorHeaders: signal => headersFor(endpoint, signal, true) } : undefined };
+}
+
+function json(url: string, init: RequestInit): Promise<Record<string, unknown>>;
+function json(url: string, init: RequestInit, allowNotFound: boolean): Promise<Record<string, unknown> | undefined>;
+async function json(url: string, init: RequestInit, allowNotFound = false) {
   const response = await fetch(url, { ...init, ...fetchOptions });
   if (!response.ok) {
     void response.body?.cancel().catch(() => {});
+    if (allowNotFound && response.status === 404) return;
     throw new Error('Could not authenticate the MCP connection.');
   }
   const value: unknown = await response.json();
@@ -25,7 +37,7 @@ export function createEntraMcpHeaders(base: URL, auth: Auth, clientId: string) {
   const cache = new Map<string, { token: string; expiresAt: number }>();
   let current = -1;
 
-  return async (endpoint: string, signal?: AbortSignal): Promise<HeadersInit> => {
+  return async (endpoint: string, signal?: AbortSignal, allowPublic = false): Promise<HeadersInit> => {
     const revision = auth.sessionVersion();
     if (revision !== current) { cache.clear(); current = revision; }
     function active() {
@@ -41,7 +53,10 @@ export function createEntraMcpHeaders(base: URL, auth: Auth, clientId: string) {
     const saved = cache.get(endpoint);
     if (saved && saved.expiresAt > Date.now()) return { Authorization: `Bearer ${saved.token}` };
 
-    const resource = await json(origin + resourceMetadata + url.pathname, { signal });
+    const resource = await json(origin + resourceMetadata + url.pathname, { signal }, allowPublic);
+    active();
+    // Public servers on the Entra host have no protected-resource document.
+    if (!resource) return {};
     const issuers = resource.authorization_servers;
     if (resource.resource !== endpoint || !Array.isArray(issuers) || issuers.length !== 1 || typeof issuers[0] !== 'string' || !issuers[0].startsWith(issuerBase)) {
       throw new Error('Unexpected MCP protected-resource metadata.');

@@ -116,7 +116,7 @@ export function AgentEditor({ entry, seed, catalog, catalogStatus, tags, mcpServ
                 : key === 'model-context' ? <AgentModelContextFields {...{ draft, patch, discovery, dialogHost }} store={mcpServers} options={mcpOptions} />
                  : key === 'skills' ? <AgentSkillFields active={tab === 'skills'} skills={skills?.skills}
                      execution={<ChatExecutionField value={skills?.execution === 'server' ? 'hosted' : skills?.execution === 'client' ? 'client' : undefined}
-                       onChange={mode => patch({ tools: patchAgentSkills(draft.tools, { execution: mode === 'hosted' ? 'server' : mode }) })} />}
+                       onChange={mode => patch({ tools: patchAgentSkills(draft.tools, { execution: mode === 'hosted' ? 'server' : mode === 'client' ? 'client' : undefined }) })} />}
                      onChange={entries => patch({ tools: patchAgentSkills(draft.tools, { skills: entries ?? [] }) })}
                      onBusyChange={setSkillBusy} local={localSkills} remote={remoteSkills} gateway={gateway} />
                    : key === 'tools' ? <AgentToolsFields {...{ draft, patch }} />

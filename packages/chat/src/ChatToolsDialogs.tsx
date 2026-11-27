@@ -93,7 +93,7 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hostedSki
   if (voice) providers.delete('openai');
   const voiceLabel = voice?.protocol === 'google' ? 'Google' : voice?.protocol === 'xai' ? 'xAI' : chatProviders.openai.label;
   const voiceSettings = voiceDraft ?? value.realtimeSettings ?? {};
-  const hasModelContext = modelContext.servers.length > 0;
+  const hasModelContext = modelContext.servers.length > 0 || !!modelContext.route && modelContext.installed === true;
   const tabs: [ChatSettingsTab, string][] = [['general', t('General')]];
   if (hasModelContext) tabs.push(['model-context', t('Model Context')]);
   tabs.push(['tools', t('Tools')], ['tool-configuration', t('Tool configuration')], ['skills', t('Skills')]);

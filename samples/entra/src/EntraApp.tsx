@@ -6,7 +6,7 @@ import { useRef, useState } from 'react';
 import { appAgents } from '../../shared/appAgents';
 import type { McpConfig } from '../../shared/mcpConfig';
 import type { EntraAuth } from './auth';
-import { createEntraMcpHeaders } from './mcpAuth';
+import { withEntraMcpAuth } from './mcpAuth';
 
 export function EntraApp({ appName, base, agentBase, auth, mcpConfig }: { appName: string; base: URL; agentBase?: URL; auth: EntraAuth; mcpConfig?: McpConfig }) {
   const { t } = useAppTranslation();
@@ -17,12 +17,7 @@ export function EntraApp({ appName, base, agentBase, auth, mcpConfig }: { appNam
   const working = useRef(false);
   const [gateway] = useState(() => createGateway(base, auth.headers));
   const [agentBackend] = useState(() => agentBase && auth.hasAgentScope ? createAgentBackend(agentBase, auth.agentHeaders) : undefined);
-  const [mcp] = useState<McpOptions | undefined>(() => {
-    if (!mcpConfig?.base || !auth.hasMcpScope) return mcpConfig;
-    const headersFor = createEntraMcpHeaders(mcpConfig.base, auth, auth.clientId);
-    return { ...mcpConfig, headersForRemote: (headers, endpoint) => headers.length === 0
-      ? { ready: !!auth.getAccount(), headers: (signal) => headersFor(endpoint, signal), challengeOnly: true } : undefined };
-  });
+  const [mcp] = useState<McpOptions | undefined>(() => auth.hasMcpScope ? withEntraMcpAuth(mcpConfig, auth, auth.clientId) : mcpConfig);
 
   async function authenticate(signOut = false) {
     if (working.current) return;

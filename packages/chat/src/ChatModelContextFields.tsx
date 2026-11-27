@@ -12,10 +12,11 @@ import { useMcpRegistry } from './useMcpRegistry';
 import type { McpSelection } from './useMcpServers';
 
 export type ChatModelContextServers = {
-  servers: McpSelection['connected'];
+  servers: ReadonlyArray<Pick<McpSelection['connected'][number], 'record'> & Partial<Pick<McpSelection['connected'][number], 'discovery'>>>;
   registry?: McpOptions;
   descriptions: ReadonlyMap<string, string>;
   route: ReturnType<typeof hostedMcpRoute>;
+  installed?: boolean;
 };
 
 export function ChatModelContextFields({ servers, registry, descriptions, route, value, onChange, locked, hostedToolSearch, localToolSearch }: ChatModelContextServers & {
@@ -25,6 +26,7 @@ export function ChatModelContextFields({ servers, registry, descriptions, route,
   const { t } = useAppTranslation();
   const { byEndpoint } = useMcpRegistry(registry, false, servers.map(({ record }) => record));
   const hosted = !!route && value?.execution === 'hosted';
+  const provider = !!route && value?.execution === 'provider';
   const policy = { ...browserMcpPolicy, ...value?.policy };
   const change = (patch: Partial<ChatModelContext>) => onChange(normalizeChatModelContext({ ...value, ...patch }));
   const changeServer = (endpoint: string, patch: Partial<ChatMcpServerOptions>) => change({
@@ -33,10 +35,10 @@ export function ChatModelContextFields({ servers, registry, descriptions, route,
 
   return <div className="chat-preference-cards">
     <section className="chat-tool-card">
-      <ChatExecutionField value={route || value?.execution !== 'hosted' ? value?.execution : undefined}
-        disabled={locked} hostedSupported={!!route} onChange={execution => change({ execution })} />
+      <ChatExecutionField value={route || value?.execution === 'client' ? value?.execution : undefined}
+        disabled={locked} hostedSupported={!!route} providerSupported={!!route} onChange={execution => change({ execution })} />
     </section>
-    {!hosted && <McpPolicyCard policy={policy} onChange={locked ? undefined : (flag, checked) => change({ policy: { ...policy, [flag]: checked } })} />}
+    {!hosted && !provider && <McpPolicyCard policy={policy} onChange={locked ? undefined : (flag, checked) => change({ policy: { ...policy, [flag]: checked } })} />}
     {servers.map(({ record, discovery }) => {
       const { id, endpoint, title } = record;
       const options = value?.servers?.[endpoint];
@@ -52,9 +54,9 @@ export function ChatModelContextFields({ servers, registry, descriptions, route,
             onChange={locked || localToolSearch ? undefined : deferLoading => changeServer(endpoint, { deferLoading })} />
         </div>}
         <div className="agent-mcp-columns">
-          <McpAllowedToolsField available={discovery.tools.map(tool => tool.remoteName)} names={options?.allowedTools} disabled={locked}
+          <McpAllowedToolsField available={discovery?.tools.map(tool => tool.remoteName) ?? options?.allowedTools ?? []} names={options?.allowedTools} disabled={locked || !discovery}
             onChange={allowedTools => changeServer(endpoint, { allowedTools })} />
-          <McpApprovalField approval={options?.requireApproval} disabled={locked || !hosted}
+          <McpApprovalField approval={options?.requireApproval} disabled={locked || !(hosted || provider)}
             onChange={requireApproval => changeServer(endpoint, { requireApproval })} />
         </div>
       </McpServerCard>;

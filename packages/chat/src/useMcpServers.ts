@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { discoverMcpServer, mcpAppAuth } from './mcp';
+import { discoverMcpServer, mcpAppAuth, mcpAppDescriptorHeaders } from './mcp';
 import type { McpDiscovery, McpOptions, McpServer } from './mcp';
 import { maxMcpServers, parseMcpServer, resolveMcpHeaders } from './mcpConfiguration';
 import type { McpHeaderRow, McpServerRecord } from './mcpConfiguration';
@@ -65,23 +65,32 @@ export function useMcpServers(scope: string | undefined, options: McpOptions | u
       if (auth?.ready) return { ...server, requestHeaders: auth.headers, challengeOnly: auth.challengeOnly };
       return;
     }
+    const headers = manualHeaders(record);
+    if (headers) return { ...server, requestHeaders: () => headers };
+  }
+
+  function descriptorHeaders(record: McpServerRecord, signal?: AbortSignal) {
+    if (!available) return;
+    return record.auth === 'app' ? mcpAppDescriptorHeaders(options, record, signal) : manualHeaders(record);
+  }
+
+  function manualHeaders(record: McpServerRecord) {
     const credentials = current.session.get(record.id);
     if ((record.needsSession || record.extraNames.length) && !credentials) return;
     try {
       const { fields, rows } = credentials ?? emptyCredentials;
-      const headers = resolveMcpHeaders(record.declarations, fields, rows);
-      return { ...server, requestHeaders: () => headers };
+      return resolveMcpHeaders(record.declarations, fields, rows);
     } catch { return; }
   }
 
-  return { available, records: current.records, credentials: (id: string) => current.session.get(id), save, remove, connection };
+  return { available, records: current.records, credentials: (id: string) => current.session.get(id), save, remove, connection, descriptorHeaders };
 }
 
 export type McpServers = ReturnType<typeof useMcpServers>;
-type Selection = { record: McpServerRecord } & ({ state: 'loading' | 'error' } | { state: 'ready'; discovery: McpDiscovery });
+type Selection = { record: McpServerRecord } & ({ state: 'loading' | 'error' | 'selected' } | { state: 'ready'; discovery: McpDiscovery });
 
 /** Selection belongs to the conversation, not the installed-server library. */
-export function useMcpSelection(store: McpServers, automatic?: readonly McpServerRecord[]) {
+export function useMcpSelection(store: McpServers, automatic?: readonly McpServerRecord[], provider = false) {
   const [selected, setSelected] = useState<ReadonlyMap<string, Selection>>(() => new Map());
   const requests = useRef(new Map<string, AbortController>());
   useEffect(() => {
@@ -97,6 +106,13 @@ export function useMcpSelection(store: McpServers, automatic?: readonly McpServe
   const invalid = [...selected.values()].filter(entry => !readyRecords.includes(entry.record));
   useEffect(() => {
     for (const { record } of invalid) clear(record.id);
+    for (const entry of current) {
+      if (provider && entry.state === 'loading') {
+        requests.current.get(entry.record.id)?.abort();
+        requests.current.delete(entry.record.id);
+        set(entry.record, true);
+      } else if (!provider && entry.state === 'selected') set(entry.record, true);
+    }
     if (automatic) for (const record of readyRecords) {
       if (!selected.has(record.id)) set(record, true);
     }
@@ -117,9 +133,10 @@ export function useMcpSelection(store: McpServers, automatic?: readonly McpServe
     if (!enabled) { clear(record.id); return; }
     const server = store.connection(record);
     if (!server || requests.current.has(record.id)) return;
+    function update(entry: Selection) { setSelected(previous => new Map(previous).set(record.id, entry)); }
+    if (provider) { update({ record, state: 'selected' }); return; }
     const controller = new AbortController();
     requests.current.set(record.id, controller);
-    function update(entry: Selection) { setSelected(previous => new Map(previous).set(record.id, entry)); }
     update({ record, state: 'loading' });
     void discoverMcpServer(server, controller.signal).then(
       discovery => { if (!controller.signal.aborted) update({ record, state: 'ready', discovery }); },
@@ -130,7 +147,7 @@ export function useMcpSelection(store: McpServers, automatic?: readonly McpServe
   }
 
   const connected = current.filter(entry => entry.state === 'ready');
-  return { entries: current, connected, loading: current.some(entry => entry.state === 'loading') ||
+  return { entries: current, connected, provider, loading: current.some(entry => entry.state === 'loading') ||
       (!!automatic && readyRecords.some(record => !current.some(entry => entry.record === record))),
     tools: connected.flatMap(entry => entry.discovery.tools).filter((tool, index, tools) => tools.findIndex(other => other.name === tool.name) === index), set };
 }

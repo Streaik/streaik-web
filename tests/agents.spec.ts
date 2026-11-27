@@ -865,7 +865,8 @@ test('sample overrides persist and reset without changing explicit role choices'
 test('only the active Entra profile sees its agent overrides, definitions and choices', async ({ page }) => {
   await page.route((url) => url.port === '15174' && url.pathname === '/src/auth.ts', (route) => route.fulfill({
     contentType: 'application/javascript',
-    body: `export async function createEntraAuth() {
+    body: `export const readMcpScopes = () => undefined;
+    export async function createEntraAuth() {
       const id = sessionStorage.getItem('test-agent-account') ?? 'alpha';
       return {
         getAccount: () => id === 'signed-out' ? null : { homeAccountId: id, environment: 'test', tenantId: 'test', name: id },

@@ -221,6 +221,7 @@ export function filterLocalToolReplay(messages: ChatMessage[], definitions: read
       }
       if (part.providerExecuted && part.approval && typeof part.approval.approved === 'boolean') {
         if (nativeMcp && part.state === 'approval-responded' && name.startsWith('mcp.')) return [part];
+        if (apiChat && part.state === 'approval-responded' && name === 'streaik_mcp_execution_approval') return [part];
         if (apiChat && name === 'streaik_mcp_result_review' && (part.state === 'approval-responded' || part.state === 'output-available')) {
           const { toolMetadata: _preview, ...decision } = part;
           const { descriptor: _descriptor, ...approval } = part.approval;

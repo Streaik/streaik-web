@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createEntraMcpHeaders } from '../samples/entra/src/mcpAuth.ts';
+import { createEntraMcpHeaders, withEntraMcpAuth } from '../samples/entra/src/mcpAuth.ts';
 import { readMcpScopes } from '../samples/entra/src/auth.ts';
-import { discoverMcpServer, expandMcpResource, fetchMcpCatalog, filterMcpCatalog, preferredMcpRemote, readMcpResource } from '../packages/chat/src/mcp.ts';
+import { discoverMcpServer, expandMcpResource, fetchMcpCatalog, filterMcpCatalog, McpDescriptorAuthUnsupported, mcpAppAuth, mcpAppDescriptorHeaders, preferredMcpRemote, readMcpResource } from '../packages/chat/src/mcp.ts';
+import { chatHostedMcp, withMcpHeaders } from '../packages/chat/src/chatModelContext.ts';
+import { apiChatHostedMcp, withResponsesHostedMcp } from '../packages/gateway/src/hostedMcp.ts';
 import { byokRegistryRemote } from '../samples/shared/mcpConfig.ts';
 
 const base = new URL('https://mcp.example.test/team/entra/');
@@ -115,6 +117,74 @@ test('does not return a wrapped bearer if the signed-in account changes during e
     return Response.json({ token_type: 'Bearer', access_token: 'mcp1.stale', expires_in: 120, issued_token_type: accessTokenType });
   });
   await assert.rejects(createEntraMcpHeaders(base, auth, 'spa-client-id')(endpoint), /sign-in changed/);
+});
+
+const managedServer = { id: 'images', title: 'Images', endpoint, declarations: [], source: 'registry', auth: 'app', extraNames: [] };
+
+test('Hosted and Provider tool descriptors await the same MCP bearer as browser auth on both Gateway routes', async t => {
+  const requests = mockFetch(t, url => url === `${issuer}/token` && Response.json({ token_type: 'Bearer',
+    access_token: 'mcp1.endpoint_fixture', expires_in: 120, issued_token_type: accessTokenType }));
+  const { auth, calls } = mockAuth();
+  const options = withEntraMcpAuth({ base }, auth, 'spa-client-id');
+  const signal = new AbortController().signal;
+  const browser = mcpAppAuth(options, managedServer);
+  assert.equal(browser.challengeOnly, true);
+  assert.equal(new Headers(await browser.headers(signal)).get('authorization'), 'Bearer mcp1.endpoint_fixture');
+  for (const mode of ['hosted', 'provider']) {
+    const descriptors = chatHostedMcp({ execution: mode }, [{ record: managedServer }]);
+    const wire = await withMcpHeaders(descriptors, url => {
+      assert.equal(url, endpoint);
+      return mcpAppDescriptorHeaders(options, managedServer, signal);
+    });
+    assert.equal(descriptors[0].headers, undefined);
+    const apiChat = apiChatHostedMcp(wire[0]).inputSchema.mcp;
+    const responses = JSON.parse(withResponsesHostedMcp('{}', wire)).tools[0];
+    for (const tool of [apiChat, responses]) {
+      assert.equal(tool.server_url, endpoint);
+      assert.equal(tool.execution, mode === 'provider' ? 'server' : undefined);
+      assert.deepEqual(tool.headers, { authorization: 'Bearer mcp1.endpoint_fixture' });
+      assert.doesNotMatch(JSON.stringify(tool), /entra-0/);
+    }
+  }
+  assert.deepEqual(calls, ['images']);
+  assert.deepEqual(requests.map(([url]) => url), [resourceDocument, issuerDocument, `${issuer}/token`]);
+});
+
+test('managed descriptors leave public servers credential-free and do not fall back to browser-only credentials', async t => {
+  const publicUrl = new URL('github-rest-countries', base).href;
+  const metadata = `${base.origin}/.well-known/oauth-protected-resource/team/entra/github-rest-countries`;
+  const requests = mockFetch(t, url => url === metadata && new Response(null, { status: 404 }));
+  const { auth, calls } = mockAuth();
+  const options = withEntraMcpAuth({ base }, auth, 'spa-client-id');
+  const record = { ...managedServer, endpoint: publicUrl };
+  const plan = chatHostedMcp({ execution: 'provider' }, [{ record }]);
+  assert.deepEqual(await withMcpHeaders(plan, () => mcpAppDescriptorHeaders(options, record)), plan);
+  assert.equal(mcpAppDescriptorHeaders(options, { ...record, endpoint: 'https://other.example.test/github-rest-countries' }), undefined);
+  assert.equal(mcpAppDescriptorHeaders(options, { ...managedServer, source: 'manual' }), undefined);
+  assert.throws(() => mcpAppDescriptorHeaders({ base, headersForRemote: () => ({ ready: true, challengeOnly: true,
+    headers: () => assert.fail('Browser-only credentials must not be copied') }) }, managedServer), McpDescriptorAuthUnsupported);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(requests.map(([url]) => url), [metadata]);
+});
+
+test('existing app adapters supply descriptor headers only for their configured MCP endpoint', async () => {
+  const signal = new AbortController().signal;
+  let acquisitions = 0;
+  const headers = async received => {
+    assert.equal(received, signal);
+    acquisitions++;
+    return { Authorization: 'Bearer fixture-mcp' };
+  };
+  const options = { base, headersForRemote: (_, url) => {
+    assert.equal(url, endpoint);
+    return { ready: true, headers };
+  } };
+  assert.deepEqual(await mcpAppDescriptorHeaders(options, managedServer, signal), { Authorization: 'Bearer fixture-mcp' });
+  assert.equal(mcpAppDescriptorHeaders(options, { ...managedServer, endpoint: 'https://elsewhere.example.test/mcp' }, signal), undefined);
+  assert.equal(mcpAppDescriptorHeaders(options, { ...managedServer, declarations: [{ name: 'Authorization', manualOnly: true }] }, signal), undefined);
+  const locked = { base, headersForRemote: () => ({ ready: false, headers }) };
+  assert.equal(mcpAppDescriptorHeaders(locked, managedServer, signal), undefined);
+  assert.equal(acquisitions, 1);
 });
 
 test('the web MCP client lists and reads delegated data with the resource-bound bearer, not the Entra assertion', async t => {

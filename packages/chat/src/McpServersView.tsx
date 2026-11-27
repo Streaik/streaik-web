@@ -197,7 +197,12 @@ function InstalledServers({ store, selection, locked, onEdit, active, byEndpoint
   const servers = results.map(record => {
     const entry = selection?.entries.find(entry => entry.record === record);
     const ready = !!store.connection(record);
-    const status = !ready ? t('Credentials needed') : entry?.state === 'loading' ? t('Connecting…')
+    const hostname = new URL(record.endpoint).hostname.replace(/\.$/, '');
+    const loopback = hostname === 'localhost' || hostname.endsWith('.localhost') || hostname === '[::1]' || /^127(?:\.\d{1,3}){3}$/.test(hostname);
+    const status = !ready ? t('Credentials needed') : entry && selection?.provider ? loopback
+      ? t('Selected for Provider. A remote provider cannot reach localhost; use Client or a local Gateway with Hosted.')
+      : t('Selected for Provider. The provider connects when you send a message.')
+      : entry?.state === 'loading' ? t('Connecting…')
       : entry?.state === 'error' ? t('Could not connect. Turn the server off and back on to retry.')
       : entry?.state === 'ready' ? entry.discovery.tools.length ? t('{{count, number}} tools available', { count: entry.discovery.tools.length })
         : entry.discovery.hasPrompts || entry.discovery.hasResources ? t('Connected') : t('No compatible tools') : undefined;

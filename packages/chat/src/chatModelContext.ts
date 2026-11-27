@@ -5,7 +5,7 @@ import { isObject, maxMcpServers, mcpEndpoint } from './mcpConfiguration.ts';
 import { toolOptions } from './toolConfiguration.ts';
 import type { ToolCaller } from './toolConfiguration.ts';
 
-export type ChatExecution = 'client' | 'hosted';
+export type ChatExecution = 'client' | 'hosted' | 'provider';
 export type McpPolicyFlag = keyof typeof agentMcpPolicy;
 export type McpPolicy = Partial<Record<McpPolicyFlag, boolean>>;
 export type ChatMcpServerOptions = {
@@ -44,7 +44,7 @@ export function normalizeChatModelContext(value: unknown): ChatModelContext | un
   });
   const { execution, toolSearch, resourceSearch } = value;
   const settings: ChatModelContext = {
-    ...(execution === 'client' || execution === 'hosted' ? { execution } : {}),
+    ...(execution === 'client' || execution === 'hosted' || execution === 'provider' ? { execution } : {}),
     ...(flags.length > 0 && { policy: Object.fromEntries(flags) }),
     ...(servers.length > 0 && { servers: Object.fromEntries(servers) }),
     ...(toolSearch === true && { toolSearch: true }),
@@ -76,8 +76,9 @@ export function hostedMcpDefers(options: ChatMcpServerOptions | undefined, hoste
 
 export function chatHostedMcp(settings: ChatModelContext | undefined, servers: readonly { record: { title: string; endpoint: string } }[],
   localToolSearch = false): HostedMcpTool[] {
-  if (settings?.execution !== 'hosted' || !servers.length) return [];
-  const hostedToolSearch = settings.toolSearch === true && !localToolSearch;
+  if ((settings?.execution !== 'hosted' && settings?.execution !== 'provider') || !servers.length) return [];
+  const hosted = settings.execution === 'hosted';
+  const hostedToolSearch = hosted && settings.toolSearch === true && !localToolSearch;
   const labels = new Set<string>();
   const tools: HostedMcpTool[] = servers.map(({ record: { title, endpoint } }) => {
     let label = title;
@@ -85,12 +86,25 @@ export function chatHostedMcp(settings: ChatModelContext | undefined, servers: r
     labels.add(label.toLowerCase());
     const options = settings.servers?.[endpoint];
     return { type: 'mcp', server_label: label, server_url: endpoint,
-      ...(hostedMcpDefers(options, hostedToolSearch, localToolSearch) && { defer_loading: true }),
-      ...(options?.allowedCallers?.length && { allowed_callers: options.allowedCallers }),
+      ...(!hosted && { execution: 'server' }),
+      ...(hosted && hostedMcpDefers(options, hostedToolSearch, localToolSearch) && { defer_loading: true }),
+      ...(hosted && options?.allowedCallers?.length && { allowed_callers: options.allowedCallers }),
       ...(options?.allowedTools && { allowed_tools: options.allowedTools }),
       ...(options?.requireApproval && { require_approval: options.requireApproval }) };
   });
   if (hostedToolSearch) tools.push({ type: 'tool_search' });
-  if (settings.resourceSearch) tools.push({ type: 'resource_search' });
+  if (hosted && settings.resourceSearch) tools.push({ type: 'resource_search' });
   return tools;
+}
+
+/** Make a wire-only copy so credentials do not enter turn state or review metadata. */
+export async function withMcpHeaders(tools: readonly HostedMcpTool[], headersFor: (endpoint: string, label: string) => HeadersInit | Promise<HeadersInit>) {
+  const result: HostedMcpTool[] = [];
+  // Resolve sequentially: several servers can use the same interactive sign-in session.
+  for (const tool of tools) {
+    if (tool.type !== 'mcp') { result.push(tool); continue; }
+    const headers = Object.fromEntries(new Headers(await headersFor(tool.server_url, tool.server_label)));
+    result.push(Object.keys(headers).length ? { ...tool, headers } : tool);
+  }
+  return result;
 }

@@ -12,10 +12,12 @@ export default defineConfig({
         VITE_ENTRA_TENANT_ID: '11111111-1111-1111-1111-111111111111',
         VITE_ENTRA_CLIENT_ID: '22222222-2222-2222-2222-222222222222',
         VITE_ENTRA_API_SCOPE: 'api://33333333-3333-3333-3333-333333333333/access_as_user',
+        VITE_MCP_BASE: '/entra-mcp-fixture/',
+        VITE_MCP_REGISTRY_URL: '/entra-mcp-registry-fixture',
       },
     },
     // The optional services fixture deliberately runs a second Vite process for the same BYOK project.
     { command: 'npm run dev -w @streaik/sample-byok -- --port 15175 --bypass-lock', url: 'http://localhost:15175',
-      env: { VITE_MCP_REGISTRY_URL: '/test-mcp-registry', VITE_AGENT_BASE: '/test-agents' } },
+      env: { VITE_MCP_REGISTRY_URL: '/test-mcp-registry', VITE_MCP_BASE: '/byok-mcp-fixture/', VITE_AGENT_BASE: '/test-agents' } },
   ],
 });
