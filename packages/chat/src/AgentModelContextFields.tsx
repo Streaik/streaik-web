@@ -1,4 +1,4 @@
-import { Button, Textarea } from '@streaik/themes';
+import { Button } from '@streaik/themes';
 import { useState } from 'react';
 import type { RefObject } from 'react';
 import { createPortal } from 'react-dom';
@@ -31,14 +31,16 @@ function AgentMcpServerFields({ entry, change, installed, discovery, registryEnt
   const callers = toolOptions(server).allowed_callers ?? [...toolCallers];
   const names = agentMcpToolNames(server);
   const filter = isObject(server.allowed_tools) ? server.allowed_tools as JsonObject : undefined;
-  const selected = !!names?.length;
-  // Keep the name editor open while entering the first name, or clearing the last one.
-  const [editingNames, setEditingNames] = useState(false);
-  const toolsMode = editingNames || selected ? 'selected' : names ? 'none' : filter ? 'custom' : 'all';
-  const availableNames = status?.state === 'ready' ? [...new Set([...status.discovery.tools.map(tool => tool.remoteName), ...names ?? []])].sort() : undefined;
+  const connected = status?.state === 'ready';
+  const discoveredNames = connected ? status.discovery.tools.map(tool => tool.remoteName) : [];
+  // Retain existing tool names even if the server is offline or no longer lists them.
+  const availableNames = [...new Set([...discoveredNames, ...(names ?? [])])].sort();
+  const [choosingTools, setChoosingTools] = useState(false);
+  const toolsMode = choosingTools || names?.length ? 'selected' : names ? 'none' : filter ? 'custom' : 'all';
+  const canSelectTools = connected && availableNames.length > 0;
   const approval = server.require_approval;
   const approvalMode = approval === 'always' || approval === 'never' ? approval : approval == null ? 'default' : 'custom';
-  const execution = server.execution === 'server' || server.execution === 'provider' ? server.execution : 'client';
+  const execution = server.execution === 'client' || server.execution === 'server' || server.execution === 'provider' ? server.execution : 'default';
   const editLabel = t('Edit MCP URL');
   const removeLabel = t('Remove {{name}}', { name: key });
   const changeNames = (next: readonly string[]) => change({ allowed_tools: filter ? { ...filter, tool_names: next } : next });
@@ -56,9 +58,9 @@ function AgentMcpServerFields({ entry, change, installed, discovery, registryEnt
     </>}>
     <div className="agent-mcp-server-fields">
       <AgentSelectField label={t('Execution')} value={execution} options={[
-        { value: 'client', label: t('Agent backend') }, { value: 'server', label: t('Gateway') },
+        { value: 'default', label: t('Default') }, { value: 'client', label: t('Client') }, { value: 'server', label: t('Hosted') },
         ...(execution === 'provider' ? [{ value: 'provider', label: t('Provider') }] : []),
-      ]} onValueChange={value => change({ execution: value })} />
+      ]} onValueChange={value => change({ execution: value === 'default' ? undefined : value })} />
       <div className="agent-mcp-usage">
         <AgentSelectField multiple label={t('Allowed callers')} value={callers} options={toolCallers.map(caller => ({
           value: caller, label: t(caller === 'direct' ? 'Direct' : 'Programmatic'),
@@ -70,11 +72,12 @@ function AgentMcpServerFields({ entry, change, installed, discovery, registryEnt
       </div>
       <div className="agent-mcp-columns">
         <AgentSelectField label={t('Allowed tools')} value={toolsMode} options={[
-          { value: 'all', label: t('All tools') }, { value: 'none', label: t('No tools') }, { value: 'selected', label: t('Selected tools') },
+          { value: 'all', label: t('All tools') }, { value: 'none', label: t('No tools') },
+          ...(canSelectTools || toolsMode === 'selected' ? [{ value: 'selected', label: t('Selected tools') }] : []),
           ...(toolsMode === 'custom' ? [{ value: 'custom', label: t('Custom filter') }] : []),
         ]} onValueChange={value => {
           if (value === 'custom') return;
-          setEditingNames(value === 'selected');
+          setChoosingTools(value === 'selected');
           if (value === 'all') change({ allowed_tools: undefined });
           else if (value === 'none' || !names) changeNames([]);
         }} />
@@ -85,16 +88,13 @@ function AgentMcpServerFields({ entry, change, installed, discovery, registryEnt
           if (value !== 'custom') change({ require_approval: value === 'default' ? undefined : value });
         }} />
       </div>
-      {toolsMode === 'selected' && (availableNames?.length
-        ? <AgentSelectField multiple label={t('Selected tools')} value={names ?? []}
-          options={availableNames.map(name => ({ value: name, label: name }))} onValueChange={changeNames} />
-        : <label className="agent-field">{t('Allowed tool names (one per line)')}<Textarea defaultValue={names?.join('\n')} onChange={event =>
-          changeNames([...new Set(event.currentTarget.value.split(/\r?\n/).map(name => name.trim()).filter(Boolean))])} /></label>)}
+      {toolsMode === 'selected' && <AgentSelectField multiple label={t('Selected tools')} value={names ?? []} disabled={!canSelectTools}
+        options={availableNames.map(name => ({ value: name, label: name }))} onValueChange={changeNames} />}
       {record && installed.connection(record)
-        ? <Button type="button" variant="subtle" className="agent-mcp-discover" disabled={status?.state === 'loading' || status?.state === 'ready'}
-          onClick={() => discovery.set(record, true)}>{t(status?.state === 'loading' ? 'Connecting to MCP servers…'
-            : status?.state === 'ready' ? 'Tools discovered' : status?.state === 'error' ? 'Retry' : 'Discover tools')}</Button>
-        : <small>{t('Install and authorize this MCP server in Streaik to discover its tools.')}</small>}
+        ? <Button type="button" variant="subtle" className="agent-mcp-discover" disabled={status?.state === 'loading' || connected}
+          onClick={() => discovery.set(record, true)}>{t(status?.state === 'loading' ? 'Connecting...' : connected ? 'Connected'
+            : status?.state === 'error' ? 'Retry connection' : 'Connect Model Context')}</Button>
+        : <small>{t('Install and authorize this server first.')}</small>}
     </div>
   </McpServerCard>;
 }
@@ -110,6 +110,7 @@ export function AgentModelContextFields({ draft, patch, store, discovery, option
   const endpoints = new Set(servers.flatMap(({ endpoint }) => endpoint ?? []));
   const { policy, elicitation } = agentMcpClientSettings(draft.mcpClient);
   const addLabel = t('Add by URL');
+  const catalogLabel = t('Catalog');
   const close = () => setDialog(undefined);
   const change = (key: string, patchFields?: ServerPatch) => patch({ tools: patchAgentMcp(draft.tools, key, patchFields) });
 
@@ -128,7 +129,7 @@ export function AgentModelContextFields({ draft, patch, store, discovery, option
     </section>
     <section className="agent-field-group">
       <div className="agent-mcp-heading"><h3>{t('Capabilities')}</h3>
-        <AgentSwitch label={t('Elicitation')} checked={!!elicitation} onChange={checked =>
+        <AgentSwitch label={t('Elicitation')} hideLabel checked={!!elicitation} onChange={checked =>
           patch({ mcpClient: setAgentElicitation(draft.mcpClient, 'elicitation', checked) })} /></div>
       <div className="agent-mcp-columns">
         <AgentSwitch label={t('Form')} checked={elicitation?.form != null} onChange={elicitation ? checked =>
@@ -140,11 +141,10 @@ export function AgentModelContextFields({ draft, patch, store, discovery, option
       registryEntry={entry.endpoint ? registry.byEndpoint.get(entry.endpoint) : undefined}
       onEdit={() => setDialog({ type: 'url', entry })} onRemove={() => change(entry.key)} />)}
     <div className="agent-mcp-actions">
-      <Button type="button" variant="subtle" aria-haspopup="dialog" onClick={() => setDialog({ type: 'catalog' })}>
-        <ChatIcon name="tool" />{t('Catalog')}
-      </Button>
       <Button type="button" variant="subtle" className="chat-composer-icon" title={addLabel} aria-label={addLabel} aria-haspopup="dialog"
         onClick={() => setDialog({ type: 'url' })}><ChatIcon name="link" /></Button>
+      <Button type="button" variant="subtle" className="chat-composer-icon" title={catalogLabel} aria-label={catalogLabel} aria-haspopup="dialog"
+        onClick={() => setDialog({ type: 'catalog' })}><ChatIcon name="tool" /></Button>
     </div>
     {dialog && dialogHost.current && createPortal(dialog.type === 'catalog'
       ? <AgentMcpCatalogDialog options={options} registry={registry} close={close} picker={{ endpoints, add: (item, endpoint) =>
