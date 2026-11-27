@@ -64,10 +64,7 @@ export function ChatActivity({ parts, renderMarkdown }: { parts: ActivityPart[];
   const result = useMemo(() => describeToolOutput(output), [output]);
   const title = reasoning ? t('Reasoning') : decision ? t('Decision', { context: 'card' }) : invocationName(part);
   const fallback = decision && output && typeof output === 'object' && 'fallback' in output && output.fallback === true;
-  // API Chat reserves an approval record before execution, but MCP only asks to review the result.
-  const mcpPending = !reasoning && part.state === 'approval-requested' &&
-    (part.type === 'dynamic-tool' ? part.toolName.startsWith('mcp_') : part.type.startsWith('tool-mcp_'));
-  const state = reasoning ? undefined : part.approval?.approved === false ? 'Declined' : mcpPending ? 'Tool requested'
+  const state = reasoning ? undefined : part.approval?.approved === false ? 'Declined'
     : fallback ? 'Fallback used' : result.isError ? 'Tool failed' : toolStates[part.state];
   return <section className="chat-activity" aria-label={t('Assistant activity')}>
     <header className="chat-activity-header">

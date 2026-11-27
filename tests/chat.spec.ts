@@ -500,8 +500,8 @@ for (const policy of ['unlimited', 'maximum', 'stop tool'] as const) {
     await settings.getByRole('button', { name: 'Close', exact: true }).click();
     const composer = page.getByRole('textbox', { name: 'Message', exact: true });
     await composer.fill('Look up the model catalog.'); await composer.press('Enter');
-    const approval = page.getByRole('dialog', { name: 'Review tool result', exact: true })
-      .getByRole('button', { name: 'Approve and share', exact: true });
+    const approval = page.getByRole('dialog', { name: 'Approve tool execution', exact: true })
+      .getByRole('button', { name: 'Approve and run', exact: true });
     for (let index = 0; index < callCount; index++) await approval.click();
     await expect(page.getByText('Tool batch complete.', { exact: true })).toBeVisible();
     expect(requests.map(request => request.toolChoice)).toEqual(policy === 'unlimited' ? [undefined, undefined] : ['required', 'none']);
@@ -521,6 +521,57 @@ for (const policy of ['unlimited', 'maximum', 'stop tool'] as const) {
       await expect.poll(() => requests.length).toBe(3);
       expect(requests[2]).not.toHaveProperty('toolChoice');
     }
+  });
+}
+
+for (const outcome of ['completed', 'unknown'] as const) {
+  test(`hosted approval is submitted once and replays only ${outcome} history`, async ({ page }) => {
+    await mockModels(page);
+    const requests: { messages: { role: string; parts: Record<string, unknown>[] }[] }[] = [];
+    const input = { sku: 'sku-1' };
+    const call = { kind: 'local', callId: 'provider-call', server: 'inventory', name: 'lookup' };
+    const result = { content: [{ type: 'text', text: 'in stock' }] };
+    const headers = { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' };
+    const frames = (events: object[]) => [{ type: 'start' }, { type: 'start-step' }, ...events,
+      { type: 'finish-step' }, { type: 'finish', finishReason: 'tool-calls' }]
+      .map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n';
+    await page.route('**/gateway/api/chat', route => {
+      requests.push(route.request().postDataJSON());
+      if (requests.length === 1) return route.fulfill({ headers, body: frames([
+        { type: 'tool-input-available', toolCallId: 'p1', toolName: 'streaik_hosted_mcp_approval', input,
+          dynamic: true, providerExecuted: true, toolMetadata: { streaikHostedCall: call } },
+        { type: 'tool-approval-request', toolCallId: 'p1', approvalId: 'p1', signature: 'fixture-signature' },
+      ]) });
+      if (requests.length === 2) return outcome === 'unknown' ? route.abort() : route.fulfill({ headers, body: frames([
+        { type: 'tool-input-available', toolCallId: 'run_p1', toolName: 'streaik_hosted_mcp_result', title: 'Lookup completed', input,
+          dynamic: true, providerExecuted: true, toolMetadata: { streaikHostedReceipt: { call, approved: true }, streaikHostedSignature: 'fixture-receipt' } },
+        { type: 'tool-output-available', toolCallId: 'run_p1', providerExecuted: true, dynamic: true, output: result },
+      ]) });
+      return route.fulfill({ headers, body: sse('Follow-up complete', requests.length) });
+    });
+    await page.goto('/');
+    await showSettings(page); await addKey(page); await closeSettings(page);
+    await chooseChatModel(page);
+    const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+    await composer.fill('Look up the SKU'); await composer.press('Enter');
+    const approval = page.getByRole('dialog', { name: 'Approve tool execution' });
+    await expect(approval).toContainText('sku-1');
+    expect(requests).toHaveLength(1);
+    await approval.getByRole('button', { name: 'Approve and run' }).click();
+    if (outcome === 'completed') await expect(page.getByText('Lookup completed', { exact: true })).toBeVisible();
+    else await expect(page.getByText(/The MCP tool may have run/)).toBeVisible();
+    expect(requests).toHaveLength(2);
+    expect(requests[1].messages.flatMap(message => message.parts)).toEqual(expect.arrayContaining([expect.objectContaining({
+      toolCallId: 'p1', input, approval: { id: 'p1', approved: true, signature: 'fixture-signature' },
+      toolMetadata: expect.objectContaining({ streaikHostedCall: call }),
+    })]));
+    await composer.fill('Continue the conversation'); await composer.press('Enter');
+    await expect(page.getByText('Follow-up complete')).toBeVisible();
+    const replay = requests[2].messages.flatMap(message => message.parts);
+    expect(replay.some(part => part.toolCallId === 'p1')).toBe(false);
+    if (outcome === 'completed') expect(replay).toContainEqual(expect.objectContaining({ toolCallId: 'run_p1', output: result,
+      toolMetadata: expect.objectContaining({ streaikHostedSignature: 'fixture-receipt' }) }));
+    else expect(replay.some(part => part.toolCallId === 'run_p1')).toBe(false);
   });
 }
 
@@ -869,7 +920,7 @@ test('local Skills tabs persist versions and chat progressively discloses approv
 
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   await composer.fill('Please write a digest.'); await composer.press('Enter');
-  const approve = page.getByRole('button', { name: 'Approve and share' });
+  const approve = page.getByRole('button', { name: 'Approve and run' });
   await expect(approve).toBeVisible(); expect(requests).toHaveLength(1);
   expect(JSON.parse(requests[0].messages[0].parts[0].text).skills[0].skill_id).toBe(displayedSkillId);
   await approve.click();
@@ -991,7 +1042,7 @@ test('chat settings list and remember remote skills without downloading until th
 
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   await composer.fill('Prepare a digest.'); await composer.press('Enter');
-  const approve = page.getByRole('button', { name: 'Approve and share' });
+  const approve = page.getByRole('button', { name: 'Approve and run' });
   await expect(approve).toBeVisible();
   expect(downloads).toBe(1);
   await approve.click();
@@ -1782,15 +1833,14 @@ test('chat Model Context opts into Gateway-hosted MCP and preserves per-route ap
   });
   const requests: { tools?: { name: string; defer_loading?: boolean }[]; id?: string; messages: unknown }[] = [];
   const responsesRequests: { tools: { type: string; name: string }[]; input: { type?: string; id?: string }[]; streaik_mcp_approvals?: unknown; streaik_mcp_history?: unknown }[] = [];
-  const output = { content: [{ type: 'text', text: 'Hosted inventory result' }] };
   await page.route('**/gateway/api/chat', route => {
     requests.push(route.request().postDataJSON());
     const turn = requests.length;
     const events = [
       { type: 'start', messageId: 'hosted-inventory-reply' }, { type: 'start-step' },
-      { type: 'tool-input-available', toolCallId: 'hosted-review', toolName: 'streaik_mcp_result_review', input: { item: 'abc' },
+      { type: 'tool-input-available', toolCallId: 'hosted-approval', toolName: 'streaik_hosted_mcp_approval', input: { item: 'abc' },
         providerExecuted: true, dynamic: true },
-      { type: 'tool-approval-request', toolCallId: 'hosted-review', approvalId: 'hosted-review', approvalDescriptor: { input: { item: 'abc' }, output } },
+      { type: 'tool-approval-request', toolCallId: 'hosted-approval', approvalId: 'hosted-approval', approvalDescriptor: { server: 'Inventory fixture', name: 'update' } },
       { type: 'finish-step' }, { type: 'finish', finishReason: 'tool-calls' },
     ];
     return route.fulfill({ headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' },
@@ -1916,10 +1966,9 @@ test('chat Model Context opts into Gateway-hosted MCP and preserves per-route ap
   await expect(bulkSearch).toBeDisabled();
   await closeSettingsDialog();
   await composer.fill('Use hosted execution'); await composer.press('Enter');
-  const review = page.getByRole('dialog', { name: 'Review tool result', exact: true });
-  await expect(review).toBeVisible();
-  await review.getByRole('tab', { name: 'Text', exact: true }).click();
-  await expect(review.getByRole('tabpanel', { name: 'Text' })).toHaveText('Hosted inventory result');
+  const review = page.getByRole('dialog', { name: 'Approve tool execution', exact: true });
+  await expect(review).toContainText('abc');
+  expect(requests).toHaveLength(3);
   const descriptor = { server_label: 'Inventory fixture', server_url: endpoint, allowed_tools: ['update'], allowed_callers: ['direct'] };
   const searches = ['tool_search', 'resource_search'];
   const expectedTools = [expect.objectContaining({ name: 'local_chart_instructions' }),
@@ -1928,11 +1977,13 @@ test('chat Model Context opts into Gateway-hosted MCP and preserves per-route ap
   expect(requests[2].tools).toEqual(expectedTools);
   expect(requests[2].tools?.find(tool => tool.name === 'local_chart_instructions')).not.toHaveProperty('defer_loading');
   expect(requests[2].id).toBeTruthy();
-  await review.getByRole('button', { name: 'Approve and share', exact: true }).click();
+  await review.getByRole('button', { name: 'Approve and run', exact: true }).click();
   await expect(page.getByText('MCP reply 4', { exact: true })).toBeVisible();
   expect(requests[3].tools).toEqual(expectedTools);
   expect(requests[3].id).toBe(requests[2].id);
-  expect(JSON.stringify(requests[3].messages)).toContain('Hosted inventory result');
+  expect(JSON.stringify(requests[3].messages)).toContain('"state":"approval-responded"');
+  expect(JSON.stringify(requests[3].messages)).toContain('"approved":true');
+  expect(JSON.stringify(requests[3].messages)).not.toContain('"output":');
 
   await openRoute(page, 'Gateway');
   await page.getByRole('menuitemradio', { name: '/v1/responses', exact: true }).click();
@@ -1941,7 +1992,7 @@ test('chat Model Context opts into Gateway-hosted MCP and preserves per-route ap
   await expect(run).toBeVisible();
   await expect(run.getByRole('tab', { name: 'Input' })).toBeVisible();
   await expect(run.getByRole('button', { name: 'Approve and run' })).toBeVisible();
-  await expect(run.getByRole('button', { name: 'Decline' })).toHaveCount(0);
+  await expect(run.getByRole('button', { name: 'Decline', exact: true })).toBeVisible();
   expect(responsesRequests).toHaveLength(1);
   await run.getByRole('button', { name: 'Approve and run' }).click();
   await expect(page.getByText('Responses hosted reply', { exact: true })).toBeVisible();
@@ -2060,8 +2111,8 @@ test('chat charts preview with the plugin off and follow the active theme', asyn
   await openTools(); await plugin.check();
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
   await send('Get the chart format');
-  const review = page.getByRole('dialog', { name: 'Review tool result', exact: true });
-  await review.getByRole('button', { name: 'Approve and share', exact: true }).click();
+  const review = page.getByRole('dialog', { name: 'Approve tool execution', exact: true });
+  await review.getByRole('button', { name: 'Approve and run', exact: true }).click();
   await expect(page.getByText('Chart instructions received.', { exact: true })).toBeVisible();
   expect(requests[1].tools?.map(tool => tool.name)).toEqual([toolName]);
   expect(requests[2].messages.flatMap(message => message.parts).find(part => part.output)).toMatchObject({
@@ -2213,22 +2264,11 @@ test('MCP Tool output preferences filter approved requests and replay without ch
   await context.getByRole('button', { name: 'Close', exact: true }).click();
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   await composer.fill('Run the MCP fixture'); await composer.press('Enter');
-  const review = page.getByRole('dialog', { name: 'Review tool result' });
-  await expect(review.getByRole('tab')).toHaveText(['Input', 'Structured', 'Text', 'Images']);
-  const structured = review.getByRole('tab', { name: 'Structured', exact: true });
-  await expect(structured).toHaveAttribute('aria-selected', 'true');
-  await expect(review.getByRole('tree', { name: 'JSON' })).toContainText('fixture-structured');
-  await structured.press('ArrowRight');
-  await expect(review.getByRole('tab', { name: 'Text', exact: true })).toBeFocused();
-  await expect(review.getByRole('tabpanel', { name: 'Text' })).toHaveText('Fixture text');
-  await review.getByRole('tab', { name: 'Text', exact: true }).press('End');
-  const preview = review.getByRole('img', { name: 'MCP image 1' });
-  await expect(preview).toBeVisible();
-  await expect.poll(() => preview.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(1);
-  await review.getByRole('tab', { name: 'Images' }).press('Home');
-  await expect(review.getByRole('tabpanel', { name: 'Input' })).toContainText('fixture-query');
+  const review = page.getByRole('dialog', { name: 'Approve tool execution' });
+  await expect(review).toContainText('fixture-query');
+  await expect(review).not.toContainText('Fixture text');
   expect(requests).toHaveLength(1);
-  await review.getByRole('button', { name: 'Approve and share', exact: true }).click();
+  await review.getByRole('button', { name: 'Approve and run', exact: true }).click();
   await expect(page.getByText('MCP fixture reply 2', { exact: true })).toBeVisible();
   const toolResult = (index: number) => requests[index].messages.flatMap(message => message.parts).find(part => part.toolCallId === 'lookup-fixture');
   const approval = { id: 'review-fixture', approved: true, signature };
@@ -2318,7 +2358,7 @@ test('Model Context settings localize, persist and leave URL and extensions off'
   await expect(spanish.getByRole('slider')).toHaveAccessibleName('Tiempo de espera de herramienta (60 minutos)');
 });
 
-test('MCP elicitation queues forms and resumes the tool before its separate result review', async ({ page }) => {
+test('MCP execution approval comes before elicitation and the tool continuation', async ({ page }) => {
   await mockModels(page);
   let toolCalls = 0;
   let chatCalls = 0;
@@ -2377,6 +2417,10 @@ test('MCP elicitation queues forms and resumes the tool before its separate resu
   await context.getByRole('button', { name: 'Close', exact: true }).click();
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   await composer.fill('Run the elicitation fixture'); await composer.press('Enter');
+  const review = page.getByRole('dialog', { name: 'Approve tool execution' });
+  await expect(review).toBeVisible();
+  expect(toolCalls).toBe(0);
+  await review.getByRole('button', { name: 'Approve and run', exact: true }).click();
 
   const dialog = page.getByRole('dialog', { name: 'Elicitation', exact: true });
   await expect(dialog.getByText('First request', { exact: true })).toBeVisible();
@@ -2401,13 +2445,8 @@ test('MCP elicitation queues forms and resumes the tool before its separate resu
   expect(toolCalls).toBe(1);
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
-  const review = page.getByRole('dialog', { name: 'Review tool result' });
-  await expect(review.getByRole('tabpanel', { name: 'Text', exact: true })).toHaveText('Elicited tool result');
-  await expect(review.getByRole('tab', { name: 'Output', exact: true })).toHaveCount(0);
-  expect(toolCalls).toBe(2);
-  expect(chatCalls).toBe(1);
-  await review.getByRole('button', { name: 'Approve and share', exact: true }).click();
   await expect(page.getByText('Elicitation flow complete', { exact: true })).toBeVisible();
+  expect(toolCalls).toBe(2);
   expect(chatCalls).toBe(2);
 });
 
@@ -2529,18 +2568,14 @@ for (const approved of [true, false]) test(`MCP composer discovers resources and
   await prompts.getByRole('button', { name: /Topic prompt/ }).click();
   await prompts.getByRole('textbox', { name: 'topic', exact: true }).fill('waterfalls');
   await prompts.getByRole('button', { name: 'Run prompt', exact: true }).click();
-  const review = page.getByRole('dialog', { name: 'Review tool result' });
-  await expect(review.getByRole('tab', { name: 'Output' })).toHaveAttribute('aria-selected', 'true');
-  const outputPanel = review.getByRole('tabpanel', { name: 'Output' });
-  await outputPanel.getByRole('button', { name: 'Expand all' }).click();
-  await expect(outputPanel).toContainText(assistantUri);
-  await expect(outputPanel).not.toContainText(privateText);
-  await review.getByRole('tab', { name: 'Text' }).click();
-  await expect(review.getByRole('tabpanel', { name: 'Text' })).toHaveText(privateText);
+  const review = page.getByRole('dialog', { name: 'Approve tool execution' });
+  await expect(review).toContainText(assistantUri);
+  await expect(review).not.toContainText(privateText);
   expect(requests).toBe(1);
-  expect(reads).toEqual(['fixture://project/road%20map', assistantUri]);
-  await review.getByRole('button', { name: approved ? 'Approve and share' : 'Decline', exact: true }).click();
+  expect(reads).toEqual(['fixture://project/road%20map']);
+  await review.getByRole('button', { name: approved ? 'Approve and run' : 'Decline', exact: true }).click();
   await expect(page.getByText('Resource turn complete.', { exact: true })).toBeVisible();
+  expect(reads).toEqual(approved ? ['fixture://project/road%20map', assistantUri] : ['fixture://project/road%20map']);
   await badges.getByRole('button', { name: `Remove ${serverName}` }).click();
   await expect(badges).toHaveCount(0);
   await openMenu();
@@ -2902,26 +2937,21 @@ test('Gateway chat shares context, keeps composer reasoning through approval, an
   await context.getByRole('button', { name: 'Close' }).click();
   await chooseReasoning('Medium');
   await send('Find earlier conversations and current models.');
-  const review = page.getByRole('dialog', { name: 'Review tool result' });
-  await expect(review.getByRole('tab', { name: 'Structured' })).toHaveAttribute('aria-selected', 'true');
-  await expect(review.getByRole('tab', { name: 'Output' })).toHaveCount(0);
-  const structuredResult = review.getByRole('tabpanel', { name: 'Structured' });
-  await structuredResult.getByRole('button', { name: 'Expand all' }).click();
-  await expect(structuredResult).toContainText('imagerouter/a/b');
+  const review = page.getByRole('dialog', { name: 'Approve tool execution' });
+  await expect(review).toBeVisible();
+  await expect(review).not.toContainText('imagerouter/a/b');
   expect(requests.length).toBe(2);
   expect(requests[1]).not.toHaveProperty('clientToolResultApproval');
   expect(requests[1].reasoning).toBe('medium');
   expect(JSON.stringify(requests[1])).not.toContain(privateText);
   expect(requests[1].messages.filter(message => message.role === 'system')).toHaveLength(1);
   expect(requests[1].messages[0].parts.map(part => part.text)).toEqual(contextParts);
-  await review.getByRole('button', { name: 'Approve and share' }).click();
+  await review.getByRole('button', { name: 'Approve and run' }).click();
   await expect(review).toContainText(historyTool);
-  await structuredResult.getByRole('button', { name: 'Expand all' }).click();
-  await expect(structuredResult).toContainText(privateText);
+  await expect(review).not.toContainText(privateText);
   expect(requests).toHaveLength(2);
-  await review.getByRole('tab', { name: 'Input', exact: true }).click();
-  await expect(review.getByRole('tabpanel', { name: 'Input' })).toContainText('archiv, gard');
-  await review.getByRole('button', { name: 'Approve and share' }).click();
+  await expect(review).toContainText('archiv, gard');
+  await review.getByRole('button', { name: 'Approve and run' }).click();
   await expect(page.getByText('Chat reply 3', { exact: true })).toBeVisible();
   expect(requests).toHaveLength(3);
   expect(requests[2].reasoning).toBe('medium');

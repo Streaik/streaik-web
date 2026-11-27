@@ -139,7 +139,7 @@ test('approved and declined client results replay with signatures only on API ch
   assert.deepEqual(filterLocalToolReplay(messages, [])[0].parts, [approved, declined, serverResult]);
   const native = filterLocalToolReplay(messages, [], false)[0].parts;
   assert.deepEqual(native.map(part => part.state), ['output-available', 'output-available', 'output-available']);
-  assert.deepEqual(native.map(part => part.output), [{ result: 'approved' }, 'The user declined to share this tool result.', 'provider result']);
+  assert.deepEqual(native.map(part => part.output), [{ result: 'approved' }, 'The user declined to run this tool.', 'provider result']);
   assert.doesNotMatch(JSON.stringify(native), /signed-|three|old-provider/);
 });
 

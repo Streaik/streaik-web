@@ -215,6 +215,11 @@ export function filterLocalToolReplay(messages: ChatMessage[], definitions: read
     const parts = message.parts.flatMap((part): ChatMessage['parts'] => {
       const name = toolPartName(part);
       if (!name || !('toolCallId' in part)) return [part];
+      if (part.providerExecuted && name === 'streaik_hosted_mcp_result') {
+        if (apiChat && part.state === 'output-available' && !part.toolMetadata?.streaikAgent) return [part];
+        changed = true;
+        return [];
+      }
       if (part.providerExecuted && !part.approval && part.toolMetadata?.streaikHosted === true) {
         changed = true;
         return [];
@@ -222,6 +227,7 @@ export function filterLocalToolReplay(messages: ChatMessage[], definitions: read
       if (part.providerExecuted && part.approval && typeof part.approval.approved === 'boolean') {
         if (nativeMcp && part.state === 'approval-responded' && name.startsWith('mcp.')) return [part];
         if (apiChat && part.state === 'approval-responded' && name === 'streaik_mcp_execution_approval') return [part];
+        if (apiChat && part.state === 'approval-responded' && name === 'streaik_hosted_mcp_approval' && !part.toolMetadata?.streaikAgent) return [part];
         if (apiChat && name === 'streaik_mcp_result_review' && (part.state === 'approval-responded' || part.state === 'output-available')) {
           const { toolMetadata: _preview, ...decision } = part;
           const { descriptor: _descriptor, ...approval } = part.approval;
@@ -247,7 +253,7 @@ export function filterLocalToolReplay(messages: ChatMessage[], definitions: read
       if (apiChat || !part.approval) return [part];
       changed = true;
       const { approval, ...result } = part;
-      if (approval.approved === false) return [{ ...result, state: 'output-available', output: 'The user declined to share this tool result.', errorText: undefined }];
+      if (approval.approved === false) return [{ ...result, state: 'output-available', output: 'The user declined to run this tool.', errorText: undefined }];
       if (part.state === 'output-available' || part.state === 'output-error') return [{ ...part, approval: undefined }];
       return [];
     });

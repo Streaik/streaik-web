@@ -168,18 +168,11 @@ async function exerciseChat(page: Page, approve: boolean, manual = false, reject
   await selectServer(page, manual ? 'Manual images' : 'OpenAI Images', 3);
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Create a tiny landscape.');
   await page.getByRole('button', { name: 'Send', exact: false }).click();
-  const review = page.getByRole('dialog', { name: 'Review tool result' });
-  if (rejectUpstream) await expect(review.getByRole('tabpanel', { name: 'Text' })).toContainText(openAiError);
-  await expect(page.getByRole('dialog', { name: 'Approve tool execution' })).toHaveCount(0);
-  if (!rejectUpstream) {
-    await expect(review.getByRole('tab', { name: 'Images' })).toHaveAttribute('aria-selected', 'true');
-    await expect(review.getByRole('img', { name: 'MCP image 1' })).toBeVisible();
-  }
-  await review.getByRole('tab', { name: 'Input' }).click();
+  const review = page.getByRole('dialog', { name: 'Approve tool execution' });
   await expect(review.getByRole('tabpanel', { name: 'Input' })).toContainText(prompt);
-  expect(calls).toEqual(['OpenAIImages_CreateImage']);
+  expect(calls).toEqual([]);
   expect(chatRequests).toBe(1);
-  await review.getByRole('button', { name: approve ? 'Approve and share' : 'Decline', exact: true }).click();
+  await review.getByRole('button', { name: approve ? 'Approve and run' : 'Decline', exact: true }).click();
   await expect(page.getByText('Chat continued after MCP.')).toBeVisible();
   if (approve && !rejectUpstream) {
     const activity = page.getByRole('region', { name: 'Assistant activity' });
@@ -189,12 +182,14 @@ async function exerciseChat(page: Page, approve: boolean, manual = false, reject
     await expect(image).toBeVisible();
     await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1);
   } else await expect(page.getByRole('img', { name: 'MCP image 1' })).toHaveCount(0);
-  expect(calls).toEqual(['OpenAIImages_CreateImage']);
+  expect(calls).toEqual(approve ? ['OpenAIImages_CreateImage'] : []);
   expect(chatRequests).toBe(2);
   expect(decisions).toBe(routed ? 1 : 0);
   // The SDK does modern capability discovery on each connection, not a legacy initialize handshake.
-  expect(toolRequests.map(request => request.method())).toEqual(['POST', 'POST', 'POST', 'POST']);
-  expect(toolRequests.map(request => request.postDataJSON().method)).toEqual(['server/discover', 'tools/list', 'server/discover', 'tools/call']);
+  expect(toolRequests.every(request => request.method() === 'POST')).toBe(true);
+  expect(toolRequests.map(request => request.postDataJSON().method)).toEqual([
+    'server/discover', 'tools/list', ...(approve ? ['server/discover', 'tools/call'] : []),
+  ]);
   for (const request of toolRequests) {
     const headers = await request.allHeaders();
     expect(headers['mcp-protocol-version']).toBe(version);
@@ -204,14 +199,14 @@ async function exerciseChat(page: Page, approve: boolean, manual = false, reject
   }
 }
 
-test('browser executes once, previews the image in a review modal, and shares the approved result', async ({ page }) => exerciseChat(page, true));
+test('browser asks before running once and shows the resulting image in activity', async ({ page }) => exerciseChat(page, true));
 test('the assigned router runs once and its chosen model continues after an MCP denial', async ({ page }) => exerciseChat(page, false));
-test('a manual server outside the trusted base runs once before result approval', async ({ page }) => exerciseChat(page, true, true));
+test('a manual server outside the trusted base runs once after approval', async ({ page }) => exerciseChat(page, true, true));
 test('approved MCP failures reach the model with provider details and without credentials', async ({ page }) => exerciseChat(page, true, false, true));
 test('declined MCP failures do not reach the model', async ({ page }) => exerciseChat(page, false, false, true));
 
 for (const approve of [true, false]) {
-  test(`native chat ${approve ? 'shares' : 'withholds'} the executed MCP result`, async ({ page }) => {
+  test(`native chat ${approve ? 'runs the approved MCP call' : 'continues without running the declined MCP call'}`, async ({ page }) => {
     const endpoint = `${mcp}/openai-images`;
     let chatCalls = 0, toolCalls = 0;
     let release = () => {};
@@ -238,7 +233,7 @@ for (const approve of [true, false]) {
       const result = sent.messages.at(-1);
       expect(result).toMatchObject({ role: 'tool', tool_call_id: 'native-call' });
       if (approve) expect(JSON.parse(result.content)).toMatchObject(openAiToolError);
-      else expect(result.content).toBe('The user declined to share this tool result.');
+      else expect(result.content).toContain('The user declined to run this tool.');
       expect(JSON.stringify(sent)).not.toContain('Key: browser-openai');
       return route.fulfill({ contentType: 'text/event-stream', body: sse([
         { ...chunk, choices: [{ index: 0, delta: { role: 'assistant', content: 'Native chat continued.' }, finish_reason: 'stop' }] },
@@ -253,21 +248,20 @@ for (const approve of [true, false]) {
     await page.getByRole('menuitem', { name: 'Gateway', exact: true }).press('ArrowRight');
     await page.getByRole('menuitemradio', { name: '/v1/chat/completions', exact: true }).click();
     await selectServer(page, 'Native images', 3);
-    const review = page.getByRole('dialog', { name: 'Review tool result' });
+    const review = page.getByRole('dialog', { name: 'Approve tool execution' });
     const composer = page.getByRole('textbox', { name: 'Message', exact: true });
     try {
       await composer.fill('Test the native tool.');
       await composer.press('Enter');
-      await expect.poll(() => toolCalls).toBe(1);
-      await expect(review).toHaveCount(0);
-      await expect(page.getByRole('dialog', { name: 'Approve tool execution' })).toHaveCount(0);
+      await expect(review).toBeVisible();
+      expect(toolCalls).toBe(0);
+      expect(chatCalls).toBe(1);
+      await review.getByRole('button', { name: approve ? 'Approve and run' : 'Decline', exact: true }).click();
+      if (approve) await expect.poll(() => toolCalls).toBe(1);
     } finally { release(); }
-    await expect(review.getByRole('tabpanel', { name: 'Text' })).toContainText(openAiError);
-    expect(chatCalls).toBe(1);
-    await review.getByRole('button', { name: approve ? 'Approve and share' : 'Decline', exact: true }).click();
     await expect(page.getByText('Native chat continued.')).toBeVisible();
     expect(chatCalls).toBe(2);
-    expect(toolCalls).toBe(1);
+    expect(toolCalls).toBe(approve ? 1 : 0);
   });
 }
 
@@ -328,12 +322,11 @@ test('approved REST Countries structured data reaches the next chat request', as
   await selectServer(page, 'GitHub RESTCountries.NET', 3);
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill('What is the capital of Poland?');
   await page.getByRole('button', { name: 'Send', exact: false }).click();
-  const review = page.getByRole('dialog', { name: 'Review tool result' });
-  const structured = review.getByRole('tabpanel', { name: 'Structured' });
-  await structured.getByRole('button', { name: 'Expand all' }).click();
-  await expect(structured).toContainText('Poland');
+  const review = page.getByRole('dialog', { name: 'Approve tool execution' });
+  await expect(review).toContainText('Poland');
   expect(chats).toBe(1);
-  await review.getByRole('button', { name: 'Approve and share', exact: true }).click();
+  expect(calls).toBe(0);
+  await review.getByRole('button', { name: 'Approve and run', exact: true }).click();
   await expect(page.getByText('Warsaw is the capital of Poland.')).toBeVisible();
   expect(calls).toBe(1);
   expect(chats).toBe(2);
