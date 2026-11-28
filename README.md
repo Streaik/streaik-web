@@ -8,35 +8,33 @@ Connect compatible AI APIs, agent runtimes and MCP servers directly from the cli
 
 The chat client supports:
 
-- **Streaming chat** with rich incremental message rendering, charts and more
-- **Provider and model switching** across Gateway and direct provider APIs
-- **Multi-protocol routing** through API Chat, Responses, Messages, Chat Completions and Direct APIs
-- **Model discovery** with catalogs, favorites, filters and configurable default preferences
-- **Provider settings** with model-specific options and native metadata passthrough
-- **Agents and workflows** on direct APIs or through connected agent runtimes with multi-agent orchestration
-- **OpenAI Responses multi-agent activity** on direct and gateway Responses, and API Chat when backed by native OpenAI Responses. The existing activity pager shows provider-executed actions and agent-attributed searches; only root text appears in the main transcript. Ordered native history travels in provider metadata for inline replay on compatible follow-ups with provider storage disabled. Encrypted payloads remain opaque; other routes use the ordinary transcript.
-- **Native realtime voice chat** with bidirectional audio, provider-specific controls and streaming playback
-- **Decisions** with intelligent multi-model and agent routing based on user input and configurable decision models
+- **Streaming chat** with rich message rendering, charts and interactive UI
+- **Provider and model switching** across gateway and direct APIs
+- **Multi-protocol routing** with API Chat, Responses, Messages and Chat Completions
+- **Model discovery** with catalogs, favorites and filters
+- **Provider settings** with native options and metadata passthrough
+- **Agents and workflows** with multi-agent orchestration and execution activity
+- **Decisions** with intelligent model and agent routing
+- **Realtime voice** with bidirectional audio and streaming playback
 - **Agent Plugins** combining Skills, MCP servers and supporting resources
-- **MCP** tools, resources, prompts, elicitation and tasks. Prompt and resource template arguments stay free-form and offer suggestions when the server advertises completions.
-- **Tool execution** with parallel tool calls, pre-execution approvals and execution activity. Approval shows the requested tool and inputs; declining does not run the tool.
-- **Server-side tools** with provider-native web search, code execution, MCP and other supported capabilities
+- **MCP** tools, resources, prompts, elicitation, completions and tasks
+- **Tool execution** with parallel calls, approvals and execution activity
+- **Server-side tools** with native web search, code execution and MCP
 - **Skills** with reusable instructions and supporting files
 - **Search** with client-side full-text, vector and hybrid search
-- **Files** with attachments, document content, PDF extraction and rich file handling
-- **Conversation history** with local persistence, configurable chat preferences, and browser-only full-text search across titles and user and assistant messages
-- **Streaming UI** with interactive apps, cards and structured response rendering
-- **Speech** with text-to-speech generation, streaming playback, downloadable clips and assistant-message Read aloud
-- **Transcriptions** with configurable file splitting, overlap handling and merged results. **Real-time** streams microphone audio to supported OpenAI, Gladia, Google Gemini Transcribe Live, Deepgram Nova-2/Nova-3, and AssemblyAI streaming models and displays text only. A compatible live model assigned to the Transcription agent can also stream composer dictation. **Dictate** on the Transcriptions page records a short clip and uploads it when you stop.
+- **Files** with attachments, document extraction and rich previews
+- **Conversation history** with local persistence and full-text search
+- **Speech** with streaming synthesis, downloadable audio and Read aloud
+- **Transcriptions** with realtime transcription, dictation and file processing
 - **Images** with generation and provider-specific options
-- **Videos** with prompt-only generation and inline playback. Pending jobs and results are saved locally for the current gateway/profile. Reopen Videos with the same credentials to resume polling; gateway job references and provider-hosted video links can expire.
-- **Benchmarks** with multi-model comparisons, configurable routing and repeatable test runs
-- **Usage analytics** with interactive charts, token consumption and cost tracking
-- **Performance metrics** including time to first token (TTFT) and tokens per second (TPS)
-- **Authentication** with header-based/BYOK and Microsoft Entra support
-- **Multi-theme UI** with interchangeable Shadcn, Fluent and HTML implementations
-- **Localization** with support for 2+ languages
-- **Model capabilities** including speech, transcription, embeddings, reranking, images, video, decision and other supported modalities
+- **Videos** with asynchronous generation, job tracking and inline playback
+- **Benchmarks** with repeatable multi-model comparisons
+- **Usage analytics** with token consumption and cost tracking
+- **Performance metrics** with TTFT and TPS
+- **Authentication** with BYOK and Microsoft Entra
+- **Multi-theme UI** with Shadcn, Fluent and HTML implementations
+- **Localization** with multilingual support
+- **Model capabilities** across language, audio, images, video, embeddings and reranking
 
 Documentation: https://ai.streaik.net/scalar  
 App: https://chat.streaik.com
