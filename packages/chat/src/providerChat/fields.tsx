@@ -1,4 +1,5 @@
 import type { ChatModel } from '@streaik/gateway';
+import { Switch } from '@streaik/themes';
 import { useId, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useAppTranslation } from '../i18n';
@@ -43,8 +44,7 @@ export function Toggle({ label, checked, onChange, disabled }: {
   label: string; checked: boolean; onChange: (value: boolean) => void; disabled?: boolean;
 }) {
   const { t } = useAppTranslation();
-  return <label className="chat-provider-switch"><input type="checkbox" role="switch" checked={checked} disabled={disabled}
-    onChange={event => onChange(event.currentTarget.checked)} />{t(label)}</label>;
+  return <Switch label={t(label)} checked={checked} disabled={disabled} onCheckedChange={onChange} />;
 }
 
 export function Integer({ label, value, min, max, onChange, disabled }: Field & { min?: number; max?: number; onChange: (value?: number) => void }) {

@@ -1,6 +1,6 @@
 import { deepgramTranscriptionSwitches, openAITranscriptionFormats } from '@streaik/gateway';
 import type { GatewayTranscriptionEndpoint, TranscriptionConfig } from '@streaik/gateway';
-import { Button } from '@streaik/themes';
+import { Button, Switch } from '@streaik/themes';
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { providerName } from './aiCatalog';
 import { ChatIcon } from './ChatIcon';
@@ -41,7 +41,7 @@ function useFields() {
         {choices.map(choice => <option key={choice} value={choice}>{choice}</option>)}
       </select></label>,
     toggle: (label: string, value: TranscriptionConfig[string], set: (value: boolean) => void) =>
-      <label key={label}><input type="checkbox" role="switch" checked={value === true} onChange={event => set(event.currentTarget.checked)} /><span>{t(label)}</span></label>,
+      <Switch key={label} label={t(label)} checked={value === true} onCheckedChange={set} />,
   };
 }
 

@@ -1,4 +1,4 @@
-import { Select } from '@streaik/themes';
+import { Select, Switch } from '@streaik/themes';
 import { useId } from 'react';
 import type { ComponentProps } from 'react';
 import { useAppTranslation } from './i18n';
@@ -28,9 +28,6 @@ export function AgentExecutionField({ execution, allowProvider, onChange }: {
 export function AgentSwitch({ label, checked, onChange, title, hideLabel = false }: {
   label: string; checked: boolean; onChange?: (checked: boolean) => void; title?: string; hideLabel?: boolean;
 }) {
-  return <label className="mcp-toggle agent-switch" title={title ?? (hideLabel ? label : undefined)}>
-    <input type="checkbox" role="switch" aria-label={hideLabel ? label : undefined} checked={checked} disabled={!onChange}
-      onChange={event => onChange?.(event.currentTarget.checked)} />
-    {!hideLabel && <span>{label}</span>}
-  </label>;
+  return <Switch className="agent-switch" title={title ?? (hideLabel ? label : undefined)} label={label} hideLabel={hideLabel}
+    checked={checked} onCheckedChange={onChange} />;
 }

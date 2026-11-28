@@ -1,6 +1,6 @@
 import { speechFormats } from '@streaik/gateway';
 import type { CatalogModel, GatewaySpeechEndpoint } from '@streaik/gateway';
-import { Button } from '@streaik/themes';
+import { Button, Switch } from '@streaik/themes';
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { providerName } from './aiCatalog';
 import { ChatIcon } from './ChatIcon';
@@ -82,8 +82,7 @@ export function SpeechSettingsDialog({ route, models, initial, onSave, onClose }
             const option = value.providers[key]?.[field.key];
             const change = (option: number | boolean | undefined) => setValue(current => ({ ...current, providers: { ...current.providers,
               [key]: { ...current.providers[key], [field.key]: option } } }));
-            return field.kind === 'checkbox' ? <label key={field.key}><span>{t(field.label)}</span><input type="checkbox" role="switch"
-              checked={option === true} onChange={event => change(event.currentTarget.checked)} /></label>
+            return field.kind === 'checkbox' ? <Switch key={field.key} label={t(field.label)} checked={option === true} onCheckedChange={change} />
               : <label key={field.key}><span>{t(field.label)}</span><input type="number" min={field.min} max={field.max} step={field.step}
                 value={typeof option === 'number' ? option : ''} onChange={event => change(Number.isFinite(event.currentTarget.valueAsNumber) ? event.currentTarget.valueAsNumber : undefined)} /></label>;
           })}</div>}

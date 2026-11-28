@@ -1,3 +1,4 @@
+import { Switch } from '@streaik/themes';
 import { useAppTranslation } from './i18n';
 import { defaultGoogleVoiceSetup, googleVoices, xaiPcmRates, xaiVoices } from './socketVoiceSettings';
 import type { GoogleVoiceSettings, VoiceFormat, XaiVoiceSettings } from './socketVoiceSettings';
@@ -13,9 +14,8 @@ function useFields() {
     number: (label: string, value: number | undefined, change: (v: number | undefined) => void, min: number, max: number, step = 1) =>
       <label>{t(label)}<input type="number" value={value ?? ''} min={min} max={max} step={step}
         onChange={e => change(Number.isFinite(e.currentTarget.valueAsNumber) ? e.currentTarget.valueAsNumber : undefined)} /></label>,
-    toggle: (label: string, checked: boolean, change: (checked: boolean) => void) => <label className="chat-tool-switch">
-      <input type="checkbox" role="switch" checked={checked} onChange={e => change(e.currentTarget.checked)} /><span>{t(label)}</span>
-    </label>,
+    toggle: (label: string, checked: boolean, change: (checked: boolean) => void) =>
+      <Switch label={t(label)} checked={checked} onCheckedChange={change} />,
     text: (label: string, value: string | undefined, change: (v: string) => void, multi = false) => <label>{t(label)}
       {multi ? <textarea rows={3} value={value ?? ''} onChange={e => change(e.currentTarget.value)} />
         : <input value={value ?? ''} onChange={e => change(e.currentTarget.value)} />}</label>,

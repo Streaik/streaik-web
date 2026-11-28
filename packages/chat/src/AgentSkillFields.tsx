@@ -1,4 +1,4 @@
-import { Button } from '@streaik/themes';
+import { Button, Switch } from '@streaik/themes';
 import type { Gateway, RemoteSkill } from '@streaik/gateway';
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -19,8 +19,7 @@ function AgentSkillSwitch({ name, checked, disabled, onChange }: {
   name: string; checked: boolean; disabled: boolean; onChange: (checked: boolean) => void;
 }) {
   return <div className="chat-tool-switches">
-    <label><input type="checkbox" role="switch" checked={checked} disabled={disabled}
-      onChange={event => onChange(event.currentTarget.checked)} /><span>{name}</span></label>
+    <Switch label={name} checked={checked} disabled={disabled} onCheckedChange={onChange} />
   </div>;
 }
 

@@ -1,4 +1,4 @@
-import { Button, Select } from '@streaik/themes';
+import { Button, Select, Switch } from '@streaik/themes';
 import type { ChatModel } from '@streaik/gateway';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
@@ -136,13 +136,10 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hostedSki
       <section className="chat-tool-card">
         <h3>{t('Local')}</h3>
         <div className="chat-tool-switches">
-          {localPlugins.map(plugin => <label key={plugin.id}>
-            <input type="checkbox" role="switch" checked={value.plugins.includes(plugin.id)}
-              disabled={locked || !browserToolsSupported || (plugin.requiresHistory && !hasHistory) || (hostedToolSearch && plugin.id === localToolSearchPluginId)}
-              onChange={event => onChange({ ...value, plugins: event.currentTarget.checked ? [...value.plugins, plugin.id]
-                : value.plugins.filter(id => id !== plugin.id) })} />
-            <span>{t(plugin.label)}</span>
-          </label>)}
+          {localPlugins.map(plugin => <Switch key={plugin.id} label={t(plugin.label)} checked={value.plugins.includes(plugin.id)}
+            disabled={locked || !browserToolsSupported || (plugin.requiresHistory && !hasHistory) || (hostedToolSearch && plugin.id === localToolSearchPluginId)}
+            onCheckedChange={checked => onChange({ ...value, plugins: checked ? [...value.plugins, plugin.id]
+              : value.plugins.filter(id => id !== plugin.id) })} />)}
         </div>
         {browserToolsSupported && !hasHistory && <p>{t('Chat History requires a local history profile.')}</p>}
       </section>
@@ -169,14 +166,9 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hostedSki
         {!gateway && <p>{t('Skills are available only on Gateway routes.')}</p>}
         {!localSkills.ready ? <p role="status">{t('Loading local skills…')}</p> : !localSkills.skills.length
           ? <p>{t('No local skills yet.')}</p> : <div className="chat-tool-switches">
-            {localSkills.skills.map(skill => <label key={skill.id}>
-              <input type="checkbox" role="switch" checked={skill.enabled} disabled={locked || !gateway}
-                onChange={event => {
-                  const enabled = event.currentTarget.checked;
-                  localSkills.update(items => items.map(item => item.id === skill.id ? { ...item, enabled } : item));
-                }} />
-              <span>{defaultSkillVersion(skill).metadata.name}</span>
-            </label>)}
+            {localSkills.skills.map(skill => <Switch key={skill.id} label={defaultSkillVersion(skill).metadata.name}
+              checked={skill.enabled} disabled={locked || !gateway}
+              onCheckedChange={enabled => localSkills.update(items => items.map(item => item.id === skill.id ? { ...item, enabled } : item))} />)}
           </div>}
         {localSkills.notice && <p role="status">{t(localSkills.notice)}</p>}
       </section>
@@ -185,12 +177,9 @@ export function ChatSettingsDialog({ dialog, value, onChange, gateway, hostedSki
         {gateway && !online && <p>{t('Connect to a gateway to browse provider skills.')}</p>}
         {gateway && online && <>
           {skills.length > 0 && <div className="chat-tool-switches">
-            {skills.map(skill => <label key={skill.id} title={skill.id}>
-              <input type="checkbox" role="switch" checked={value.remoteSkillIds.includes(skill.id)} disabled={locked}
-                onChange={event => onChange({ ...value, remoteSkillIds: event.currentTarget.checked ? [...value.remoteSkillIds, skill.id]
-                  : value.remoteSkillIds.filter(id => id !== skill.id) })} />
-              <span>{skill.name}</span>
-            </label>)}
+            {skills.map(skill => <Switch key={skill.id} title={skill.id} label={skill.name} checked={value.remoteSkillIds.includes(skill.id)}
+              disabled={locked} onCheckedChange={checked => onChange({ ...value, remoteSkillIds: checked ? [...value.remoteSkillIds, skill.id]
+                : value.remoteSkillIds.filter(id => id !== skill.id) })} />)}
           </div>}
           {error !== undefined ? <>
             <p role="alert">{t(error || 'Could not load provider skills.')}</p>

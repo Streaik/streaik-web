@@ -1447,8 +1447,12 @@ test('model picker sorts dated models newest first within each provider group', 
     'Claude Y newest', 'Claude Z newest', 'Claude A older', 'Claude B undated', 'Claude C undated',
   ]);
   await expect(list.getByRole('group', { name: 'OpenAI', exact: true }).getByRole('option')).toHaveText('GPT Mini');
-  await popup.getByRole('searchbox', { name: 'Search models', exact: true }).fill('Claude newest');
+  const search = popup.getByRole('searchbox', { name: 'Search models', exact: true });
+  await search.fill('Claude newest');
   await expect(claude.getByRole('option')).toHaveText(['Claude Y newest', 'Claude Z newest']);
+  await search.press('ArrowDown');
+  await search.press('Enter');
+  await expect(modelPicker(page)).toHaveText('Claude Z newest');
 });
 
 test('model picker groups and searches compatible models on a narrow screen, with keyboard selection', async ({ page }) => {
@@ -1474,7 +1478,7 @@ test('model picker groups and searches compatible models on a narrow screen, wit
   const list = popup.getByRole('listbox');
   const openAI = list.getByRole('group', { name: 'OpenAI', exact: true });
   const claude = list.getByRole('option', { name: 'Claude Example', exact: true });
-  await expect(page.locator('.chat-toolbar').getByRole('button', { name: 'Model', exact: true })).toHaveCount(1);
+  await expect(page.locator('.chat-toolbar').getByRole('button')).toHaveCount(1);
   await expect(picker).toHaveText('Select models');
   await picker.press('ArrowDown');
   await expect(search).toBeFocused();

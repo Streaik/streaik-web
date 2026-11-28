@@ -1,3 +1,4 @@
+import { Switch } from '@streaik/themes';
 import { useAppTranslation } from './i18n';
 import { toolCallers } from './toolConfiguration';
 import type { ToolCaller, ToolOptions } from './toolConfiguration';
@@ -33,13 +34,12 @@ export function ToolConfigurationEditor({ rows, onChange, namespaces, disabled, 
     </details>;
   }
   function search(label: string, checked: boolean, keys: readonly string[]) {
-    return <input className="tool-config-switch" type="checkbox" role="switch" checked={!deferLoadingDisabled && checked} disabled={disabled || deferLoadingDisabled}
-      aria-label={t('Search for {{tool}}', { tool: label })} onChange={event => onChange(keys, { defer_loading: event.currentTarget.checked })} />;
+    return <Switch label={t('Search for {{tool}}', { tool: label })} hideLabel checked={!deferLoadingDisabled && checked}
+      disabled={disabled || deferLoadingDisabled} onCheckedChange={defer_loading => onChange(keys, { defer_loading })} />;
   }
   return <div className="tool-config-editor">
-    {namespaces && <label className="tool-config-namespaces"><input className="tool-config-switch" type="checkbox" role="switch"
-      checked={namespaces.checked} disabled={disabled || namespaces.disabled} onChange={event => namespaces.onChange(event.currentTarget.checked)} />
-      {t('Use namespaces')}</label>}
+    {namespaces && <Switch className="tool-config-namespaces" label={t('Use namespaces')} checked={namespaces.checked}
+      disabled={disabled || namespaces.disabled} onCheckedChange={namespaces.onChange} />}
     {!sorted.length ? <p>{t('No tools enabled.')}</p> : <table className="tool-config-table">
       <thead><tr><th scope="col">{t('Tool')}</th><th scope="col">{t('Usage method')}</th><th scope="col">{t('Search')}</th></tr></thead>
       <tbody>

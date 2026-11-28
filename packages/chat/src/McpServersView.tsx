@@ -1,4 +1,4 @@
-import { Button, Tooltip, useColorScheme } from '@streaik/themes';
+import { Button, Switch, Tooltip, useColorScheme } from '@streaik/themes';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -220,8 +220,8 @@ function InstalledServers({ store, selection, locked, onEdit, active, byEndpoint
     if (!selection) return <McpServerCard key={record.id} title={record.title} registryEntry={byEndpoint.get(record.endpoint)}
       actions={<>{statusText}<CopyServerUrl key={record.endpoint} endpoint={record.endpoint} />{actions}</>} />;
     return <li className="mcp-row" key={record.id}>
-      <label className="mcp-toggle"><input type="checkbox" role="switch" checked={!!entry} aria-describedby={status ? statusId : undefined}
-        disabled={!ready || disabled} onChange={event => selection.set(record, event.target.checked)} /><span>{record.title}</span></label>
+      <Switch label={record.title} checked={!!entry} aria-describedby={status ? statusId : undefined}
+        disabled={!ready || disabled} onCheckedChange={checked => selection.set(record, checked)} />
       <div className="mcp-actions">{actions}</div>
       <small className="mcp-endpoint">{record.endpoint}</small>
       {statusText}

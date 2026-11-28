@@ -1,3 +1,4 @@
+import { Switch } from '@streaik/themes';
 import { useId } from 'react';
 import type { ChatModel } from '@streaik/gateway';
 import { useAppTranslation } from './i18n';
@@ -34,9 +35,8 @@ export function OpenAIRealtimeConfigForm({ value, onChange, models, agents, prot
   const number = (label: string, value: number | undefined, change: (v: number | undefined) => void, min: number, max?: number, step = 1) =>
     <label>{t(label)}<input type="number" value={value ?? ''} min={min} max={max} step={step}
       onChange={e => change(Number.isFinite(e.currentTarget.valueAsNumber) ? e.currentTarget.valueAsNumber : undefined)} /></label>;
-  const toggle = (label: string, value: boolean, change: (v: boolean) => void) => <label className="chat-tool-switch" key={label}>
-    <input type="checkbox" role="switch" checked={value} onChange={e => change(e.currentTarget.checked)} /><span>{t(label)}</span>
-  </label>;
+  const toggle = (label: string, value: boolean, change: (v: boolean) => void) =>
+    <Switch key={label} label={t(label)} checked={value} onCheckedChange={change} />;
   const text = (label: string, value: string | undefined, change: (v: string) => void, multi = false) => <label>{t(label)}
     {multi ? <textarea rows={3} value={value ?? ''} onChange={e => change(e.currentTarget.value)} />
       : <input value={value ?? ''} onChange={e => change(e.currentTarget.value)} />}</label>;

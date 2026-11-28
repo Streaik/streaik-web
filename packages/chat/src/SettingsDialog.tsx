@@ -1,4 +1,4 @@
-import { Button, ColorModeSettings, ThemeSettings, Tooltip } from '@streaik/themes';
+import { Button, ColorModeSettings, Switch, ThemeSettings, Tooltip } from '@streaik/themes';
 import type { IconName } from '@streaik/themes';
 import { useId, useState } from 'react';
 import type { ReactNode, RefObject } from 'react';
@@ -18,10 +18,10 @@ const toolOutputLabels = { text: 'Text', links: 'Links', images: 'Images', audio
 
 function SettingSwitch({ label, checked, onChange, hint }: { label: string; checked: boolean; onChange?: (value: boolean) => void; hint?: string }) {
   const id = useId();
-  return <label><input type="checkbox" role="switch" checked={checked} disabled={!onChange} title={hint}
-    aria-describedby={hint ? id : undefined} onChange={onChange && (event => onChange(event.currentTarget.checked))} />
+  return <>
+    <Switch label={label} title={hint} checked={checked} aria-describedby={hint ? id : undefined} onCheckedChange={onChange} />
     {hint && <span id={id} hidden>{hint}</span>}
-    <span>{label}</span></label>;
+  </>;
 }
 
 function ModelContextSettings({ value, onChange }: { value: McpPreferences; onChange: (value: McpPreferences) => void }) {
