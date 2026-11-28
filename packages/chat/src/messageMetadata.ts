@@ -17,24 +17,29 @@ export function messageTokens(metadata?: ChatMessageMetadata) {
   return { input, output, total };
 }
 
-export function conversationGatewayCost(messages: readonly ChatMessage[]): number | undefined {
+export function messageCost(metadata?: ChatMessageMetadata) {
+  const reported = metadata?.providerMetadata?.gateway;
+  const legacy = metadata?.gateway;
+  // Timing-only metadata must not mask a cost saved in an older field.
+  const metrics = reported?.cost != null ? reported : legacy?.cost != null ? legacy : reported ?? legacy;
+  return { cost: nonnegativeNumber(metrics?.cost ?? metadata?.cost), source: metrics?.source };
+}
+
+export function conversationCost(messages: readonly ChatMessage[]): number | undefined {
   let total = 0;
   let count = 0;
-  function add(value: unknown) {
-    const cost = nonnegativeNumber(value);
+  function add(cost: number | undefined) {
     if (cost === undefined) return;
     total += cost;
     count++;
   }
   for (const { role, metadata, parts } of messages) {
     if (role !== 'assistant') continue;
-    const reported = metadata?.providerMetadata?.gateway;
-    const legacy = metadata?.gateway;
-    if (reported?.source !== 'direct' && legacy?.source !== 'direct') add(reported?.cost ?? legacy?.cost ?? metadata?.cost);
+    add(messageCost(metadata).cost);
     for (const part of parts) {
       if (!('toolCallId' in part) || part.state !== 'output-available') continue;
       const tool = part.output as { _meta?: { gateway?: ChatMessageMetadata['gateway'] } } | undefined;
-      if (tool?._meta?.gateway?.source !== 'direct') add(tool?._meta?.gateway?.cost);
+      add(nonnegativeNumber(tool?._meta?.gateway?.cost));
     }
   }
   return count > 1 && Number.isFinite(total) ? total : undefined;

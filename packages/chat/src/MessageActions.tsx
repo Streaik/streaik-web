@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { OutputAttachmentMenu } from './AssistantAttachments';
 import { ChatIcon } from './ChatIcon';
 import { browserNumberFormat, useAppTranslation } from './i18n';
-import { messageTokens, nonnegativeNumber } from './messageMetadata';
+import { messageCost, messageTokens, nonnegativeNumber } from './messageMetadata';
 import type { OutputAttachment } from './outputAttachments';
 import type { MessageSpeechState, ToggleMessageSpeech } from './useMessageSpeech';
 
@@ -39,7 +39,8 @@ export function MessageActions({ message, userText, showMessageTokens, showMetri
   const metadata = user ? undefined : message.metadata;
   const { providerMetadata, gateway } = metadata ?? {};
   const metrics = providerMetadata?.gateway ?? gateway;
-  const costLabel = metrics?.source === 'direct' ? 'Direct cost' : 'Gateway cost';
+  const { cost, source } = messageCost(metadata);
+  const costLabel = source === 'direct' ? 'Direct cost' : 'Gateway cost';
   const { input, output, total: tokens } = messageTokens(metadata);
   const breakdown = [input !== undefined ? t('{{count, number}} input', { count: input }) : '', output !== undefined ? t('{{count, number}} output', { count: output }) : '']
     .filter(Boolean).join(' · ');
@@ -54,7 +55,7 @@ export function MessageActions({ message, userText, showMessageTokens, showMetri
     {!!attachments?.length && menuContainer && <OutputAttachmentMenu files={attachments} container={menuContainer} />}
     {showMessageTokens && <Badge icon="tokens" label={t(tokens !== undefined ? 'Total tokens' : input !== undefined ? 'Input tokens' : 'Output tokens')}
       value={tokens ?? input ?? output} format={integer} details={tokens !== undefined ? breakdown : undefined} />}
-    <Badge icon="cost" label={t(costLabel)} value={metrics?.cost} format={costFormat} />
+    <Badge icon="cost" label={t(costLabel)} value={cost} format={costFormat} />
     {showMetrics && <>
       <Badge icon="timer" label={t('Time to first token')} value={metrics?.ttft} format={seconds} unit=" s" />
       <Badge icon="speed" label={t('Tokens per second')} value={metrics?.tps} format={integer} unit=" tok/s" />

@@ -4,7 +4,7 @@ import { defaultChatPreferences, loadChatPreferences, normalizeChatPreferences, 
 import { chatHostedMcp, withMcpHeaders } from '../packages/chat/src/chatModelContext.ts';
 import { apiChatHostedMcp, withResponsesHostedMcp } from '../packages/gateway/src/hostedMcp.ts';
 import { defaultMcpPreferences } from '../packages/chat/src/mcpPreferences.ts';
-import { conversationGatewayCost, latestContextUsage } from '../packages/chat/src/messageMetadata.ts';
+import { conversationCost, latestContextUsage, messageCost } from '../packages/chat/src/messageMetadata.ts';
 import { filterToolOutputContent } from '../packages/chat/src/toolOutputContent.ts';
 import { chatProviderRequest } from '../packages/chat/src/providerChat/settings.ts';
 import { encryptedReasoningInclude, updateTypedItem } from '../packages/chat/src/providerChat/openai/options.ts';
@@ -219,13 +219,36 @@ test('only typed client tool content is filtered, without altering approvals, st
   assert.deepEqual(replayed.parts[0].output.content.slice(0, 3), [output.content[0], omitted('Link'), output.content[2]]);
 });
 
-test('conversation cost needs two gateway-priced results and ignores Direct, duplicates and invalid values', () => {
-  const direct = assistant({ providerMetadata: { gateway: { source: 'direct', cost: 0.8 } } });
+test('conversation cost adds Gateway and Direct replies once, regardless of order', () => {
+  const direct = assistant({ providerMetadata: { gateway: { source: 'direct', cost: 0.5 } } });
   const gateway = assistant({ providerMetadata: { gateway: { cost: '0.125' } }, gateway: { cost: 4 }, cost: 8 });
-  assert.equal(conversationGatewayCost([direct, gateway, assistant({ cost: NaN }), { role: 'user', metadata: { cost: 4 }, parts: [] }]), undefined);
-  assert.equal(conversationGatewayCost([gateway, direct, assistant({ gateway: { cost: 0 } })]), 0.125);
-  assert.equal(conversationGatewayCost([assistant(gateway.metadata, [tool({ _meta: { gateway: { cost: 0.25 } } })])]), 0.375);
-  assert.equal(conversationGatewayCost([gateway, assistant({ cost: 0.5 })]), 0.625);
+  const legacyDirect = assistant({ gateway: { source: 'direct', cost: '0.25' } });
+  assert.equal(conversationCost([gateway, direct]), 0.625);
+  assert.equal(conversationCost([direct, gateway]), 0.625);
+  assert.equal(conversationCost([direct, legacyDirect]), 0.75);
+  assert.equal(conversationCost([gateway, assistant({ cost: 0.5 })]), 0.625);
+});
+
+test('message cost uses the canonical cost first, with legacy fallbacks for missing cost', () => {
+  assert.deepEqual(messageCost({ providerMetadata: { gateway: { source: 'direct', cost: 0 } }, gateway: { cost: 4 }, cost: 8 }),
+    { cost: 0, source: 'direct' });
+  assert.deepEqual(messageCost({ providerMetadata: { gateway: { ttft: 1 } }, gateway: { source: 'direct', cost: '0.25' }, cost: 8 }),
+    { cost: 0.25, source: 'direct' });
+  assert.equal(messageCost({ providerMetadata: { gateway: { ttft: 1 } }, cost: '0.125' }).cost, 0.125);
+});
+
+test('conversation cost needs two valid costs, includes completed tool results and counts zero', () => {
+  const invalid = [NaN, Infinity, -1, '', 'unknown'].map(cost => assistant({ cost }));
+  const unpriced = assistant({ providerMetadata: { gateway: { source: 'direct', ttft: 1 } } });
+  const user = { role: 'user', metadata: { cost: 4 }, parts: [] };
+  const gatewayTool = tool({ _meta: { gateway: { cost: 0.25 } } });
+  const directOutput = { _meta: { gateway: { source: 'direct', cost: '0.5' } } };
+  const pending = tool(directOutput, { state: 'input-available' });
+  const reply = assistant({ gateway: { cost: 0.125 } }, [pending]);
+  assert.equal(conversationCost([reply, unpriced, user, ...invalid]), undefined);
+  assert.equal(conversationCost([reply, assistant({ gateway: { cost: 0 } })]), 0.125);
+  assert.equal(conversationCost([assistant(reply.metadata, [gatewayTool])]), 0.375);
+  assert.equal(conversationCost([assistant(reply.metadata, [gatewayTool, tool(directOutput, { toolCallId: 'direct' })])]), 0.875);
 });
 
 test('context usage uses the replying model, not the first routing candidate or all conversation tokens', () => {

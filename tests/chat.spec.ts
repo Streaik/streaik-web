@@ -1590,11 +1590,12 @@ test('search and provider groups remain available when switching to HTML and Flu
   }
 });
 
-function sse(text: string, turn: number, answerModel = model) {
+function sse(text: string, turn: number, answerModel = model, cost?: number) {
   return [
     { type: 'start', messageId: `answer-${turn}` }, { type: 'text-start', id: 'p1' },
     { type: 'text-delta', id: 'p1', delta: text }, { type: 'text-end', id: 'p1' },
-    { type: 'finish', finishReason: 'stop', messageMetadata: { model: answerModel } },
+    { type: 'finish', finishReason: 'stop', messageMetadata: { model: answerModel,
+      ...(cost !== undefined && { providerMetadata: { gateway: { cost } } }) } },
   ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n';
 }
 
@@ -4909,8 +4910,9 @@ test('BYOK can chat and persist Direct performance and cost with every gateway r
   await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeHidden();
   const lastReply = page.getByRole('article', { name: 'Assistant', exact: true }).last();
   const badge = (label: string) => lastReply.getByRole('img', { name: new RegExp(`^${label.replace(/[()]/g, '\\$&')}:`) });
+  const total = page.getByRole('img', { name: /^Conversation cost:/ });
   await expect(badge('Direct cost')).toHaveText('0.0000104');
-  await expect(page.getByRole('img', { name: /^Conversation cost:/ })).toHaveCount(0);
+  await expect(total).toHaveText('0.0000208');
   await enableChatMetrics(page);
   await expect(badge('Time to first token')).toBeVisible();
   await expect(badge('Tokens per second')).toBeVisible();
@@ -4923,9 +4925,60 @@ test('BYOK can chat and persist Direct performance and cost with every gateway r
   await expect(page.getByText('Direct reply 1', { exact: true })).toBeVisible();
   await expect(page.getByText('Direct reply 2', { exact: true })).toBeVisible();
   await expect(badge('Direct cost')).toHaveText('0.0000104');
+  await expect(total).toHaveText('0.0000208');
   await expect(badge('Time to first token')).toHaveText(ttft!);
   await expect(badge('Tokens per second')).toHaveText(tps!);
   expect(gatewayCalls).toBe(0);
+});
+
+test('conversation cost survives switching between Gateway and Direct and reloading', async ({ page }) => {
+  await mockModels(page);
+  let gatewayCalls = 0;
+  await page.route('**/gateway/api/chat', route => {
+    const turn = ++gatewayCalls;
+    return route.fulfill({ contentType: 'text/event-stream', body: sse(`Gateway reply ${turn}`, turn, model, 0.125) });
+  });
+  await page.route('https://api.openai.com/v1/models', route => route.fulfill({ json: { data: [{ id: 'gpt-4.1-mini' }] } }));
+  await page.route('https://api.openai.com/v1/chat/completions', route => {
+    expect(JSON.stringify(route.request().postDataJSON().messages)).toContain('Gateway reply 1');
+    return route.fulfill({ contentType: 'text/event-stream', body: nativeChatSse('Direct reply') });
+  });
+
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await chooseChatModel(page);
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  const send = async (prompt: string, reply: string) => {
+    await composer.fill(prompt); await composer.press('Enter');
+    await expect(page.getByText(reply, { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeHidden();
+  };
+  const total = page.getByRole('img', { name: /^Conversation cost:/ });
+  const gatewayCost = page.getByRole('img', { name: /^Gateway cost:/ }).first();
+  const directCost = page.getByRole('img', { name: /^Direct cost:/ });
+
+  await send('Start on Gateway', 'Gateway reply 1');
+  await expect(gatewayCost).toHaveText('0.125');
+  await expect(total).toHaveCount(0);
+
+  await openRoute(page, 'Direct');
+  await page.getByRole('menuitemradio', { name: '/v1/chat/completions', exact: true }).click();
+  await chooseChatModel(page);
+  await send('Switch to Direct', 'Direct reply');
+  await expect(directCost).toHaveText('0.0000104');
+  await expect(total).toHaveText('0.1250104');
+
+  await openRoute(page, 'Gateway');
+  await page.getByRole('menuitemradio', { name: '/api/chat', exact: true }).click();
+  await chooseChatModel(page);
+  await expect(total).toHaveText('0.1250104');
+  await send('Return to Gateway', 'Gateway reply 2');
+  await expect(total).toHaveText('0.2500104');
+
+  await page.reload();
+  await expect(gatewayCost).toHaveText('0.125');
+  await expect(directCost).toHaveText('0.0000104');
+  await expect(total).toHaveText('0.2500104');
 });
 
 test('BYOK can leave a failed gateway model request and discover directly', async ({ page }) => {

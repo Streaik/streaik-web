@@ -15,7 +15,7 @@ import { MessageActions } from './MessageActions';
 import { MessageClock, MessageTime } from './MessageTime';
 import { outputAttachmentsByReply } from './outputAttachments';
 import type { OutputAttachment } from './outputAttachments';
-import { conversationGatewayCost, latestContextUsage, withReplyMetadata } from './messageMetadata';
+import { conversationCost, latestContextUsage, withReplyMetadata } from './messageMetadata';
 import { AssistantSpeaker } from './AssistantSpeaker';
 import { ChatIcon } from './ChatIcon';
 import { ChatNavigation } from './ChatNavigation';
@@ -1157,7 +1157,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     ? typeof WebSocket !== 'undefined' && typeof AudioContext !== 'undefined' && typeof AudioWorkletNode !== 'undefined'
     : typeof RTCPeerConnection !== 'undefined');
   const voiceAgents = (agents?.entries ?? []).filter(({ definition }) => !!browserAgentModel(definition, textCatalog));
-  const conversationCost = useMemo(() => conversationGatewayCost(messages), [messages]);
+  const totalCost = useMemo(() => conversationCost(messages), [messages]);
   const contextUsage = preferences.showContextSize ? latestContextUsage(messages, agentMode ? browserModel ? [browserModel] : [] : selected) : undefined;
   const welcomeAgent = assignedAgent(agents, welcomeRoleId);
   const welcomeModels = configuredAgentModels(welcomeAgent).filter(({ type }) => type !== 'decision');
@@ -1402,7 +1402,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           </p>}
            <div className="chat-progress" role="status">{(progress || restoringSkills || connectingMcp) && <><span className="chat-spinner" aria-hidden="true" />
              {progress || (restoringSkills ? t('Loading provider skills…') : t('Connecting to MCP servers…'))}</>}</div>
-          <ComposerUsage context={contextUsage} cost={conversationCost} />
+          <ComposerUsage context={contextUsage} cost={totalCost} />
           <ChatComposer busy={busy || (status === 'ready' && toolParts.length > 0)} canSend={canSend} onStop={stopTurn}
             voice={voiceProtocol ? { phase: voicePhase, start: () => { void startVoice(); }, stop: stopTurn,
               manualTurn: () => voiceRun.current?.session?.manualTurn() } : undefined}
