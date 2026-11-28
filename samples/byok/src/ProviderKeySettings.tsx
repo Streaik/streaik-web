@@ -1,43 +1,50 @@
-import { Button } from '@streaik/themes';
-import { useAppTranslation } from '@streaik/chat';
+import { Button, Select } from '@streaik/themes';
+import { providerDirectory, useAppTranslation } from '@streaik/chat';
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { providerIds, providers } from './providerKeys.ts';
-import type { ProviderId } from './providerKeys.ts';
+import { catalogKeyProviders, directKeyProviderIds } from './providerKeys.ts';
 
-type KeyEditor = { mode: 'add'; id?: ProviderId } | { mode: 'replace'; id: ProviderId };
+const names = catalogKeyProviders(providerDirectory.providers);
+const catalogProviderIds = [...names.keys()];
+const providerName = (id: string) => names.get(id) ?? id;
+type KeyEditor = { mode: 'add'; id?: string } | { mode: 'replace'; id: string };
 
-export function ProviderKeySettings({ configured, vault, busy, notice, mcp, onChangeKey, onPassphrase, onLock, onErase }: {
-  configured: ProviderId[];
+export function ProviderKeySettings({ gatewayConfigured, configured, vault, busy, notice, mcp, onChangeKey, onPassphrase, onLock, onErase }: {
+  gatewayConfigured: boolean;
+  configured: readonly string[];
   vault: 'session' | 'locked' | 'unlocked';
   busy: boolean;
   notice: string;
   mcp: boolean;
-  onChangeKey: (id: ProviderId, value?: string) => Promise<boolean>;
+  onChangeKey: (id: string, value?: string) => Promise<boolean>;
   onPassphrase: (event: FormEvent<HTMLFormElement>) => void;
   onLock: () => void;
   onErase: () => Promise<boolean>;
 }) {
   const id = useId();
-  const { t } = useAppTranslation();
+  const { t, i18n } = useAppTranslation();
   const [editor, setEditor] = useState<KeyEditor>();
   const [setup, setSetup] = useState(false);
   const [confirmErase, setConfirmErase] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
-  const picker = useRef<HTMLSelectElement>(null);
+  const picker = useRef<HTMLDivElement>(null);
   const keyInput = useRef<HTMLInputElement>(null);
   const passphrase = useRef<HTMLInputElement>(null);
-  const available = providerIds.filter((provider) => !configured.includes(provider));
+  const alphabetical = new Intl.Collator(i18n.resolvedLanguage, { sensitivity: 'base' });
+  const sorted = (ids: readonly string[]) => ids.map(value => ({ value, label: providerName(value) }))
+    .sort((a, b) => alphabetical.compare(a.label, b.label) || alphabetical.compare(a.value, b.value));
+  const available = sorted((gatewayConfigured ? catalogProviderIds : directKeyProviderIds).filter(provider => !configured.includes(provider)));
+  const selectedId = editor?.id;
 
   useLayoutEffect(() => {
-    if (editor?.id) keyInput.current?.focus();
-    else if (editor) picker.current?.focus();
+    if (selectedId) keyInput.current?.focus();
+    else if (editor) picker.current?.querySelector('button')?.focus();
     else if (opener.current) {
       (opener.current.isConnected ? opener.current : heading.current)?.focus();
       opener.current = null;
     }
-  }, [editor]);
+  }, [editor, selectedId]);
 
   useLayoutEffect(() => {
     if (setup) passphrase.current?.focus();
@@ -50,11 +57,11 @@ export function ProviderKeySettings({ configured, vault, busy, notice, mcp, onCh
 
   function submitKey(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!editor?.id) return;
+    if (!selectedId) return;
     const form = event.currentTarget;
     const value = String(new FormData(form).get('key') ?? '').trim();
     form.reset();
-    void onChangeKey(editor.id, value).then((saved) => { if (saved) setEditor(undefined); });
+    void onChangeKey(selectedId, value).then((saved) => { if (saved) setEditor(undefined); });
   }
 
   function lock() {
@@ -70,12 +77,12 @@ export function ProviderKeySettings({ configured, vault, busy, notice, mcp, onCh
       {mcp && <> {t('When MCP tools are enabled, the matching provider key also goes to the configured MCP host.')}</>}</p>
     {vault !== 'locked' && <>
       {configured.length ? <ul className="byok-providers" aria-label={t('Configured providers')}>
-        {configured.map((provider) => <li className="byok-provider" key={provider}>
-          <strong>{providers[provider].label}</strong>
+        {sorted(configured).map(({ value: provider, label }) => <li className="byok-provider" key={provider}>
+          <strong>{label}</strong>
           <div className="byok-actions">
-            <Button variant="subtle" aria-label={t('Replace {{provider}} key', { provider: providers[provider].label })} disabled={busy}
+            <Button variant="subtle" aria-label={t('Replace {{provider}} key', { provider: label })} disabled={busy}
               onClick={(event) => edit({ mode: 'replace', id: provider }, event.currentTarget)}>{t('Replace')}</Button>
-            <Button variant="subtle" aria-label={t('Remove {{provider}} key', { provider: providers[provider].label })} disabled={busy || editor?.id === provider}
+            <Button variant="subtle" aria-label={t('Remove {{provider}} key', { provider: label })} disabled={busy || selectedId === provider}
               onClick={() => { void onChangeKey(provider); }}>{t('Remove')}</Button>
           </div>
         </li>)}
@@ -86,20 +93,18 @@ export function ProviderKeySettings({ configured, vault, busy, notice, mcp, onCh
           else edit({ mode: 'add' }, event.currentTarget);
         }}>{t('Add API key')}</Button></div>}
       {editor && <div className="byok-editor">
-        {editor.mode === 'add' && <div className="byok-key-form">
+        {editor.mode === 'add' && <div ref={picker} className="byok-key-form">
           <label htmlFor={`${id}-provider`}>{t('Provider')}</label>
-          <select ref={picker} className="ui-input byok-provider-select" id={`${id}-provider`} disabled={busy} value={editor.id ?? ''}
-            onChange={(event) => setEditor({ mode: 'add', id: available.find((provider) => provider === event.currentTarget.value) })}>
-            <option value="" disabled>{t('Choose a provider')}</option>
-            {available.map((provider) => <option key={provider} value={provider}>{providers[provider].label}</option>)}
-          </select>
+          <Select id={`${id}-provider`} label={t('Provider')} disabled={busy} value={selectedId ?? ''} options={available}
+            placeholder={t('Choose a provider')} search={{ label: t('Search providers'), placeholder: t('Search providers'), emptyMessage: t('No matching providers.') }}
+            onValueChange={(provider) => setEditor({ mode: 'add', id: provider })} />
         </div>}
-        {editor.id ? <form className="byok-key-form" onSubmit={submitKey} key={editor.id}>
-          <label htmlFor={`${id}-key`}>{t('{{provider}} API key', { provider: providers[editor.id].label })}</label>
+        {selectedId ? <form className="byok-key-form" onSubmit={submitKey} key={selectedId}>
+          <label htmlFor={`${id}-key`}>{t('{{provider}} API key', { provider: providerName(selectedId) })}</label>
           <input ref={keyInput} className="ui-input" id={`${id}-key`} name="key" type="password" autoComplete="off"
             maxLength={4096} required disabled={busy} />
           <div className="byok-actions">
-            <Button type="submit" variant="primary" disabled={busy}>{t('Save {{provider}} key', { provider: providers[editor.id].label })}</Button>
+            <Button type="submit" variant="primary" disabled={busy}>{t('Save {{provider}} key', { provider: providerName(selectedId) })}</Button>
             <Button disabled={busy} onClick={() => setEditor(undefined)}>{t('Cancel')}</Button>
           </div>
         </form> : <div><Button disabled={busy} onClick={() => setEditor(undefined)}>{t('Cancel')}</Button></div>}

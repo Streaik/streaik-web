@@ -8,8 +8,8 @@ import { byokMcpProvider, byokRegistryRemote } from '../../shared/mcpConfig';
 import { isMcpRuntime } from '@streaik/chat';
 import type { McpConfig } from '../../shared/mcpConfig';
 import { ProviderKeySettings } from './ProviderKeySettings';
-import { agentProviderHeaders, providerHeaders, providerIds, providers, validProviderKey } from './providerKeys.ts';
-import type { ProviderId, ProviderKeys } from './providerKeys.ts';
+import { agentProviderHeaders, directKeyProviderIds, providerHeaders, validProviderId, validProviderKey } from './providerKeys.ts';
+import type { ProviderKeys } from './providerKeys.ts';
 import { createVault, unlockVault } from './vault.ts';
 
 type Encrypter = Awaited<ReturnType<typeof createVault>>;
@@ -35,8 +35,9 @@ export function ByokApp({ appName, base, agentBase, mcpConfig, enableKeylessEcho
     if ((request.kind === 'chat' || request.kind === 'image' || request.kind === 'video' || request.kind === 'transcription' || request.kind === 'speech' || request.kind === 'realtime') && request.provider !== 'echo' && ![...headers].length) throw new GatewayError('Set or unlock the provider key for this model.');
     return headers;
   }));
+  // A catalog entry is not a grant to send keys directly to another origin.
   const [direct] = useState(() => createDirectChat(providerDirectory.providers, (provider) =>
-    Object.hasOwn(providers, provider) ? keys.current[provider as ProviderId] : undefined));
+    directKeyProviderIds.includes(provider) ? keys.current[provider] : undefined));
   const [agentBackend] = useState(() => agentBase && createAgentBackend(agentBase, request => {
     if (request.kind === 'catalog') return {};
     const headers = agentProviderHeaders(keys.current, request.modelIds);
@@ -68,15 +69,14 @@ export function ByokApp({ appName, base, agentBase, mcpConfig, enableKeylessEcho
     finally { working.current = false; setBusy(false); }
   }
 
-  async function changeKey(id: ProviderId, value?: string) {
-    if (vault.state === 'locked') return false;
+  async function changeKey(id: string, value?: string) {
+    if (vault.state === 'locked' || !validProviderId(id)) return false;
     if (value !== undefined && !validProviderKey(value)) {
       setNotice('Enter a nonempty provider key without spaces.');
       return false;
     }
-    const next = { ...keys.current };
+    const next = value === undefined ? { ...keys.current } : { ...keys.current, [id]: value };
     if (value === undefined) delete next[id];
-    else next[id] = value;
     return run(async () => {
       if (vault.state === 'unlocked') localStorage.setItem(storageKey, await vault.encrypt(next));
       updateKeys(next);
@@ -124,14 +124,15 @@ export function ByokApp({ appName, base, agentBase, mcpConfig, enableKeylessEcho
     }, 'Could not erase the vault.');
   }
 
-  const configured = providerIds.filter((id) => !!keys.current[id]);
+  const configured = Object.keys(keys.current);
   return <ChatApp appName={appName} gateway={gateway} agents={vault.state === 'locked' ? undefined : appAgents} connection={{
     ready: configured.length > 0 || (enableKeylessEcho && !!base && vault.state !== 'locked'), modelRevision: revision, mcp, direct, mcpSession: vault.state !== 'locked',
     agentBackend: vault.state === 'locked' ? undefined : agentBackend,
     historyProfile: vault.state === 'locked' ? undefined : 'byok',
     emptyMessage: t(vault.state === 'locked' ? 'Unlock your provider keys in Settings to start chatting.' : 'Add a provider key in Settings to start chatting.'),
     account: { name: 'BYOK' },
-    apiKeySettings: <ProviderKeySettings configured={configured} vault={vault.state} busy={busy} notice={notice} mcp={!!mcp}
+    apiKeySettings: <ProviderKeySettings gatewayConfigured={!!base} configured={configured}
+      vault={vault.state} busy={busy} notice={notice} mcp={!!mcp}
       onChangeKey={changeKey} onPassphrase={submitPassphrase} onLock={() => {
         updateKeys({}); setVault({ state: 'locked' }); setNotice('Vault locked.');
       }} onErase={eraseVault} />,

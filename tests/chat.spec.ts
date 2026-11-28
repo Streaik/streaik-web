@@ -4,6 +4,7 @@ import type { TokenRates } from '@streaik/gateway';
 import { readFileSync } from 'node:fs';
 import { BlobWriter, TextReader, ZipWriter } from '@zip.js/zip.js';
 import { faviconEndpoint, iconResponse, openAiFavicon } from './icon-fixtures';
+import { selectKeyProvider } from './provider-key-picker';
 
 const directory = JSON.parse(readFileSync(new URL('../packages/chat/src/provider-directory.json', import.meta.url), 'utf8')) as {
   providers: { id: string; country?: string; regions?: string[]; tokenPricing?: Partial<Record<string, TokenRates>> }[];
@@ -68,7 +69,7 @@ async function addKey(page: Page, provider = 'OpenAI', key = fakeKey) {
   await page.getByRole('tab', { name: 'API keys', exact: true }).click();
   const panel = page.getByRole('tabpanel', { name: 'API keys', exact: true });
   await panel.getByRole('button', { name: 'Add API key', exact: true }).click();
-  await panel.getByLabel('Provider', { exact: true }).selectOption({ label: provider });
+  await selectKeyProvider(panel, provider);
   await panel.getByLabel(`${provider} API key`, { exact: true }).fill(key);
   await panel.getByRole('button', { name: `Save ${provider} key`, exact: true }).click();
   await expect(panel.getByRole('status')).toHaveText('Provider key saved.');
@@ -308,7 +309,7 @@ test('Gemini Live and Grok Voice switch in the same composer and save portable t
   await showSettings(page);
   await addKey(page);
   await addKey(page, 'Google Gemini', 'test-google-key');
-  await addKey(page, 'xAI', 'test-xai-key');
+  await addKey(page, 'SpaceXAI', 'test-xai-key');
   await closeSettings(page);
   await modelPicker(page).click();
   await expect(page.getByRole('option', { name: 'gemini-3.5-transcribe-live', exact: true })).toHaveCount(0);
@@ -5388,17 +5389,18 @@ test('API keys lists only configured providers and opens one empty editor at a t
   const panel = dialog.getByRole('tabpanel', { name: 'API keys' });
   const list = panel.getByRole('list', { name: 'Configured providers' });
   const add = panel.getByRole('button', { name: 'Add API key', exact: true });
-  const picker = panel.getByLabel('Provider', { exact: true });
+  const picker = panel.getByRole('button', { name: 'Provider', exact: true });
+  const openAiOption = panel.getByRole('option', { name: 'OpenAI', exact: true });
   const input = panel.getByLabel('OpenAI API key', { exact: true });
   await tab.click();
   await expect(panel.getByText(/No API keys added yet/)).toBeVisible();
   await expect(panel.locator('input[type="password"]')).toHaveCount(0);
   await add.click();
   await expect(picker).toBeFocused();
-  await picker.selectOption('openai');
+  await selectKeyProvider(panel, 'OpenAI');
   await expect(input).toBeFocused();
   await input.fill('discard-this-draft');
-  await picker.selectOption('anthropic');
+  await selectKeyProvider(panel, 'Anthropic');
   await expect(panel.getByLabel('Anthropic API key', { exact: true })).toHaveValue('');
   await dialog.getByRole('tab', { name: 'Agents' }).click();
   await tab.click();
@@ -5409,7 +5411,10 @@ test('API keys lists only configured providers and opens one empty editor at a t
   await expect(list.getByRole('listitem')).toHaveCount(1);
   await expect(list.getByText('OpenAI', { exact: true })).toBeVisible();
   await add.click();
-  await expect(picker.locator('option[value="openai"]')).toHaveCount(0);
+  await picker.click();
+  await expect(panel.getByRole('listbox', { name: 'Provider', exact: true })).toBeVisible();
+  await expect(openAiOption).toHaveCount(0);
+  await page.keyboard.press('Escape');
   await panel.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(add).toBeFocused();
   const replace = list.getByRole('button', { name: 'Replace OpenAI key', exact: true });
@@ -5426,7 +5431,56 @@ test('API keys lists only configured providers and opens one empty editor at a t
   await expect(panel.getByRole('status')).toHaveText('Provider key removed.');
   await expect(panel.getByText(/No API keys added yet/)).toBeVisible();
   await add.click();
-  await expect(picker.locator('option[value="openai"]')).toHaveCount(1);
+  await picker.click();
+  await expect(openAiOption).toBeVisible();
+});
+
+test('BYOK searches the alphabetized bundled catalog without a gateway request', async ({ page }) => {
+  const gatewayRequests: string[] = [];
+  page.on('request', request => {
+    const { pathname } = new URL(request.url());
+    if (pathname.startsWith('/gateway/')) gatewayRequests.push(pathname);
+  });
+  const modelKeys: Record<string, string>[] = [];
+  await page.route('**/gateway/v1/models', async (route) => {
+    modelKeys.push(await route.request().allHeaders());
+    await route.fulfill({ json: { data: [] } });
+  });
+  await page.goto('/');
+  const dialog = await showSettings(page);
+  await dialog.getByRole('tab', { name: 'API keys', exact: true }).click();
+  const panel = dialog.getByRole('tabpanel', { name: 'API keys', exact: true });
+  await panel.getByRole('button', { name: 'Add API key', exact: true }).click();
+  await panel.getByRole('button', { name: 'Provider', exact: true }).click();
+  const options = panel.getByRole('listbox', { name: 'Provider', exact: true }).getByRole('option');
+  const search = panel.getByRole('combobox', { name: 'Search providers', exact: true });
+  await expect(search).toBeFocused();
+  const labels = await options.allTextContents();
+  expect(labels.length).toBeGreaterThan(12);
+  expect(labels).toEqual([...labels].sort(new Intl.Collator('en-US', { sensitivity: 'base' }).compare));
+  expect(labels.filter(label => label === 'SpaceXAI')).toHaveLength(1);
+  expect(labels).not.toContain('Echo');
+  await search.fill('not-a-provider');
+  await expect(panel.getByText('No matching providers.')).toBeVisible();
+  await search.fill('misTRAL');
+  await expect(options).toHaveText(['Mistral']);
+  await search.press('Enter');
+  const mistral = panel.getByLabel('Mistral API key', { exact: true });
+  await expect(mistral).toBeFocused();
+  expect(gatewayRequests).toEqual([]);
+  await mistral.fill('fixture-mistral-key');
+  await panel.getByRole('button', { name: 'Save Mistral key', exact: true }).click();
+  await expect.poll(() => modelKeys.at(-1)?.['x-mistral-key']).toBe('fixture-mistral-key');
+
+  await panel.getByRole('button', { name: 'Add API key', exact: true }).click();
+  await panel.getByRole('button', { name: 'Provider', exact: true }).click();
+  await expect(options.filter({ hasText: /^Mistral$/ })).toHaveCount(0);
+  await search.fill('xai');
+  await options.filter({ hasText: /^SpaceXAI$/ }).click();
+  await panel.getByLabel('SpaceXAI API key', { exact: true }).fill('fixture-xai-key');
+  await panel.getByRole('button', { name: 'Save SpaceXAI key', exact: true }).click();
+  await expect.poll(() => modelKeys.at(-1)?.['x-xai-key']).toBe('fixture-xai-key');
+  expect(modelKeys.at(-1)?.['x-spacexai-key']).toBeUndefined();
 });
 
 test('BYOK does not persist session keys; the encrypted vault reloads locked and can be erased', async ({ page }) => {

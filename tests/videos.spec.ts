@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import { selectKeyProvider } from './provider-key-picker';
 
 const model = 'google/veo-3.1-generate';
 const openVideos = (page: Page) => page.getByRole('button', { name: 'Videos', exact: true }).click();
@@ -21,7 +22,7 @@ async function addKey(page: Page) {
   const settings = page.getByRole('dialog', { name: 'Settings', exact: true });
   await settings.getByRole('tab', { name: 'API keys' }).click();
   await settings.getByRole('button', { name: 'Add API key' }).click();
-  await settings.getByLabel('Provider', { exact: true }).selectOption('google');
+  await selectKeyProvider(settings, 'Google Gemini');
   await settings.getByLabel('Google Gemini API key', { exact: true }).fill('fixture-video-key');
   await settings.getByRole('button', { name: 'Save Google Gemini key' }).click();
   await expect(settings.getByRole('status')).toHaveText('Provider key saved.');

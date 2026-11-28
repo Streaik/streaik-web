@@ -17,7 +17,6 @@
 }
 .byok-key-form { display: grid; gap: .4rem; }
 .byok-key-form .ui-input { box-sizing: border-box; max-width: 100%; }
-.byok-provider-select { background: var(--surface); color: var(--foreground); border: 1px solid var(--border); border-radius: var(--radius); }
 .byok-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
 .byok-settings .byok-notice:not(:empty) { color: var(--foreground); }
 .byok-settings .byok-notice:empty { height: 0; margin-top: -.8rem; }

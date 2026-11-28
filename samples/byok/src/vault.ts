@@ -1,12 +1,17 @@
-import { providerIds, validProviderKey } from './providerKeys.ts';
+import { validProviderId, validProviderKey } from './providerKeys.ts';
 import type { ProviderKeys } from './providerKeys.ts';
 
 const encoder = new TextEncoder();
 const iterations = 600_000;
 const version = 1;
+const maxVaultLength = 2_000_000;
 type Bytes = Uint8Array<ArrayBuffer>;
 type Cipher = { salt: Bytes; key: CryptoKey };
-const encode = (value: Bytes) => btoa(String.fromCharCode(...value));
+function encode(value: Bytes) {
+  let binary = '';
+  for (let start = 0; start < value.length; start += 0x8000) binary += String.fromCharCode(...value.subarray(start, start + 0x8000));
+  return btoa(binary);
+}
 const decode = (value: string) => Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
 const associatedData = (scope: string) => encoder.encode(`streaik/provider-keys/${version}\n${scope}`);
 
@@ -21,7 +26,9 @@ async function seal(cipher: Cipher, keys: ProviderKeys, scope: string) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: associatedData(scope) },
     cipher.key, encoder.encode(JSON.stringify(keys)));
-  return JSON.stringify({ version, salt: encode(cipher.salt), iv: encode(iv), ciphertext: encode(new Uint8Array(encrypted)) });
+  const raw = JSON.stringify({ version, salt: encode(cipher.salt), iv: encode(iv), ciphertext: encode(new Uint8Array(encrypted)) });
+  if (raw.length > maxVaultLength) throw new Error('Vault is too large.');
+  return raw;
 }
 
 function encryptWith(cipher: Cipher, scope: string) {
@@ -35,7 +42,7 @@ export async function createVault(passphrase: string, scope: string) {
 
 export async function unlockVault(raw: string, passphrase: string, scope: string) {
   // Refuse malformed or unexpectedly large values before deriving a key.
-  if (!raw || raw.length > 14_000 || passphrase.length > 256) throw new Error('Invalid vault.');
+  if (!raw || raw.length > maxVaultLength || passphrase.length > 256) throw new Error('Invalid vault.');
   const record = JSON.parse(raw);
   if (record?.version !== version || typeof record.salt !== 'string' || typeof record.iv !== 'string' ||
       typeof record.ciphertext !== 'string') throw new Error('Invalid vault.');
@@ -45,11 +52,9 @@ export async function unlockVault(raw: string, passphrase: string, scope: string
   const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: associatedData(scope) }, cipher.key, ciphertext);
   const decoded: unknown = JSON.parse(new TextDecoder().decode(plaintext));
   if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) throw new Error('Invalid vault.');
-  const keys: ProviderKeys = {};
-  for (const [id, key] of Object.entries(decoded)) {
-    const provider = providerIds.find((value) => value === id);
-    if (!provider || typeof key !== 'string' || !validProviderKey(key)) throw new Error('Invalid vault.');
-    keys[provider] = key;
+  const entries = Object.entries(decoded);
+  for (const [id, key] of entries) {
+    if (!validProviderId(id) || typeof key !== 'string' || !validProviderKey(key)) throw new Error('Invalid vault.');
   }
-  return { keys, encrypt: encryptWith(cipher, scope) };
+  return { keys: Object.fromEntries<string>(entries), encrypt: encryptWith(cipher, scope) };
 }

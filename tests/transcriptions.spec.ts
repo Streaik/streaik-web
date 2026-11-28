@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { Locator, Page, WebSocketRoute } from '@playwright/test';
+import { selectKeyProvider } from './provider-key-picker';
 
 const batchModel = 'openai/gpt-4o-transcribe';
 const liveModel = 'openai/gpt-realtime-transcribe';
@@ -30,7 +31,7 @@ async function connectFixture(page: Page, provider: string, models: FixtureModel
 async function saveFixtureKey(page: Page, provider: string) {
   const dialog = await appSettings(page, 'API keys');
   await dialog.getByRole('button', { name: 'Add API key' }).click();
-  await dialog.getByLabel('Provider', { exact: true }).selectOption({ label: provider });
+  await selectKeyProvider(dialog, provider);
   await dialog.getByLabel(`${provider} API key`, { exact: true }).fill('fixture-provider-key');
   await dialog.getByRole('button', { name: `Save ${provider} key` }).click();
   await expect(dialog.getByRole('status')).toHaveText('Provider key saved.');

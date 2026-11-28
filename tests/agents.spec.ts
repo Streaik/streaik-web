@@ -3,6 +3,7 @@ import type { Locator, Page, Route } from '@playwright/test';
 import { appAgents } from '../samples/shared/appAgents';
 import { exportSkillZip } from '../packages/chat/src/skillBundles';
 import { faviconEndpoint, iconResponse, openAiFavicon } from './icon-fixtures';
+import { selectKeyProvider } from './provider-key-picker';
 
 test.beforeEach(async ({ page }) => {
   await page.route(faviconEndpoint, route => route.fulfill(iconResponse));
@@ -405,7 +406,7 @@ async function mockTextAgentModels(page: Page) {
 async function enableOpenAI(page: Page) {
   const keys = await settings(page, 'API keys');
   await keys.getByRole('button', { name: 'Add API key', exact: true }).click();
-  await keys.getByLabel('Provider', { exact: true }).selectOption({ label: 'OpenAI' });
+  await selectKeyProvider(keys, 'OpenAI');
   await keys.getByLabel('OpenAI API key', { exact: true }).fill(agentTestKey);
   await keys.getByRole('button', { name: 'Save OpenAI key', exact: true }).click();
   await keys.getByRole('button', { name: 'Close', exact: true }).click();

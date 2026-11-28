@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { exportSkillZip } from '../packages/chat/src/skillBundles';
 import { faviconEndpoint, iconResponse } from './icon-fixtures';
+import { selectKeyProvider } from './provider-key-picker';
 
 const app = 'http://localhost:15175';
 const model = 'openai/gpt-6-luna';
@@ -29,7 +30,7 @@ async function start(page: Page, data: { id: string; type?: string; name?: strin
   await page.getByRole('tab', { name: 'API keys', exact: true }).click();
   const panel = page.getByRole('tabpanel', { name: 'API keys', exact: true });
   await panel.getByRole('button', { name: 'Add API key' }).click();
-  await panel.getByLabel('Provider', { exact: true }).selectOption({ label: 'OpenAI' });
+  await selectKeyProvider(panel, 'OpenAI');
   await panel.getByLabel('OpenAI API key').fill(key);
   await panel.getByRole('button', { name: 'Save OpenAI key' }).click();
   await expect(panel.getByRole('status')).toHaveText('Provider key saved.');

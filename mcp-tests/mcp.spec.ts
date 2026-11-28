@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { APIRequestContext, APIResponse, Page, Request } from '@playwright/test';
+import { selectKeyProvider } from '../tests/provider-key-picker';
 import { completeMcpArgument, discoverMcpServer, fetchMcpCatalog, mcpAppAuth } from '../packages/chat/src/mcp';
 import { acceptsEntraMcpToken, readMcpConfig } from '../samples/shared/mcpConfig';
 
@@ -21,7 +22,7 @@ async function setOpenAiKey(page: Page) {
   await page.getByRole('menuitem', { name: 'Settings' }).click();
   await page.getByRole('tab', { name: 'API keys', exact: true }).click();
   await page.getByRole('button', { name: 'Add API key', exact: true }).click();
-  await page.getByLabel('Provider', { exact: true }).selectOption('openai');
+  await selectKeyProvider(page, 'OpenAI');
   await page.getByLabel('OpenAI API key').fill('browser-openai');
   await page.getByRole('button', { name: 'Save OpenAI key' }).click();
   await page.getByRole('button', { name: 'Close', exact: true }).click();

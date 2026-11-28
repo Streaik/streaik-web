@@ -1,42 +1,43 @@
 import type { CredentialRequest } from '@streaik/gateway';
 
-export const providers = {
-  openai: { label: 'OpenAI', header: 'X-OpenAI-Key' },
-  anthropic: { label: 'Anthropic', header: 'X-Anthropic-Key' },
-  openrouter: { label: 'OpenRouter', header: 'X-OpenRouter-Key' },
-  deepseek: { label: 'DeepSeek', header: 'X-DeepSeek-Key' },
-  groq: { label: 'Groq', header: 'X-Groq-Key' },
-  together: { label: 'Together', header: 'X-Together-Key' },
-  cerebras: { label: 'Cerebras', header: 'X-Cerebras-Key' },
-  google: { label: 'Google Gemini', header: 'X-Google-Key' },
-  xai: { label: 'xAI', header: 'X-Xai-Key' },
-  assemblyai: { label: 'AssemblyAI', header: 'X-AssemblyAI-Key' },
-  gladia: { label: 'Gladia', header: 'X-Gladia-Key' },
-  deepgram: { label: 'Deepgram', header: 'X-Deepgram-Key' },
-} as const;
-export type ProviderId = keyof typeof providers;
-export type ProviderKeys = Partial<Record<ProviderId, string>>;
-export const providerIds = Object.keys(providers) as ProviderId[];
+// Keep the existing direct-to-provider credential scope independent of the picker.
+export const directKeyProviderIds: readonly string[] = [
+  'openai', 'anthropic', 'openrouter', 'deepseek', 'groq', 'together', 'cerebras',
+  'google', 'xai', 'assemblyai', 'gladia', 'deepgram',
+];
+export type ProviderKeys = Partial<Record<string, string>>;
+
+export function validProviderId(id: string) {
+  return id.length > 0 && !/[^a-z0-9_-]/.test(id) && id !== 'echo';
+}
+
+export function catalogKeyProviders(catalog: readonly { id: string; name: string }[]) {
+  const providers = new Map<string, string>();
+  for (const { id, name } of catalog) {
+    // The catalog renamed its entry; the gateway's model IDs and key header have not changed.
+    const routingId = id === 'spacexai' ? 'xai' : id;
+    if (validProviderId(routingId) && (id === 'spacexai' || !providers.has(routingId))) providers.set(routingId, name);
+  }
+  return providers;
+}
 
 export function validProviderKey(value: string) {
   return value.length <= 4096 && /^[!-~]+$/.test(value);
 }
 
 export function providerHeaders(keys: ProviderKeys, request: CredentialRequest) {
-  const headers = new Headers();
-  for (const id of providerIds) {
-    const value = keys[id];
-    if (value && (request.kind === 'models' || request.provider === id)) headers.set(providers[id].header, value);
-  }
-  return headers;
+  return selectHeaders(keys, id => request.kind === 'models' || request.provider === id);
 }
 
 export function agentProviderHeaders(keys: ProviderKeys, modelIds: readonly string[]) {
   const requested = new Set(modelIds.flatMap(id => id.includes('/') ? [id.slice(0, id.indexOf('/'))] : []));
+  return selectHeaders(keys, id => requested.has(id));
+}
+
+function selectHeaders(keys: ProviderKeys, include: (id: string) => boolean) {
   const headers = new Headers();
-  for (const id of providerIds) {
-    const key = keys[id];
-    if (key && requested.has(id)) headers.set(providers[id].header, key);
+  for (const [id, key] of Object.entries(keys)) {
+    if (key && validProviderId(id) && include(id)) headers.set(`X-${id}-Key`, key);
   }
   return headers;
 }

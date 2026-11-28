@@ -27,6 +27,7 @@ export const sampleMessages = {
   'No API keys added yet. Add a key to use models from that provider.': ['Nog geen API-sleutels toegevoegd. Voeg een sleutel toe om de modellen van die provider te gebruiken.', 'Aún no hay claves de API. Añade una clave para usar los modelos de ese proveedor.'],
   'Add API key': ['API-sleutel toevoegen', 'Añadir clave de API'],
   'Choose a provider': ['Kies een provider', 'Elige un proveedor'],
+  'No matching providers.': ['Geen overeenkomende providers.', 'No hay proveedores que coincidan.'],
   '{{provider}} API key': ['API-sleutel van {{provider}}', 'Clave de API de {{provider}}'],
   'Save {{provider}} key': ['Sleutel van {{provider}} opslaan', 'Guardar la clave de {{provider}}'],
   'Encrypted storage': ['Versleutelde opslag', 'Almacenamiento cifrado'],
