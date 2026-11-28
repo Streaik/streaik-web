@@ -1757,8 +1757,10 @@ test('Provider Model Context sends authenticated MCP upstream without browser di
   const approval = page.getByRole('dialog', { name: 'Approve tool execution', exact: true });
   await approval.getByRole('button', { name: 'Approve and run', exact: true }).click();
   await expect(page.getByText('Provider MCP reply', { exact: true })).toBeVisible();
-  const descriptor = { server_label: 'Provider fixture', server_url: endpoint, execution: 'server', headers: { authorization: 'Bearer provider-mcp-fixture-token' } };
+  const descriptor = { server_label: expect.stringMatching(/^[A-Za-z][A-Za-z0-9_-]*$/), server_url: endpoint, execution: 'server',
+    headers: { authorization: 'Bearer provider-mcp-fixture-token' } };
   expect(requests).toHaveLength(2);
+  expect(requests[1].tools).toEqual(requests[0].tools);
   for (const request of requests) {
     expect(request.tools).toEqual([{ name: 'mcp', inputSchema: { type: 'object', mcp: descriptor } }]);
     expect(JSON.stringify(request.messages)).not.toContain('provider-mcp-fixture-token');
@@ -1802,8 +1804,9 @@ test('BYOK app-managed and public MCP reach both Gateway transports', async ({ p
   await page.route('**/gateway/v1/responses', route => {
     const body = route.request().postDataJSON();
     expect(body.tools).toEqual(expect.arrayContaining([
-      { type: 'mcp', name: 'mcp', server_label: 'BYOK Images', server_url: appEndpoint, execution: 'server', headers: { authorization: `Bearer ${fakeKey}` } },
-      { type: 'mcp', name: 'mcp', server_label: 'Public Countries', server_url: publicEndpoint, execution: 'server' },
+      { type: 'mcp', name: 'mcp', server_label: 'test_example_mcp_byok-images', server_url: appEndpoint, execution: 'server',
+        headers: { authorization: `Bearer ${fakeKey}` } },
+      { type: 'mcp', name: 'mcp', server_label: 'test_example_mcp_countries', server_url: publicEndpoint, execution: 'server' },
     ]));
     expect(JSON.stringify(body.input)).not.toContain(fakeKey);
     return route.fulfill({ contentType: 'text/event-stream', body: nativeToolSse('/v1/responses', model, [], 'BYOK Provider reply') });

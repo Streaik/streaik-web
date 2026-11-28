@@ -68,7 +68,7 @@ test('hosted MCP normalizes per-server callers and deferral, and honors a saved 
     },
   } });
   assert.deepEqual(modelContext.servers, { [eager]: { allowedCallers: ['programmatic'], deferLoading: false }, [configured]: { deferLoading: true } });
-  const servers = [eager, configured, inherited].map(endpoint => ({ record: { title: new URL(endpoint).hostname, endpoint } }));
+  const servers = [eager, configured, inherited].map((endpoint, index) => ({ record: { id: `mcp-${index}`, title: new URL(endpoint).hostname, endpoint } }));
   const descriptors = servers.map(({ record }) => ({ type: 'mcp', server_label: record.title, server_url: record.endpoint }));
   const first = { ...descriptors[0], allowed_callers: ['programmatic'] };
   const deferred = { ...descriptors[1], defer_loading: true };
@@ -88,9 +88,9 @@ test('provider MCP survives preference normalization and sends only the MCP desc
   const { modelContext } = normalizeChatPreferences({ modelContext: source });
   assert.equal(modelContext.execution, 'provider');
   assert.doesNotMatch(JSON.stringify(modelContext), /must-not-be-persisted/);
-  const servers = [{ record: { title: 'Inventory', endpoint } }];
+  const servers = [{ record: { id: 'rest_countries', title: 'GitHub RESTCountries.NET', registryName: 'net.streaik.mcp/rest-countries', endpoint } }];
   const tools = chatHostedMcp(modelContext, servers);
-  const descriptor = { server_label: 'Inventory', server_url: endpoint, execution: 'server', allowed_tools: ['lookup'], require_approval: 'always' };
+  const descriptor = { server_label: 'net_streaik_mcp_rest-countries', server_url: endpoint, execution: 'server', allowed_tools: ['lookup'], require_approval: 'always' };
   assert.deepEqual(tools, [{ type: 'mcp', ...descriptor }]);
   assert.deepEqual(chatHostedMcp(undefined, servers), []);
   const headers = { authorization: 'Bearer mcp-fixture', 'x-region': 'eu' };
@@ -101,6 +101,20 @@ test('provider MCP survives preference normalization and sends only the MCP desc
   assert.equal(tools[0].headers, undefined);
   assert.deepEqual(apiChatHostedMcp(wire[0]), { name: 'mcp', inputSchema: { type: 'object', mcp: { ...descriptor, headers } } });
   assert.deepEqual(JSON.parse(withResponsesHostedMcp('{}', wire)).tools, [{ type: 'mcp', name: 'mcp', ...descriptor, headers }]);
+});
+
+test('provider MCP disambiguates normalized names and falls back to saved IDs, without changing hosted titles', () => {
+  const servers = [
+    { id: 'countries', title: 'Country Catalog', registryName: 'net.streaik.mcp/rest-countries' },
+    { id: 'countries-2', title: 'Country Catalog', registryName: 'net.streaik.mcp/rest_countries' },
+    { id: 'countries-3', title: 'Country Catalog', registryName: 'net.streaik.mcp/rest/countries' },
+    { id: 'legacy_countries', title: 'Legacy Server' },
+    { id: '123-fixture', title: 'Manual Server' },
+  ].map(record => ({ record: { ...record, endpoint: `https://mcp.example/${record.id}` } }));
+  const labels = execution => chatHostedMcp({ execution }, servers).map(tool => tool.server_label);
+  assert.deepEqual(labels('provider'), ['net_streaik_mcp_rest-countries', 'net_streaik_mcp_rest_countries',
+    'net_streaik_mcp_rest_countries_2', 'legacy_countries', 'mcp_123-fixture']);
+  assert.deepEqual(labels('hosted'), ['Country Catalog', 'Country Catalog (2)', 'Country Catalog (3)', 'Legacy Server', 'Manual Server']);
 });
 
 test('browser tool choice, maximum and stop tools persist only in their profile', (t) => {

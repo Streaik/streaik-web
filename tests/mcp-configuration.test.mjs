@@ -45,6 +45,16 @@ test('installed records discard secrets and unsafe auth declarations cannot requ
   assert.equal(mcpAppAuth(options, { source: 'manual', endpoint, declarations: [] }), undefined);
 });
 
+test('installed MCP records round-trip the registry name separately from their display title and local ID', () => {
+  const saved = { id: 'github_restcountries', title: 'GitHub RESTCountries.NET', endpoint: 'https://mcp.example.org/countries',
+    source: 'registry', auth: 'manual', declarations: [], extraNames: [] };
+  const registryName = 'invalid.default-mcp-host/GitHub-RESTCountries';
+  const record = parseMcpServer({ ...saved, registryName });
+  assert.deepEqual(parseMcpServer(JSON.parse(JSON.stringify(record))), { ...saved, registryName, needsSession: false });
+  assert.deepEqual(parseMcpServer(saved), { ...saved, needsSession: false });
+  assert.deepEqual(parseMcpServer({ ...saved, source: 'manual', registryName }), { ...saved, source: 'manual', needsSession: false });
+});
+
 test('MCP fails closed when a remote only supports an earlier protocol revision', async (t) => {
   const endpoint = 'https://mcp.example.org/tools';
   const attempts = [];
