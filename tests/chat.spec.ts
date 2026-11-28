@@ -5537,7 +5537,8 @@ test('Entra sample starts signed out, without a provider-key surface or model re
   expect(requests).toEqual([]);
 });
 
-test('signed-in Entra has only gateway routes, can browse live models, and clears them on avatar logout', async ({ page }) => {
+test('signed-in Entra can chat with Mistral on a gateway route, browse live models, and clear them on logout', async ({ page }) => {
+  const mistral = 'mistral/mistral-small-latest';
   // Stub the host auth adapter so this only exercises the UI, without real Microsoft sign-in.
   await page.route((url) => url.port === '15174' && url.pathname === '/src/auth.ts', (route) => route.fulfill({
     contentType: 'application/javascript',
@@ -5554,17 +5555,20 @@ test('signed-in Entra has only gateway routes, can browse live models, and clear
   }));
   await page.route('**/gateway/v1/models', (route) => route.fulfill({ json: { data: [
     { id: model, type: 'language' }, { id: 'openai/gpt-realtime-mini', type: 'audio', tags: ['realtime'] },
+    { id: mistral, type: 'language' }, { id: 'mistral/mistral-embed', type: 'embedding' },
   ] } }));
   await page.route('**/gateway/v1/chat/completions', async (route) => {
     expect(await route.request().headerValue('authorization')).toBe('Bearer test-entra-token');
-    expect(route.request().postDataJSON()).toMatchObject({ model, stream: true, store: false });
+    expect(await route.request().headerValue('x-mistral-key')).toBeNull();
+    expect(route.request().postDataJSON()).toMatchObject({ model: mistral, stream: true, store: false });
     await route.fulfill({ contentType: 'text/event-stream', body: nativeChatSse('Entra native reply') });
   });
   await page.goto('http://localhost:15174');
-  await chooseChatModel(page);
+  await chooseModel(page, 'mistral-small-latest');
   await modelPicker(page).click();
-  await page.getByRole('searchbox', { name: 'Search models', exact: true }).fill('OPENAI');
-  await expect(page.getByRole('group', { name: 'OpenAI', exact: true }).getByRole('option', { name: 'gpt-4.1-mini', exact: true })).toBeVisible();
+  await page.getByRole('searchbox', { name: 'Search models', exact: true }).fill('MISTRAL');
+  const mistralModels = page.getByRole('group', { name: 'Mistral', exact: true }).getByRole('option');
+  await expect(mistralModels).toHaveText(['mistral-small-latest']);
   await page.keyboard.press('Escape');
   await openRoute(page);
   await expect(page.getByRole('menuitem', { name: 'Direct', exact: true })).toHaveCount(0);

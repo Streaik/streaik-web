@@ -109,7 +109,7 @@ export function normalizeGatewayBase(value: string, appUrl: string): URL {
 
 // /v1/models is shared across protocols. These are the text-chat providers
 // supported by the current gateway's Vercel adapter, not every listed provider.
-const apiChatProviders = new Set(['echo', 'openai', 'anthropic', 'openrouter', 'fireworks', 'deepseek', 'groq', 'together', 'cerebras', 'google', 'xai']);
+const apiChatProviders = new Set(['echo', 'openai', 'anthropic', 'openrouter', 'fireworks', 'deepseek', 'groq', 'together', 'cerebras', 'google', 'xai', 'mistral']);
 
 function apiChatProvider(id: string): string | undefined {
   const slash = id.indexOf('/');

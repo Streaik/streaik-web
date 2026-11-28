@@ -66,6 +66,31 @@ test('gateway chat accepts Google agents and Fireworks chat without admitting tr
     ['fireworks/accounts/team/models/chat', 'google/agents/trip-planner']);
 });
 
+test('Mistral language models can use API Chat without exposing Mistral media or embedding models there', async () => {
+  const model = 'mistral/mistral-small-latest';
+  const data = [
+    { id: model, type: 'language' },
+    { id: 'mistral/mistral-embed', type: 'embedding' },
+    { id: 'mistral/voxtral-mini-tts-3-0/alice', type: 'speech' },
+    { id: 'mistral/voxtral-mini-transcribe-realtime-3-0', type: 'transcription', tags: ['realtime'] },
+  ];
+  assert.deepEqual(readChatModels({ data }).map(({ id }) => id), [model]);
+
+  const gateway = createGateway(root, (request) => {
+    assert.deepEqual(request, { kind: 'chat', provider: 'mistral' });
+    return { Authorization: 'Bearer fixture-gateway-token' };
+  }, async (url, init) => {
+    assert.equal(url, new URL('api/chat', root).href);
+    assert.equal(init.headers.get('authorization'), 'Bearer fixture-gateway-token');
+    assert.equal(JSON.parse(init.body).model, model);
+    return new Response('data: {"type":"finish"}\n\ndata: [DONE]\n\n', {
+      headers: { 'Content-Type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' },
+    });
+  });
+  const stream = await gateway.chatTransport().sendMessages({ chatId: 'local', messages, body: { model }, trigger: 'submit-message' });
+  assert.deepEqual(await Array.fromAsync(stream), [{ type: 'finish' }]);
+});
+
 test('catalog preserves non-chat models, types, capabilities, limits and nested qualified IDs', async () => {
   const payload = { data: [
     { id: 'assemblyai/live', name: 'Live ASR', type: 'transcription', tags: [' real-time ', 'REALTIME', 'ASR', 1] },
