@@ -114,7 +114,7 @@ async function* speechEvents(body: ReadableStream<Uint8Array<ArrayBuffer>>, sign
 
 // Some streaming providers return signed, mono, little-endian PCM with a declared sample rate.
 // Wrap that in WAV for final playback; never guess a rate for an unknown provider.
-function wavHeader(size: number, rate: number) {
+export function wavHeader(size: number, rate: number) {
   const bytes = new Uint8Array(44), header = new DataView(bytes.buffer);
   for (const [offset, label] of [[0, 'RIFF'], [8, 'WAVEfmt '], [36, 'data']] as const) bytes.set(new TextEncoder().encode(label), offset);
   header.setUint32(4, size + 36, true); header.setUint32(16, 16, true);

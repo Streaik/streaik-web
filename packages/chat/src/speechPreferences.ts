@@ -1,8 +1,11 @@
-import { gatewaySpeechEndpoints, isSpeechEndpoint, speechFormats } from '@streaik/gateway';
-import type { GatewaySpeechEndpoint, SpeechOptions, SpeechProviderConfig, SpeechRequest } from '@streaik/gateway';
+import { gatewaySpeechEndpoints, isSpeechEndpoint, speechFormats, supportsRealtimeSpeech } from '@streaik/gateway';
+import type { CatalogModel, GatewaySpeechEndpoint, SpeechOptions, SpeechProviderConfig, SpeechRequest } from '@streaik/gateway';
 import { useState } from 'react';
 
-export type SpeechRouteSetting = { selected: GatewaySpeechEndpoint; onSelect: (value: GatewaySpeechEndpoint) => void };
+export type SpeechRoute = GatewaySpeechEndpoint | 'websocket';
+export type SpeechRouteSetting = { selected?: SpeechRoute; onSelect: (value: SpeechRoute) => void };
+export const resolveSpeechRoute = (selected?: SpeechRoute, model?: CatalogModel): SpeechRoute =>
+  selected ?? (supportsRealtimeSpeech(model) ? 'websocket' : gatewaySpeechEndpoints[0]);
 export type NativeSpeechOptions = Omit<SpeechOptions, 'language'> & Pick<SpeechRequest, 'streamFormat'>;
 type Option = string | number | boolean | undefined;
 type ProviderPreferences = Record<string, Option>;
@@ -39,9 +42,9 @@ function write(key: string | undefined, value: string) {
 
 export function useSpeechRoute(scope?: string): SpeechRouteSetting {
   const key = scope && `streaik.speech.route.v1:${scope}`;
-  function load() {
+  function load(): { key?: string; selected?: SpeechRoute } {
     const value = read(key);
-    return { key, selected: isSpeechEndpoint(value) ? value : gatewaySpeechEndpoints[0] };
+    return { key, selected: value === 'websocket' || isSpeechEndpoint(value) ? value : undefined };
   }
   const [state, setState] = useState(load);
   const current = state.key === key ? state : load();
@@ -87,7 +90,7 @@ export function writeSpeechPreferences(scope: string | undefined, value: SpeechP
   write(settingsKey(scope), JSON.stringify(value));
 }
 
-export function speechOptionsForModel(route: GatewaySpeechEndpoint, model: string, settings: SpeechPreferences): Omit<SpeechRequest, 'model' | 'text'> {
+export function speechOptionsForModel(route: SpeechRoute, model: string, settings: SpeechPreferences): Omit<SpeechRequest, 'model' | 'text'> {
   const provider = model.split('/', 1)[0];
   const native = route === '/v1/audio/speech';
   const options: NativeSpeechOptions & { language?: string } = native ? { ...settings.native } : { ...settings.general };

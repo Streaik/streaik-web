@@ -1,21 +1,20 @@
 import { GatewayError } from '@streaik/gateway';
-import type { CatalogModel, Gateway, GatewaySpeechEndpoint } from '@streaik/gateway';
+import type { CatalogModel, Gateway } from '@streaik/gateway';
 import { Button } from '@streaik/themes';
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { assignedAgent } from './agentCatalog';
-import { useAgents } from './AgentsProvider';
 import { ChatComposer } from './ChatComposer';
 import type { ComposerDictation } from './composerDictation';
 import { useAppTranslation } from './i18n';
 import type { ModelRouter } from './modelDecisions';
 import { ModelPicker } from './ModelPicker';
-import { defaultAgentModelIds, resolveModelSelection } from './modelSelection';
 import { deleteSpeech, listSpeech, saveSpeech, speechFilename } from './speechLibrary';
 import type { SavedSpeech } from './speechLibrary';
-import { progressiveSpeech } from './speechPlayback';
-import { readSpeechPreferences, speechOptionsForModel, writeSpeechPreferences } from './speechPreferences';
+import { pcmSpeechPlayback, progressiveSpeech } from './speechPlayback';
+import { readSpeechPreferences, resolveSpeechRoute, writeSpeechPreferences } from './speechPreferences';
+import type { SpeechRoute } from './speechPreferences';
 import { SpeechSettingsDialog } from './SpeechSettingsDialog';
+import { synthesizeSpeech } from './speechSynthesis';
 import './images.css';
 import './speech.css';
 
@@ -40,14 +39,13 @@ function SpeechClip({ item, onDelete, onPlay }: { item: SavedSpeech; onDelete: (
   </li>;
 }
 
-export default function SpeechView({ gateway, scope, route, toolbar, catalog, loading: loadingModels, router, status, dictation }: {
-  gateway: Gateway; scope?: string; route: GatewaySpeechEndpoint; toolbar: HTMLDivElement | null;
-  catalog?: readonly CatalogModel[]; loading: boolean; router?: ModelRouter; status?: string; dictation: ComposerDictation;
+export default function SpeechView({ gateway, scope, routeOverride, toolbar, models, selected, onSelect, loading: loadingModels, router, status, dictation }: {
+  gateway: Gateway; scope?: string; routeOverride?: SpeechRoute; toolbar: HTMLDivElement | null;
+  models: CatalogModel[]; selected: CatalogModel[]; onSelect: (ids: string[]) => void;
+  loading: boolean; router?: ModelRouter; status?: string; dictation: ComposerDictation;
 }) {
   const { t } = useAppTranslation();
-  const agent = assignedAgent(useAgents(), 'speech');
   const id = useId();
-  const [selectedIds, setSelectedIds] = useState<string[]>();
   const [draft, setDraft] = useState('');
   const [settings, setSettings] = useState(() => readSpeechPreferences(scope));
   const [showSettings, setShowSettings] = useState(false);
@@ -60,9 +58,9 @@ export default function SpeechView({ gateway, scope, route, toolbar, catalog, lo
   const [preview, setPreview] = useState(false);
   const audio = useRef<HTMLAudioElement>(null);
   const playback = useRef<ReturnType<typeof progressiveSpeech>>(undefined);
+  const pcmPlayback = useRef<ReturnType<typeof pcmSpeechPlayback>>(undefined);
   const running = useRef<AbortController>(null);
-  const models = catalog?.filter(({ type }) => type === 'speech') ?? [];
-  const { selected } = resolveModelSelection(models, selectedIds, !!router, defaultAgentModelIds(agent));
+  const route = resolveSpeechRoute(routeOverride, selected[0]);
   const canSend = selected.length > 0 && !status;
 
   useEffect(() => {
@@ -76,22 +74,27 @@ export default function SpeechView({ gateway, scope, route, toolbar, catalog, lo
       setHistoryError(true);
       setLoading(false);
     });
-    return () => { live = false; running.current?.abort(); playback.current?.close(); };
+    return () => { live = false; stop(); };
   }, [scope]);
 
   function stop() {
     running.current?.abort();
     playback.current?.close();
+    pcmPlayback.current?.close();
   }
 
   async function generate() {
     const text = draft.trim();
     if (!text || !canSend || running.current) return;
     playback.current?.close();
+    pcmPlayback.current?.close();
     const controller = new AbortController();
     running.current = controller;
     const { signal } = controller;
     const decision = router && selected.length > 1 ? router : undefined;
+    // Prepare audio during Send even if Decisions must pick a winner asynchronously.
+    const live = selected.some(model => resolveSpeechRoute(routeOverride, model) === 'websocket') ? pcmSpeechPlayback() : undefined;
+    pcmPlayback.current = live;
     setPhase(decision ? 'choosing' : 'generating');
     setError('');
     setWarnings([]);
@@ -100,7 +103,8 @@ export default function SpeechView({ gateway, scope, route, toolbar, catalog, lo
       if (decision) {
         const { endpoint, ...agent } = decision;
         const { voice, instructions, language, outputFormat, speed } = route === '/v1/audio/speech' ? { ...settings.native, language: undefined } : settings.general;
-        const input = JSON.stringify({ text, route, voice, instructions, language, outputFormat, speed });
+        const decisionRoute = selected.every(model => resolveSpeechRoute(routeOverride, model) === route) ? route : undefined;
+        const input = JSON.stringify({ text, route: decisionRoute, voice, instructions, language, outputFormat, speed });
         const choices = selected.map(({ id, name, provider, description, tags }) => ({ value: id,
           description: JSON.stringify({ name, provider, description, tags }) }));
         const winner = await gateway.decideChoice(endpoint, { ...agent, input, choices }, signal);
@@ -110,9 +114,10 @@ export default function SpeechView({ gateway, scope, route, toolbar, catalog, lo
         model = chosen;
         setPhase('generating');
       }
-      const options = speechOptionsForModel(route, model.id, settings);
+      const actualRoute = resolveSpeechRoute(routeOverride, model);
+      if (actualRoute !== 'websocket') live?.close();
       let attempted = false;
-      const result = await gateway.generateSpeech(route, { ...options, text, model: model.id }, signal, (bytes, type) => {
+      const result = await synthesizeSpeech(gateway, actualRoute, model, text, settings, signal, { pcm: live?.append, audio: (bytes, type) => {
         if (!attempted && audio.current && !signal.aborted) {
           attempted = true;
           // A preview failure must not affect the generation or saved clip.
@@ -122,7 +127,7 @@ export default function SpeechView({ gateway, scope, route, toolbar, catalog, lo
           } catch { /* The browser will use the completed clip instead. */ }
         }
         playback.current?.append(bytes);
-      });
+      } });
       signal.throwIfAborted();
       playback.current?.finish();
       const { warnings, ...audioResult } = result;
@@ -133,8 +138,10 @@ export default function SpeechView({ gateway, scope, route, toolbar, catalog, lo
       if (scope) try { await saveSpeech(scope, item); } catch {
         if (!signal.aborted) setError('Could not save the generated speech.');
       }
+      await live?.finish();
     } catch (cause) {
       playback.current?.close();
+      live?.close();
       if (!signal.aborted) setError(cause instanceof GatewayError ? cause.message : 'Could not generate speech.');
     } finally {
       if (running.current === controller) {
@@ -153,7 +160,7 @@ export default function SpeechView({ gateway, scope, route, toolbar, catalog, lo
 
   return <main className="catalog-main" aria-labelledby={id}>
     {toolbar && createPortal(<ModelPicker models={models} selected={selected} multiple={!!router} loading={loadingModels}
-      disabled={!!phase} onChange={setSelectedIds} />, toolbar)}
+      disabled={!!phase} onChange={onSelect} />, toolbar)}
     <div className="images-content speech-content">
       <h1 id={id}>{t('Speech')}</h1>
       <ChatComposer busy={!!phase} canSend={canSend} onStop={stop} dictation={dictation}
@@ -168,7 +175,7 @@ export default function SpeechView({ gateway, scope, route, toolbar, catalog, lo
         {loading && <p className="chat-attachment-notice" role="status">{t('Loading speech…')}</p>}
         {historyError && <p className="chat-attachment-notice" role="alert">{t('Could not load saved speech.')}</p>}
         {!!items.length && <ul className="speech-clips">{[...items].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp)).map(item =>
-          <SpeechClip key={item.id} item={item} onDelete={() => remove(item)} onPlay={() => playback.current?.close()} />)}</ul>}
+          <SpeechClip key={item.id} item={item} onDelete={() => remove(item)} onPlay={() => { playback.current?.close(); pcmPlayback.current?.close(); }} />)}</ul>}
       </section>
     </div>
     {showSettings && <SpeechSettingsDialog initial={settings} models={selected} route={route}

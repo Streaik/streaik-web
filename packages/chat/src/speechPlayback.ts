@@ -64,3 +64,65 @@ export function progressiveSpeech(audio: HTMLAudioElement, type: string, onClose
     close,
   };
 }
+// Open within the user's Send/Read aloud gesture. PCM plays as it arrives while the
+// transport assembles the final WAV. Playback failure doesn't discard that clip.
+export function pcmSpeechPlayback(onStart?: () => void) {
+  let context: AudioContext;
+  try { context = new AudioContext(); } catch { return; }
+  const sources = new Set<AudioBufferSourceNode>();
+  let end = 0, carry: number | undefined, played = false, closed = false, drained: (() => void) | undefined;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    for (const source of sources) {
+      source.onended = null;
+      try { source.stop(); } catch { /* Already ended. */ }
+      source.disconnect();
+    }
+    sources.clear();
+    void context.close().catch(() => {});
+    drained?.();
+  };
+  void context.resume().catch(close);
+  context.onstatechange = () => { if (played && context.state !== 'running') close(); };
+
+  return {
+    append(bytes: Uint8Array, rate: number) {
+      if (closed || context.state !== 'running' || !bytes.length) return;
+      try {
+        if (carry !== undefined) {
+          const joined = new Uint8Array(bytes.length + 1);
+          joined[0] = carry;
+          joined.set(bytes, 1);
+          bytes = joined;
+        }
+        carry = bytes.length % 2 ? bytes[bytes.length - 1] : undefined;
+        const samples = Math.floor(bytes.length / 2);
+        if (!samples) return;
+        if (end - context.currentTime + samples / rate > 90) { close(); return; }
+        const buffer = context.createBuffer(1, samples, rate);
+        const pcm = buffer.getChannelData(0), view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        for (let i = 0; i < samples; i++) pcm[i] = view.getInt16(i * 2, true) / 32768;
+        const source = context.createBufferSource();
+        source.buffer = buffer;
+        source.connect(context.destination);
+        sources.add(source);
+        source.onended = () => {
+          sources.delete(source);
+          source.disconnect();
+          if (!sources.size) drained?.();
+        };
+        const start = end > context.currentTime ? end : context.currentTime + 0.015;
+        end = start + buffer.duration;
+        source.start(start);
+        if (!played) { played = true; onStart?.(); }
+      } catch { close(); }
+    },
+    async finish() {
+      if (sources.size && context.state === 'running') await new Promise<void>(resolve => { drained = resolve; });
+      close();
+      return played;
+    },
+    close,
+  };
+}

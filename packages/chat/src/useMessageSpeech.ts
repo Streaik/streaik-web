@@ -1,7 +1,10 @@
 import { GatewayError } from '@streaik/gateway';
-import type { Gateway, GatewaySpeechEndpoint } from '@streaik/gateway';
+import type { CatalogModel, Gateway } from '@streaik/gateway';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import { readSpeechPreferences, speechOptionsForModel } from './speechPreferences';
+import { pcmSpeechPlayback } from './speechPlayback';
+import { readSpeechPreferences } from './speechPreferences';
+import type { SpeechRoute } from './speechPreferences';
+import { synthesizeSpeech } from './speechSynthesis';
 
 export type MessageSpeechState = { id: string } & (
   { phase: 'generating' | 'playing' | 'blocked' } | { phase: 'error'; message: string }
@@ -9,7 +12,7 @@ export type MessageSpeechState = { id: string } & (
 export type ToggleMessageSpeech = (id: string, text: string) => Promise<void>;
 type SpeechRun = { id: string; controller: AbortController; audio?: HTMLAudioElement; release?: () => void; blocked?: boolean };
 
-export function useMessageSpeech(gateway: Gateway, model: string | undefined, route: GatewaySpeechEndpoint, scope?: string) {
+export function useMessageSpeech(gateway: Gateway, model: CatalogModel | undefined, route: SpeechRoute, scope?: string) {
   const [state, setState] = useState<MessageSpeechState>();
   const current = useRef<SpeechRun>(undefined);
   const stop = useCallback(() => {
@@ -22,7 +25,7 @@ export function useMessageSpeech(gateway: Gateway, model: string | undefined, ro
   useLayoutEffect(() => {
     setState(undefined);
     return stop;
-  }, [gateway, model, route, scope, stop]);
+  }, [gateway, model?.id, route, scope, stop]);
 
   const toggle = useCallback<ToggleMessageSpeech>(async (id, text) => {
     if (!model || !text) return;
@@ -45,9 +48,14 @@ export function useMessageSpeech(gateway: Gateway, model: string | undefined, ro
     if (!run.audio) {
       setState({ id, phase: 'generating' });
       let clip: Blob;
+      const live = route === 'websocket' ? pcmSpeechPlayback(() => {
+        if (current.current === run) setState({ id, phase: 'playing' });
+      }) : undefined;
+      run.release = live?.close;
       try {
-        const options = speechOptionsForModel(route, model, readSpeechPreferences(scope));
-        ({ audio: clip } = await gateway.generateSpeech(route, { ...options, model, text }, run.controller.signal));
+        ({ audio: clip } = await synthesizeSpeech(gateway, route, model, text, readSpeechPreferences(scope), run.controller.signal,
+          { pcm: live?.append }));
+        if (await live?.finish()) { finish(); return; }
       } catch (cause) {
         finish(cause instanceof GatewayError ? cause.message : 'Could not generate speech.');
         return;

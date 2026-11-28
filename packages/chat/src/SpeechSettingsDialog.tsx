@@ -1,5 +1,5 @@
 import { speechFormats } from '@streaik/gateway';
-import type { CatalogModel, GatewaySpeechEndpoint } from '@streaik/gateway';
+import type { CatalogModel } from '@streaik/gateway';
 import { Button, Switch } from '@streaik/themes';
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { providerName } from './aiCatalog';
@@ -7,7 +7,7 @@ import { ChatIcon } from './ChatIcon';
 import { DialogTabs } from './DialogTabs';
 import { useAppTranslation } from './i18n';
 import { defaultSpeechPreferences, normalizeSpeechPreferences, speechProviderFields } from './speechPreferences';
-import type { NativeSpeechOptions, SpeechPreferences } from './speechPreferences';
+import type { NativeSpeechOptions, SpeechPreferences, SpeechRoute } from './speechPreferences';
 
 const voices = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer', 'verse', 'marin', 'cedar'];
 
@@ -49,7 +49,7 @@ function SpeechFields({ options, onChange, compatible, native }: {
 }
 
 export function SpeechSettingsDialog({ route, models, initial, onSave, onClose }: {
-  route: GatewaySpeechEndpoint; models: readonly CatalogModel[]; initial: SpeechPreferences;
+  route: SpeechRoute; models: readonly CatalogModel[]; initial: SpeechPreferences;
   onSave: (value: SpeechPreferences) => void; onClose: () => void;
 }) {
   const { t } = useAppTranslation();

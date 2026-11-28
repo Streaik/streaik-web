@@ -67,7 +67,8 @@ export function pageRouteMenu(view: ChatView, { chat, agents, decisions, images,
       break;
     case 'speech': {
       if (!speech) return;
-      const groups = [choices('speech', speech.selected, gatewaySpeechEndpoints, speech.onSelect)];
+      const groups = [choices('gateway', speech.selected ?? '', gatewaySpeechEndpoints, speech.onSelect, { label: 'Gateway' }),
+        choices('direct', speech.selected ?? '', ['websocket'] as const, speech.onSelect, { label: 'Direct' }, () => 'WebSocket')];
       if (decisionGroup) groups.push(decisionGroup);
       return { groups };
     }

@@ -18,6 +18,8 @@ import { readVideoOperation, readVideoStatus, videoOperationParts } from './vide
 import type { VideoRequest, VideoStatus } from './videos.ts';
 import { isSpeechEndpoint, readSpeech, speechRequestBody } from './speech.ts';
 import type { GatewaySpeechEndpoint, SpeechChunk, SpeechRequest } from './speech.ts';
+import { realtimeSpeechProvider, streamRealtimeSpeech } from './realtimeSpeech.ts';
+import type { SpeechPcm } from './realtimeSpeech.ts';
 import { googleLiveTranscriptionSetup, isTranscriptionEndpoint, liveTranscriptionProvider, openAITranscriptionSession, readLiveTranscriptionCredential, readNativeTranscript, readTranscript, readTranscriptStream, supportsFileTranscription, transcriptionBody } from './transcriptions.ts';
 import type { GatewayTranscriptionEndpoint, LiveTranscriptionOptions, TranscriptionOptions } from './transcriptions.ts';
 export { deepgramTranscriptionSwitches, gatewayTranscriptionEndpoints, googleLiveTranscriptionSetup, isLiveTranscriptionModel, isTranscriptionEndpoint, openAITranscriptionFormats, openAITranscriptionSocket, supportsFileTranscription, transcriptionFileAccept, transcriptionMediaType, transcriptionUploadLimit, usesTranscriptionWebSocket } from './transcriptions.ts';
@@ -35,6 +37,7 @@ export type { GatewayImageEndpoint, ImageFileInput, ImageInput, ImageJsonObject,
 export type { VideoAsset, VideoRequest, VideoStatus } from './videos.ts';
 export { gatewaySpeechEndpoints, isSpeechEndpoint, speechFormats } from './speech.ts';
 export type { GatewaySpeechEndpoint, SpeechChunk, SpeechOptions, SpeechProviderConfig, SpeechRequest, SpeechResponse } from './speech.ts';
+export { supportsRealtimeSpeech } from './realtimeSpeech.ts';
 export type { TokenRates } from './tokenPricing.ts';
 
 export const nativeChatEndpoints = ['/v1/responses', '/v1/messages', '/v1/chat/completions'] as const;
@@ -425,6 +428,22 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
         method: 'POST', headers: { 'content-type': 'application/json', accept }, body: JSON.stringify(body), signal,
       });
       return readSpeech(endpoint, response, speech, signal, onChunk);
+    },
+    async generateRealtimeSpeech(speech: SpeechRequest, signal: AbortSignal, onPcm?: SpeechPcm) {
+      const provider = realtimeSpeechProvider(speech.model);
+      if (!provider) throw new GatewayError('This speech model does not support Direct WebSocket. Choose a Gateway route or a compatible model.');
+      if (!root) throw new GatewayError('No gateway is configured.');
+      const path = speech.model.split('/').map(encodeURIComponent).join('/');
+      return streamRealtimeSpeech(speech, async credentialSignal => {
+        const response = await request(new URL(`api/realtime/token/${path}`, root).href, { kind: 'realtime', provider }, {
+          method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json' },
+          body: '{}', cache: 'no-store', signal: credentialSignal,
+        });
+        try { return await response.json(); } catch {
+          credentialSignal.throwIfAborted();
+          throw new GatewayError('The gateway returned an unreadable speech credential.');
+        }
+      }, signal, onPcm);
     },
     async startVideo({ model, prompt }: VideoRequest, signal?: AbortSignal): Promise<string> {
       const match = /^([a-z0-9-]+)\/(\S.*)$/.exec(model);

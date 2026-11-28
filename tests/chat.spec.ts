@@ -3633,6 +3633,184 @@ async function sendReadAloudFixture(page: Page) {
   return reply;
 }
 
+const speechSockets = [
+  { id: 'deepgram/aura-2-asteria-en', url: 'wss://api.deepgram.com/v1/speak?model=aura-2-asteria-en', token: 'deepgram-fixture' },
+  { id: 'cartesia/tts/sonic-3.6/fixture-voice', url: 'wss://api.cartesia.ai/tts/websocket?cartesia_version=2026-08-14', token: 'cartesia-fixture' },
+  { id: 'mistral/voxtral-mini-tts-3-0', url: 'wss://api.mistral.ai/v1/audio/speech/realtime?model=voxtral-mini-tts-3-0', token: 'rt_fixture' },
+];
+
+async function prepareRealtimeSpeech(page: Page, id: string) {
+  await page.addInitScript(id => {
+    const scope = JSON.stringify([new URL('/gateway/api/chat', location.href).href, 'byok']);
+    const key = `streaik.agents.v1:${scope}`;
+    if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify({ version: 1, assignments: {}, local: [],
+      overrides: [{ id: 'speech', definition: { name: 'SpeechAgent', instructions: 'Create speech', model: { id } } }] }));
+    const start = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function (...args: Parameters<typeof start>) {
+      start.apply(this, args);
+      const root = document.documentElement;
+      root.dataset.pcmStarts = String(Number(root.dataset.pcmStarts ?? 0) + 1);
+    };
+  }, id);
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [
+    { id: model }, { id, name: 'Realtime Speech Fixture', type: 'speech', tags: ['realtime', 'realtime-token'] },
+    { id: openaiSpeech, type: 'speech' },
+  ] } }));
+  await page.route('**/gateway/v1/skills?*', route => route.fulfill({ json: { data: [], has_more: false } }));
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await page.getByRole('button', { name: 'Speech', exact: true }).click();
+  await expect(page).toHaveURL(/\/speech$/);
+  await expect(modelPicker(page)).toHaveText('Realtime Speech Fixture');
+}
+
+for (const { id, url, token } of speechSockets) {
+  const provider = id.split('/')[0];
+  test(`Direct WebSocket speech streams ${provider} on Send and Read aloud`, async ({ page }) => {
+    let http = 0, tokens = 0, closed = 0;
+    let complete: (() => void) | undefined;
+    const inputs: string[] = [];
+    const wave = speechWav(), pcm = wave.subarray(44);
+    await page.route(`**/gateway/api/realtime/token/${id}`, route => {
+      tokens++;
+      expect(route.request().postDataJSON()).toEqual({});
+      return route.fulfill({ json: { url, token, expiresAt: Math.floor(Date.now() / 1000) + 60 } });
+    });
+    await page.route(/\/gateway\/(api\/speech(?:\/stream)?|v1\/audio\/speech)$/, route => { http++; return route.abort(); });
+    await page.routeWebSocket(`${url}*`, socket => {
+      let text = '';
+      const send = (value: object) => socket.send(JSON.stringify(value));
+      socket.onClose(() => { closed++; });
+      socket.onMessage(payload => {
+        const event = JSON.parse(String(payload));
+        if (provider === 'deepgram') {
+          expect(new URL(socket.url()).searchParams.get('sample_rate')).toBe('24000');
+          if (event.type === 'Speak') text += event.text;
+          if (event.type === 'Flush') {
+            inputs.push(text);
+            socket.send(pcm.subarray(0, 799)); socket.send(pcm.subarray(799));
+            complete = () => send({ type: 'Flushed' });
+          }
+        } else if (provider === 'cartesia') {
+          expect(new URL(socket.url()).searchParams.get('access_token')).toBe(token);
+          expect(event).toMatchObject({ model_id: 'sonic-3.6', voice: { id: 'fixture-voice' } });
+          if (event.continue) text += event.transcript;
+          else {
+            inputs.push(text);
+            send({ type: 'chunk', context_id: 'unrelated-context', data: 'ignored' });
+            send({ type: 'chunk', context_id: event.context_id, data: pcm.toString('base64') });
+            complete = () => send({ type: 'done', context_id: event.context_id });
+          }
+        } else {
+          if (event.type === 'session.update') send({ type: 'session.updated', session: event.session });
+          if (event.type === 'input_text.append') text += event.text;
+          if (event.type === 'input_text.end') {
+            inputs.push(text);
+            send({ type: 'speech.audio.delta', audio_data: wave.subarray(0, 13).toString('base64') });
+            send({ type: 'speech.audio.delta', audio_data: wave.subarray(13).toString('base64') });
+            complete = () => send({ type: 'speech.audio.done' });
+          }
+        }
+      });
+      if (provider === 'mistral') send({ type: 'session.created' });
+    });
+
+    await prepareRealtimeSpeech(page, id);
+    await openRoute(page, 'Direct');
+    await expect(page.getByRole('menuitemradio', { name: 'WebSocket', exact: true })).toHaveAttribute('aria-checked', 'true');
+    await page.keyboard.press('Escape');
+    await page.getByRole('heading', { name: 'Speech', exact: true }).click();
+    const composer = page.getByRole('form', { name: 'Speech composer' });
+    const sendSpeech = async (text: string) => {
+      await composer.getByRole('textbox', { name: 'Speech text' }).fill(text);
+      await composer.getByRole('button', { name: 'Send', exact: true }).click();
+    };
+    const starts = () => page.locator('html').evaluate(el => Number((el as HTMLElement).dataset.pcmStarts ?? 0));
+    await sendSpeech('Realtime input');
+    await expect.poll(starts).toBeGreaterThan(0);
+    const downloads = page.getByRole('link', { name: 'Download' });
+    await expect(downloads).toHaveCount(0);
+    complete!();
+    await expect(downloads).toHaveAttribute('download', 'Realtime input.wav');
+    const savedHeader = await downloads.evaluate(async el => {
+      const audio = new DataView(await (await fetch((el as HTMLAnchorElement).href)).arrayBuffer());
+      return [audio.getUint32(24, true), audio.getUint32(40, true)];
+    });
+    expect(savedHeader).toEqual([provider === 'mistral' ? 8000 : 24000, pcm.length]);
+    await expect.poll(() => closed).toBe(1);
+
+    await page.getByRole('button', { name: 'New chat', exact: true }).click();
+    const reply = await sendReadAloudFixture(page);
+    const read = reply.getByRole('button', { name: 'Read aloud', exact: true });
+    await read.click();
+    await expect(reply.getByRole('button', { name: 'Stop reading aloud', exact: true })).toBeVisible();
+    complete!();
+    await expect(read).toBeEnabled();
+    await read.click();
+    await reply.getByRole('button', { name: 'Stop reading aloud', exact: true }).click();
+    await expect.poll(() => closed).toBe(3);
+    await expect(read).toBeEnabled();
+    expect(inputs).toEqual(['Realtime input', 'Read this assistant reply.', 'Read this assistant reply.']);
+    expect(tokens).toBe(3);
+    expect(http).toBe(0);
+    await page.getByRole('button', { name: 'Speech', exact: true }).click();
+    await expect(downloads).toHaveCount(1);
+  });
+}
+
+test('Speech persists explicit Gateway and WebSocket overrides and never retries a different route', async ({ page }) => {
+  const { id, url } = speechSockets[0];
+  let tokens = 0, http = 0;
+  await page.route(`**/gateway/api/realtime/token/${id}`, route => {
+    tokens++;
+    return route.fulfill({ json: { url, token: 'temporary', expiresAt: Math.floor(Date.now() / 1000) + 60 } });
+  });
+  await page.routeWebSocket(`${url}*`, socket => socket.onMessage(() => socket.close()));
+  await page.route('**/gateway/api/speech', route => {
+    http++;
+    expect(route.request().postDataJSON().model).toBe(id);
+    return route.fulfill({ json: { audio: { base64: speechWav().toString('base64'), format: 'wav', mediaType: 'audio/wav' } } });
+  });
+  await prepareRealtimeSpeech(page, id);
+  await openRoute(page, 'Gateway');
+  await page.getByRole('menuitemradio', { name: '/api/speech', exact: true }).click();
+  await page.reload();
+  await openRoute(page, 'Gateway');
+  await expect(page.getByRole('menuitemradio', { name: '/api/speech', exact: true })).toHaveAttribute('aria-checked', 'true');
+  await page.keyboard.press('Escape');
+  await page.getByRole('heading', { name: 'Speech', exact: true }).click();
+  const composer = page.getByRole('form', { name: 'Speech composer' });
+  const submit = async () => {
+    await composer.getByRole('textbox', { name: 'Speech text' }).fill('Test route override');
+    await composer.getByRole('button', { name: 'Send', exact: true }).click();
+  };
+  await submit();
+  await expect(page.getByRole('link', { name: 'Download' })).toHaveCount(1);
+  expect([http, tokens]).toEqual([1, 0]);
+
+  await openRoute(page, 'Direct');
+  await page.getByRole('menuitemradio', { name: 'WebSocket', exact: true }).click();
+  await page.reload();
+  await submit();
+  await expect(page.getByRole('alert')).toHaveText('The speech WebSocket closed before completion.');
+  expect([http, tokens]).toEqual([1, 1]);
+
+  const settings = page.getByRole('dialog', { name: 'Speech settings' });
+  await composer.getByRole('button', { name: 'Speech settings', exact: true }).click();
+  await settings.getByLabel('Output format').selectOption('mp3');
+  await settings.getByRole('button', { name: 'Save', exact: true }).click();
+  await submit();
+  await expect(page.getByRole('alert')).toContainText('The selected output format is not supported');
+  expect([http, tokens]).toEqual([1, 1]);
+
+  await modelPicker(page).click();
+  await page.getByRole('option', { name: 'gpt-4o-mini-tts', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await submit();
+  await expect(page.getByRole('alert')).toContainText('This speech model does not support Direct WebSocket.');
+  expect([http, tokens]).toEqual([1, 1]);
+});
+
 test('chat Read aloud stays visible but disabled without a model from the Speech agent', async ({ page }) => {
   await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: model }, { id: openaiSpeech, type: 'speech' }] } }));
   await page.route('**/gateway/v1/skills?*', route => route.fulfill({ json: { data: [], has_more: false } }));
@@ -3675,7 +3853,7 @@ test('chat Read aloud uses the Speech agent and settings, cancels, retries playb
     return route.fulfill({ contentType: 'audio/wav', body: speechWav() });
   });
   await prepareSpeech(page);
-  await openRoute(page);
+  await openRoute(page, 'Gateway');
   await page.getByRole('menuitemradio', { name: '/v1/audio/speech', exact: true }).click();
   await page.getByRole('button', { name: 'Speech settings', exact: true }).click();
   const settings = page.getByRole('dialog', { name: 'Speech settings', exact: true });
@@ -3731,7 +3909,7 @@ test('Speech imports local text, routes via Decisions, and saves playable histor
     await route.fulfill({ json: { audio: { base64: wav.toString('base64'), format: 'wav', mediaType: 'audio/wav' } } });
   });
   await prepareSpeech(page);
-  await openRoute(page);
+  await openRoute(page, 'Gateway');
   await expect(page.getByRole('menuitemradio', { name: '/api/speech', exact: true })).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByRole('menuitemradio', { name: '/api/speech/stream', exact: true })).toBeVisible();
   await expect(page.getByRole('menuitemradio', { name: '/v1/audio/speech', exact: true })).toBeVisible();
@@ -3759,7 +3937,7 @@ test('Speech imports local text, routes via Decisions, and saves playable histor
   await expect(page.getByRole('link', { name: 'Download' })).toHaveAttribute('download', 'Read this. From a file.wav');
   await expect(input).toHaveValue('');
   expect(calls).toBe(1);
-  await openRoute(page);
+  await openRoute(page, 'Gateway');
   await page.getByRole('menuitemradio', { name: '/v1/audio/speech', exact: true }).click();
   await composer.getByRole('button', { name: 'Speech settings' }).click();
   const general = settings.getByRole('tabpanel', { name: 'General' });
@@ -3770,7 +3948,7 @@ test('Speech imports local text, routes via Decisions, and saves playable histor
   await settings.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.reload();
   await expect(page.getByRole('link', { name: 'Download' })).toBeVisible();
-  await openRoute(page);
+  await openRoute(page, 'Gateway');
   await expect(page.getByRole('menuitemradio', { name: '/v1/audio/speech', exact: true })).toHaveAttribute('aria-checked', 'true');
   await page.keyboard.press('Escape');
   const saved = page.locator('.speech-clip audio');

@@ -1,7 +1,7 @@
 import { useChat } from '@ai-sdk/react';
 import { GatewayError, gatewayChatEndpoints, isVoiceCatalogModel, nativeChatEndpoints, voiceProtocolForModel, pickChatCatalogModels } from '@streaik/gateway';
 import type { AgentBackend, ChatRoute, DirectChat, GatewayChatEndpoint, HostedAgentSelection, HostedMcpTool } from '@streaik/gateway';
-import type { CatalogModel, ChatMessage, ChatReasoning, ChatToolChoice, DecisionChoiceResult, Gateway, GatewaySpeechEndpoint } from '@streaik/gateway';
+import type { CatalogModel, ChatMessage, ChatReasoning, ChatToolChoice, DecisionChoiceResult, Gateway } from '@streaik/gateway';
 import { Button, ThemeRoot, useColorScheme } from '@streaik/themes';
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -96,8 +96,8 @@ import { useImageRoute } from './imageRoute';
 import type { ImageRouteSetting } from './imageRoute';
 import { useTranscriptionRoute } from './transcriptionPreferences';
 import type { TranscriptionRouteSetting } from './transcriptionPreferences';
-import { useSpeechRoute } from './speechPreferences';
-import type { SpeechRouteSetting } from './speechPreferences';
+import { resolveSpeechRoute, useSpeechRoute } from './speechPreferences';
+import type { SpeechRoute, SpeechRouteSetting } from './speechPreferences';
 import { useMessageSpeech } from './useMessageSpeech';
 import type { MessageSpeechState, ToggleMessageSpeech } from './useMessageSpeech';
 import { useVideoJobs } from './useVideoJobs';
@@ -190,7 +190,7 @@ const Message = memo(function Message({ message, showMessageTokens, showProvider
 });
 
 function Transcript({ messages, showMessageTokens, showProviderLogo, showMetrics, showDecisions, gateway, speechModel, speechRoute, scope, pendingReply }: {
-  messages: ChatMessage[]; gateway: Gateway; speechModel?: string; speechRoute: GatewaySpeechEndpoint; scope?: string; pendingReply?: string;
+  messages: ChatMessage[]; gateway: Gateway; speechModel?: CatalogModel; speechRoute: SpeechRoute; scope?: string; pendingReply?: string;
 } & MessagePreferences) {
   const { t } = useAppTranslation();
   const speech = useMessageSpeech(gateway, speechModel, speechRoute, scope);
@@ -537,9 +537,11 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const dictateChat = preferences.dictate && view === 'chat' && !locationIssue;
   const dictateView = dictateChat || preferences.dictate && (view === 'images' || view === 'videos' || view === 'speech');
   const transcriptionModelIds = dictateView ? defaultAgentModelIds(assignedAgent(agents, 'transcription')) : [];
-  const speechModelIds = hasGateway && view === 'chat' && !locationIssue ? defaultAgentModelIds(assignedAgent(agents, 'speech')) : [];
+  const speechModelIds = defaultAgentModelIds(assignedAgent(agents, 'speech'));
+  const [speechSelection, setSpeechSelection] = useState<string[]>();
+  useEffect(() => { if (view !== 'speech') setSpeechSelection(undefined); }, [view]);
   const fetchGatewayModels = route.mode === 'direct' && (view === 'agents' ||
-    hasGateway && (mediaView || transcriptionModelIds.length > 0 || speechModelIds.length > 0));
+    hasGateway && (mediaView || transcriptionModelIds.length > 0 || view === 'chat' && !locationIssue && speechModelIds.length > 0));
   const gatewayModels = useModels(gateway, connection.ready && fetchGatewayModels, connection.modelRevision ?? 0, scope);
   // Execution decisions are input for one request; completed receipts are the replayable history.
   const sentNativeApprovals = useRef(new Set<string>());
@@ -1099,8 +1101,13 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const mediaRouter = (view === 'images' || view === 'speech') && mediaModels ? modelDecisionRouter(agents, mediaModels.catalog, decisions.selected) : undefined;
   const mediaStatus = !hasGateway ? t('No gateway is configured.') : !connection.ready ? connection.emptyMessage
     : !mediaModels ? t('Loading models…') : mediaModels.error;
-  const speechModel = speechModelIds.length && mediaModels && !mediaModels.error
-    ? resolveModelSelection(mediaModels.catalog.filter(({ type }) => type === 'speech'), undefined, false, speechModelIds).selected[0]?.id
+  const speechModels = mediaModels?.catalog.filter(({ type }) => type === 'speech') ?? [];
+  const selectedSpeech = view === 'speech' ? resolveModelSelection(speechModels, speechSelection, !!mediaRouter, speechModelIds).selected : [];
+  const inferredSpeechRoute = resolveSpeechRoute(speech.selected, selectedSpeech[0]);
+  // A mixed Decisions selection has no effective default until a model wins.
+  const menuSpeechRoute = selectedSpeech.every(model => resolveSpeechRoute(speech.selected, model) === inferredSpeechRoute) ? inferredSpeechRoute : undefined;
+  const speechModel = view === 'chat' && !locationIssue && speechModelIds.length && mediaModels && !mediaModels.error
+    ? resolveModelSelection(speechModels, undefined, false, speechModelIds).selected[0]
     : undefined;
   const agentModelStatus = !connection.ready ? t('Connect to the gateway to browse models. You can still edit this agent.')
     : !agentModels ? t('Loading gateway models…') : agentModels.error;
@@ -1302,7 +1309,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     decisions: connection.account && hasDecisions ? decisions : undefined,
     images: hasGateway ? images : undefined,
     transcriptions: hasGateway ? transcriptions : undefined,
-    speech: hasGateway ? speech : undefined,
+    speech: hasGateway ? { ...speech, selected: menuSpeechRoute } : undefined,
   });
   const modelStatus = !connection.ready ? connection.emptyMessage : agentMode
     ? agentChat.checking ? t('Connecting to the agent backend…')
@@ -1352,7 +1359,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       <main className="chat-main" data-empty={!messages.length} hidden={view !== 'chat' || !!locationIssue}>
         {messages.length ? <Transcript messages={messages} showMessageTokens={preferences.showMessageTokens}
           showProviderLogo={preferences.showProviderLogo} showMetrics={preferences.showMetrics} showDecisions={preferences.showDecisions}
-          gateway={gateway} speechModel={speechModel} speechRoute={speech.selected} scope={scope}
+          gateway={gateway} speechModel={speechModel} speechRoute={resolveSpeechRoute(speech.selected, speechModel)} scope={scope}
           pendingReply={(busy || toolBusy || pending || voicePhase && turn?.voiceMessage) && last?.role === 'assistant' ? last.id : undefined} /> : null}
         <div className="chat-column chat-dock">
            {!messages.length && !locationIssue && <WelcomeHeading request={welcomeRequest} discovering={!agentMode && connection.ready && !result && welcomeModels.length > 0} />}
@@ -1418,7 +1425,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         <VideosView gateway={gateway} library={videos} toolbar={mediaToolbar} catalog={mediaModels?.catalog}
           loading={hasGateway && connection.ready && !mediaModels} ready={hasGateway && connection.ready} status={mediaStatus} dictation={dictation} />
       </Suspense> : view === 'speech' ? <Suspense fallback={<main className="catalog-main"><p role="status">{t('Loading speech…')}</p></main>}>
-        <SpeechView key={scope} gateway={gateway} scope={scope} route={speech.selected} toolbar={mediaToolbar} catalog={mediaModels?.catalog}
+        <SpeechView key={scope} gateway={gateway} scope={scope} routeOverride={speech.selected} toolbar={mediaToolbar}
+          models={speechModels} selected={selectedSpeech} onSelect={setSpeechSelection}
           loading={hasGateway && connection.ready && !mediaModels} router={mediaRouter} status={mediaStatus} dictation={dictation} />
       </Suspense> : view === 'transcriptions' ? <Suspense fallback={<main className="catalog-main"><p role="status">{t('Loading transcriptions…')}</p></main>}>
         <TranscriptionsView gateway={gateway} scope={scope} route={transcriptions.selected} toolbar={mediaToolbar} catalog={mediaModels?.catalog}
