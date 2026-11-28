@@ -278,6 +278,72 @@ test('browser Gateway agents route dual-use IDs once per turn and keep the winni
   expect(saved && JSON.parse(saved.value).local[0].definition).toEqual({ ...agent, models: [...agent.models, { id: model, type: 'decision' }] });
 });
 
+test('browser Gateway Responses uses the selected Decisions endpoint and sends the winner', async ({ page }) => {
+  const alternate = 'openai/gpt-5-mini';
+  const name = 'Responses routing agent';
+  await page.addInitScript(({ name, model, alternate }) => {
+    const scope = JSON.stringify([new URL('/gateway/api/chat', location.href).href, 'byok']);
+    localStorage.setItem(`streaik.agents.v1:${scope}`, JSON.stringify({ version: 1, assignments: {}, overrides: [], local: [{
+      id: 'responses-router', definition: { name, description: 'Routes Responses turns.', instructions: 'Answer concisely.', models: [
+        { id: model, type: 'language', providerMetadata: { service_tier: 'flex' } },
+        { id: alternate, type: 'language', providerMetadata: { service_tier: 'priority' } },
+      ] },
+    }] }));
+  }, { name, model, alternate });
+  await page.route('**/test-agents/v1/models', route => route.abort());
+  await page.route('**/gateway/api/chat', route => route.fulfill(stream('Welcome')));
+  const sequence: string[] = [];
+  for (const endpoint of ['/v1/decisions', '/api/decisions']) {
+    await page.route(`**/gateway${endpoint}`, async route => {
+      sequence.push(endpoint);
+      const body = route.request().postDataJSON();
+      expect(body.model).toBe(model);
+      expect(await route.request().headerValue('x-openai-key')).toBe(key);
+      if (endpoint === '/v1/decisions') {
+        expect(body.questions[0].choices.map(({ value }: { value: string }) => value)).toEqual([model, alternate]);
+        expect(JSON.parse(body.input).conversation.at(-1).text).toBe('First Responses turn');
+        return route.fulfill({ json: { answers: [{ name: 'chat_model', type: 'choice', choice: alternate }] } });
+      }
+      expect(Object.keys(body.questions.chat_model.criteria)).toEqual([model, alternate]);
+      expect(JSON.parse(body.state).conversation.at(-1).text).toBe('Second Responses turn');
+      return route.fulfill({ json: { answers: { chat_model: { type: 'choice', choice: alternate } } } });
+    });
+  }
+  let replies = 0;
+  await page.route('**/gateway/v1/responses', route => {
+    const body = route.request().postDataJSON();
+    const turn = ++replies;
+    const answerModel = turn === 3 ? model : alternate;
+    sequence.push(`/v1/responses:${answerModel}`);
+    expect(body).toMatchObject({ model: answerModel, service_tier: turn === 3 ? 'flex' : 'priority' });
+    expect(body.agent).toBeUndefined();
+    expect(JSON.stringify(body.input)).not.toContain('streaik_client_model_decision');
+    const response = { id: `resp_${turn}`, created_at: 1, model: answerModel, usage: { input_tokens: 5, output_tokens: 2, total_tokens: 7 } };
+    const item = { type: 'message', id: `msg_${turn}`, role: 'assistant', status: 'in_progress', content: [] };
+    const text = `Responses reply ${turn}`;
+    const frames = [{ type: 'response.created', response },
+      { type: 'response.output_item.added', output_index: 0, item },
+      { type: 'response.output_text.delta', output_index: 0, content_index: 0, item_id: item.id, delta: text },
+      { type: 'response.output_item.done', output_index: 0, item: { ...item, status: 'completed', content: [{ type: 'output_text', text, annotations: [] }] } },
+      { type: 'response.completed', response }];
+    return route.fulfill({ contentType: 'text/event-stream', body: frames.map(frame => `event: ${frame.type}\ndata: ${JSON.stringify(frame)}\n\n`).join('') });
+  });
+  await start(page, [{ id: model, type: 'decision' }, { id: alternate, type: 'language' }, { id: model, type: 'language' }]);
+  await agentPicker(page).click();
+  await page.getByRole('option', { name, exact: true }).click();
+  await routeGroup(page, 'Gateway');
+  await page.getByRole('menuitemradio', { name: '/v1/responses', exact: true }).click();
+  for (const [index, [endpoint, prompt]] of [
+    ['/v1/decisions', 'First Responses turn'], ['/api/decisions', 'Second Responses turn'], ['Off', 'Third Responses turn'],
+  ].entries()) {
+    await routeGroup(page, 'Decisions');
+    await page.getByRole('menuitemradio', { name: endpoint, exact: true }).click();
+    await send(page, prompt);
+    await expect(page.getByText(`Responses reply ${index + 1}`, { exact: true })).toBeVisible();
+  }
+  expect(sequence).toEqual(['/v1/decisions', `/v1/responses:${alternate}`, '/api/decisions', `/v1/responses:${alternate}`, `/v1/responses:${model}`]);
+});
+
 for (const mode of ['Gateway', 'Direct', 'Agents'] as const) test(`saved agent skills use browser tools only on browser routes: ${mode}`, async ({ page }) => {
   const endpoint = '/v1/chat/completions';
   const skill = { id: 'openai/skill_agenda', name: 'agenda-check', description: 'Review an agenda.', default_version: '1', latest_version: '2' };
