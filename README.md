@@ -41,10 +41,6 @@ The chat client supports:
 Documentation: https://ai.streaik.net/scalar  
 App: https://chat.streaik.com
 
-## Realtime speech
-
-In Speech, **Route → Direct → WebSocket** connects the browser to the speech provider with a short-lived credential from the Gateway. It is the default for supported realtime speech models: Mistral Voxtral Mini TTS 3.0, Deepgram Aura-2 Asteria, and Cartesia Sonic 3.6 voices. The assistant’s **Read aloud** action uses the model assigned to the Speech agent and the same route preference. An explicit route choice is saved for the current profile and takes precedence over the model default. Direct WebSocket produces WAV clips; if a model, setting or connection is unsupported, the app reports an error without retrying on a Gateway speech route.
-
 ## Local mode
 
 Use [local.streaik.com](https://local.streaik.com) with the standalone Windows runtimes:

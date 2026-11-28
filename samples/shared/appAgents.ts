@@ -41,6 +41,14 @@ const definitions = [
     { id: 'openai/gpt-6.1-terra' },
     { id: 'openai/gpt-6.2-sol' }],
     instructions: 'Chat',
+    transcription: {
+      id: "openai/gpt-live-transcribe"
+    },
+    speech: {
+      model: {
+        id: "openai/gpt-realtime-2.1-mini"
+      }
+    }
   }],
   ['image', 'Create an image', {
     name: 'ImageAgent', description: 'Creates images.',

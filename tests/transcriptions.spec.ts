@@ -739,6 +739,137 @@ async function mockAudio(page: Page) {
   });
 }
 
+test('Chat voice sends only completed turns through ordinary chat and falls back to gateway speech', async ({ page }) => {
+  const chat = 'openai/gpt-6-luna', speech = 'deepgram/aura-2-asteria-en';
+  await mockAudio(page);
+  await page.addInitScript(({ chat, speech, transcriber }) => {
+    const scope = JSON.stringify([new URL('/gateway/api/chat', location.href).href, 'byok']);
+    localStorage.setItem(`streaik.agents.v1:${scope}`, JSON.stringify({ version: 1, local: [],
+      assignments: { 'welcome-message': null, 'conversation-name': null }, overrides: [
+      { id: 'chat', definition: { name: 'ChatAgent', description: 'Chat.', instructions: 'Chat', model: { id: chat },
+        transcription: { id: transcriber }, speech: { model: { id: speech }, outputFormat: { type: 'audio/wav', rate: 24000 } } } },
+      { id: 'transcription', definition: { name: 'TranscriptionAgent', description: 'Transcribe.', instructions: 'Transcribe', model: { id: 'deepgram/nova-2' } } },
+    ] }));
+    const startAudio = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function (...args: Parameters<typeof startAudio>) {
+      document.documentElement.dataset.spoke = 'yes';
+      return startAudio.apply(this, args);
+    };
+  }, { chat, speech, transcriber: deepgramModel });
+
+  let socket: WebSocketRoute | undefined, directSpeech = 0, fallbackSpeech = 0;
+  let releaseSecond!: () => void;
+  const secondReply = new Promise<void>(resolve => { releaseSecond = resolve; });
+  const requests: { model: string; messages: { role: string; parts: { text?: string }[] }[] }[] = [];
+  await page.routeWebSocket('wss://api.deepgram.com/v1/listen?*', ws => { socket = ws; });
+  await page.route(`**/gateway/api/realtime/token/${deepgramModel}`, route => route.fulfill({ json: {
+    url: deepgramSocket, token: 'fixture-ephemeral', expiresAt: Math.floor(Date.now() / 1000) + 60,
+  } }));
+  await page.route(`**/gateway/api/realtime/token/${speech}`, route => {
+    directSpeech++;
+    return route.fulfill({ status: 502, body: 'Direct speech is temporarily unavailable.' });
+  });
+  await page.route('**/gateway/api/speech/stream', route => {
+    fallbackSpeech++;
+    expect(route.request().postDataJSON()).toMatchObject({ model: speech, text: [{ type: 'text', text: fallbackSpeech === 1 ? 'Voice reply 1' : 'Voice reply 3' }],
+      outputFormat: { type: 'audio/wav', rate: 24000 } });
+    return route.fulfill({ contentType: 'text/event-stream', body: [
+      { type: 'audio', audio: Buffer.alloc(2400).toString('base64'), audioFormat: { type: 'audio/pcm', rate: 24000 } }, { type: 'finish' },
+    ].map(event => `data: ${JSON.stringify(event)}\n\n`).join('') });
+  });
+  await page.route('**/gateway/api/chat', async route => {
+    requests.push(route.request().postDataJSON());
+    const number = requests.length;
+    if (number === 2) await secondReply;
+    const frames = [{ type: 'start', messageId: 'reused-provider-id' }, { type: 'text-start', id: 'text' },
+      { type: 'text-delta', id: 'text', delta: `Voice reply ${number}` }, { type: 'text-end', id: 'text' }, { type: 'finish', finishReason: 'stop' }];
+    return route.fulfill({ contentType: 'text/event-stream', headers: { 'x-vercel-ai-ui-message-stream': 'v1' },
+      body: frames.map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n' });
+  });
+  await connectFixture(page, 'Deepgram', [{ id: chat, type: 'language' }, { id: speech, type: 'speech', tags: ['realtime'] },
+    { id: deepgramModel, type: 'transcription', tags: ['realtime'] }, { id: 'deepgram/nova-2', type: 'transcription', tags: ['realtime'] }]);
+  await saveFixtureKey(page, 'OpenAI');
+  const composer = page.getByRole('form', { name: 'Message composer' });
+  const draft = composer.getByRole('textbox', { name: 'Message' });
+  const startVoice = composer.getByRole('button', { name: 'Start voice session', exact: true });
+  const stopVoice = composer.getByRole('button', { name: 'Stop voice session', exact: true });
+  await expect(startVoice).toBeEnabled();
+  await draft.fill('A typed draft');
+  await expect(composer.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+  await draft.clear();
+  await composer.locator('input[type=file]').setInputFiles({ name: 'note.txt', mimeType: 'text/plain', buffer: Buffer.from('note') });
+  await expect(composer.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+  await composer.getByRole('button', { name: 'Remove note.txt' }).click();
+  await startVoice.click();
+  await expect(stopVoice).toBeEnabled();
+  await expect(composer.getByRole('button', { name: 'Dictate', exact: true })).toBeDisabled();
+  const result = (transcript: string, start: number, is_final: boolean, speech_final: boolean) => socket!.send(JSON.stringify({
+    type: 'Results', start, duration: 1, is_final, speech_final, channel: { alternatives: [{ transcript }] },
+  }));
+  result('Preview does not send', 0, false, false);
+  await expect(draft).toHaveValue('Preview does not send');
+  expect(requests).toHaveLength(0);
+  result('First fragment', 0, true, false);
+  await expect(draft).toHaveValue('First fragment');
+  expect(requests).toHaveLength(0);
+  result('completes the turn', 1, true, true);
+  result('completes the turn', 1, true, true);
+  await expect(page.getByText('Voice reply 1', { exact: true })).toBeVisible();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].model).toBe(chat);
+  expect(requests[0].messages.filter(({ role }) => role === 'user').flatMap(({ parts }) => parts.map(part => part.text))).toEqual(['First fragment completes the turn']);
+  await expect(page.locator('html')).toHaveAttribute('data-spoke', 'yes');
+  expect([directSpeech, fallbackSpeech]).toEqual([1, 1]);
+  result('A second question', 2, true, true);
+  try {
+    await expect.poll(() => requests.length).toBe(2);
+    result('Queuing a third', 3, false, false);
+    await expect(draft).toHaveValue('Queuing a third');
+    result('A queued question', 3, true, true);
+    await expect(draft).toHaveValue('');
+    expect(requests).toHaveLength(2);
+  } finally { releaseSecond(); }
+  await expect(page.getByText('Voice reply 2', { exact: true })).toBeVisible();
+  await expect(page.getByText('Voice reply 3', { exact: true })).toBeVisible();
+  await expect.poll(() => [directSpeech, fallbackSpeech]).toEqual([2, 2]);
+  result('Unfinished draft', 4, false, false);
+  await expect(draft).toHaveValue('Unfinished draft');
+  await stopVoice.click();
+  await expect(page.locator('html')).toHaveAttribute('data-track', 'stopped');
+  await expect(draft).toHaveValue('');
+  await page.reload();
+  await expect(page.getByText('First fragment completes the turn', { exact: true })).toBeVisible();
+  await expect(page.getByText('Voice reply 3', { exact: true })).toBeVisible();
+  await expect(page.getByText('Unfinished draft', { exact: true })).toHaveCount(0);
+  expect(requests).toHaveLength(3);
+});
+
+test('Agent chat gates voice on the selected agent’s own transcription setting', async ({ page }) => {
+  const model = 'openai/gpt-6-luna';
+  await page.addInitScript(({ model, transcriber }) => {
+    const scope = JSON.stringify([new URL('/gateway/api/chat', location.href).href, 'byok']);
+    localStorage.setItem(`streaik.agents.v1:${scope}`, JSON.stringify({ version: 1, assignments: {}, overrides: [
+      { id: 'transcription', definition: { name: 'TranscriptionAgent', description: 'Transcribe.', instructions: 'Transcribe', model: { id: transcriber } } },
+    ], local: [{ id: 'voice', definition: { name: 'Voice helper', description: 'Voice.', instructions: 'Chat', model: { id: model }, transcription: { id: transcriber } } },
+      { id: 'text', definition: { name: 'Text helper', description: 'Text.', instructions: 'Chat', model: { id: model } } }] }));
+  }, { model, transcriber: deepgramModel });
+  await connectFixture(page, 'OpenAI', [{ id: model, type: 'language' }, { id: deepgramModel, type: 'transcription', tags: ['realtime'] }]);
+  const voice = page.getByRole('button', { name: 'Start voice session', exact: true });
+  await expect(voice).toBeEnabled(); // Model chat inherits the fallback.
+  await page.getByRole('button', { name: 'Agent chat', exact: true }).click();
+  const picker = page.getByRole('button', { name: 'Agent', exact: true });
+  await picker.click();
+  await page.getByRole('option', { name: 'Text helper', exact: true }).click();
+  await expect(voice).toHaveCount(0);
+  const draft = page.getByRole('textbox', { name: 'Message', exact: true });
+  await draft.fill('Still chat normally');
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+  await draft.clear();
+  await picker.click();
+  await page.getByRole('option', { name: 'Voice helper', exact: true }).click();
+  await expect(voice).toBeEnabled();
+});
+
 test('OpenAI microphone uses only the ephemeral secret, saves confirmed turns and releases capture', async ({ page }) => {
   await mockAudio(page);
   await page.addInitScript(() => {
