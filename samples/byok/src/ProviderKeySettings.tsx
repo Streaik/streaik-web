@@ -9,13 +9,12 @@ const catalogProviderIds = [...names.keys()];
 const providerName = (id: string) => names.get(id) ?? id;
 type KeyEditor = { mode: 'add'; id?: string } | { mode: 'replace'; id: string };
 
-export function ProviderKeySettings({ gatewayConfigured, configured, vault, busy, notice, mcp, onChangeKey, onPassphrase, onLock, onErase }: {
+export function ProviderKeySettings({ gatewayConfigured, configured, vault, busy, notice, onChangeKey, onPassphrase, onLock, onErase }: {
   gatewayConfigured: boolean;
   configured: readonly string[];
   vault: 'session' | 'locked' | 'unlocked';
   busy: boolean;
   notice: string;
-  mcp: boolean;
   onChangeKey: (id: string, value?: string) => Promise<boolean>;
   onPassphrase: (event: FormEvent<HTMLFormElement>) => void;
   onLock: () => void;
@@ -72,9 +71,7 @@ export function ProviderKeySettings({ gatewayConfigured, configured, vault, busy
   }
 
   return <section className="chat-settings-section byok-settings" aria-labelledby={`${id}-title`}>
-    <h3 ref={heading} tabIndex={-1} id={`${id}-title`}>{t('Provider keys')}</h3>
-    <p>{t('Gateway chat sends the selected provider’s key to the configured Streaik gateway. Direct chat sends it only to that provider.')}
-      {mcp && <> {t('When MCP tools are enabled, the matching provider key also goes to the configured MCP host.')}</>}</p>
+    <h3 ref={heading} tabIndex={-1} id={`${id}-title`}>{t('API keys')}</h3>
     {vault !== 'locked' && <>
       {configured.length ? <ul className="byok-providers" aria-label={t('Configured providers')}>
         {sorted(configured).map(({ value: provider, label }) => <li className="byok-provider" key={provider}>
@@ -115,8 +112,7 @@ export function ProviderKeySettings({ gatewayConfigured, configured, vault, busy
         <h4 id={`${id}-storage`}>{t('Encrypted storage')}</h4>
         <span className="byok-storage-state">{t(vault === 'session' ? 'Session only' : vault === 'locked' ? 'Locked' : 'On')}</span>
       </div>
-      <p>{t(vault === 'session' ? 'Keys are session-only unless you create a vault. Choose a strong passphrase; there is no recovery.'
-        : vault === 'locked' ? 'Unlock the vault to use or change saved keys.' : 'Keys are saved encrypted in this browser.')}</p>
+      {vault === 'session' && <p>{t('Keys are session-only unless you create a vault. Choose a strong passphrase; there is no recovery.')}</p>}
       {vault === 'session' && !setup && <div><Button disabled={busy} onClick={() => setSetup(true)}>{t('Set up encrypted storage')}</Button></div>}
       {(vault === 'locked' || (vault === 'session' && setup)) && <form className="byok-key-form" onSubmit={onPassphrase} key={vault}>
         <label htmlFor={`${id}-passphrase`}>{t('Vault passphrase')}</label>

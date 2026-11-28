@@ -125,14 +125,16 @@ export function ByokApp({ appName, base, agentBase, mcpConfig, enableKeylessEcho
   }
 
   const configured = Object.keys(keys.current);
-  return <ChatApp appName={appName} gateway={gateway} agents={vault.state === 'locked' ? undefined : appAgents} connection={{
-    ready: configured.length > 0 || (enableKeylessEcho && !!base && vault.state !== 'locked'), modelRevision: revision, mcp, direct, mcpSession: vault.state !== 'locked',
-    agentBackend: vault.state === 'locked' ? undefined : agentBackend,
-    historyProfile: vault.state === 'locked' ? undefined : 'byok',
-    emptyMessage: t(vault.state === 'locked' ? 'Unlock your provider keys in Settings to start chatting.' : 'Add a provider key in Settings to start chatting.'),
+  const locked = vault.state === 'locked';
+  // The vault protects provider keys, not the local BYOK profile or its content.
+  return <ChatApp appName={appName} gateway={gateway} agents={appAgents} connection={{
+    historyProfile: 'byok',
+    ready: !locked && (configured.length > 0 || (enableKeylessEcho && !!base)), modelRevision: revision, mcp, direct, mcpSession: !locked,
+    agentBackend: locked ? undefined : agentBackend,
+    emptyMessage: t(locked ? 'Unlock your provider keys in Settings to start chatting.' : 'Add a provider key in Settings to start chatting.'),
     account: { name: 'BYOK' },
     apiKeySettings: <ProviderKeySettings gatewayConfigured={!!base} configured={configured}
-      vault={vault.state} busy={busy} notice={notice} mcp={!!mcp}
+      vault={vault.state} busy={busy} notice={notice}
       onChangeKey={changeKey} onPassphrase={submitPassphrase} onLock={() => {
         updateKeys({}); setVault({ state: 'locked' }); setNotice('Vault locked.');
       }} onErase={eraseVault} />,

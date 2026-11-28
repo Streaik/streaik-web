@@ -333,7 +333,7 @@ function McpServerTabs({ selection, ...props }: ServerSectionsProps & { selectio
   const id = useId();
   const [tab, setTab] = useState<'installed' | 'registry'>(() => selection && !props.store.records.length ? 'registry' : 'installed');
   const [registryOpened, setRegistryOpened] = useState(tab === 'registry');
-  const registry = useMcpRegistry(props.options, registryOpened, !selection && tab === 'installed' ? props.store.records : undefined);
+  const registry = useMcpRegistry(props.options, registryOpened, !selection && tab === 'installed' && props.store.available ? props.store.records : undefined);
   return <>
     <DialogTabs id={id} label={t('Model Context')} tabs={[[ 'installed', t('Installed') ], [ 'registry', t('Registry') ]]} value={tab}
       className={selection ? undefined : 'catalog-tabs'}

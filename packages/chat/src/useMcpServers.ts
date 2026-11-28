@@ -25,7 +25,8 @@ type Library = { key?: string; available: boolean; records: McpServerRecord[]; s
 
 export function useMcpServers(scope: string | undefined, options: McpOptions | undefined, available: boolean) {
   const key = scope ? `streaik.mcp.servers:${JSON.stringify([scope, options?.base?.href, options?.registryUrl?.href])}` : undefined;
-  const initial = (): Library => ({ key, available, records: available ? load(key) : [], session: new Map() });
+  // The profile controls metadata visibility; the session controls credentials and connections.
+  const initial = (): Library => ({ key, available, records: load(key), session: new Map() });
   const [library, setLibrary] = useState(initial);
   const current = library.key === key && library.available === available ? library : initial();
   if (current !== library) setLibrary(current);

@@ -3182,9 +3182,10 @@ test('Images uses explicit routes and persists compatible records only for the c
   await page.reload();
   await imagesPage.click();
   await expect(gallery).toBeVisible();
-  await expect(generated).toHaveCount(0);
+  await expect(generated).toHaveCount(3);
+  await expect(top.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
   await openRoute(page);
-  await expect(page.getByRole('menuitemradio', { name: '/api/images', exact: true })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('menuitemradio', { name: '/v1/images/edits', exact: true })).toHaveAttribute('aria-checked', 'true');
   await page.keyboard.press('Escape');
   await showSettings(page);
   await page.getByRole('tab', { name: 'API keys', exact: true }).click();
@@ -3644,7 +3645,7 @@ async function prepareRealtimeSpeech(page: Page, id: string) {
     const scope = JSON.stringify([new URL('/gateway/api/chat', location.href).href, 'byok']);
     const key = `streaik.agents.v1:${scope}`;
     if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify({ version: 1, assignments: {}, local: [],
-      overrides: [{ id: 'speech', definition: { name: 'SpeechAgent', instructions: 'Create speech', model: { id } } }] }));
+      overrides: [{ id: 'speech', definition: { name: 'SpeechAgent', description: 'Creates speech.', instructions: 'Create speech', model: { id } } }] }));
     const start = AudioBufferSourceNode.prototype.start;
     AudioBufferSourceNode.prototype.start = function (...args: Parameters<typeof start>) {
       start.apply(this, args);
@@ -3658,7 +3659,11 @@ async function prepareRealtimeSpeech(page: Page, id: string) {
   ] } }));
   await page.route('**/gateway/v1/skills?*', route => route.fulfill({ json: { data: [], has_more: false } }));
   await page.goto('/');
-  await showSettings(page); await addKey(page); await closeSettings(page);
+  await showSettings(page);
+  await addKey(page);
+  const provider = id.split('/')[0];
+  await addKey(page, provider[0].toUpperCase() + provider.slice(1), `test-${provider}-key`);
+  await closeSettings(page);
   await page.getByRole('button', { name: 'Speech', exact: true }).click();
   await expect(page).toHaveURL(/\/speech$/);
   await expect(modelPicker(page)).toHaveText('Realtime Speech Fixture');
@@ -3982,7 +3987,7 @@ test('Speech plays supported MP3 while streaming and falls back to saved WAV con
   }, { mp3, wav: speechWav().toString('base64') });
   await prepareSpeech(page);
   test.skip(!await page.evaluate(() => typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported('audio/mpeg')), 'MP3 MediaSource is unavailable');
-  await openRoute(page);
+  await openRoute(page, 'Gateway');
   await page.getByRole('menuitemradio', { name: '/api/speech/stream', exact: true }).click();
   const composer = page.getByRole('form', { name: 'Speech composer' });
   const text = composer.getByRole('textbox', { name: 'Speech text' });
@@ -5696,8 +5701,16 @@ test('BYOK searches the alphabetized bundled catalog without a gateway request',
   expect(modelKeys.at(-1)?.['x-spacexai-key']).toBeUndefined();
 });
 
-test('BYOK does not persist session keys; the encrypted vault reloads locked and can be erased', async ({ page }) => {
+test('the BYOK vault protects keys but leaves saved content visible when locked', async ({ page }) => {
   await mockModels(page);
+  let replies = 0;
+  await page.route('**/gateway/api/chat', async route => {
+    expect(await route.request().headerValue('x-openai-key')).toBe(fakeKey);
+    const reply = ++replies;
+    await route.fulfill({ headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' }, body: sse(`Vault reply ${reply}`, reply) });
+  });
+  const endpoint = new URL('/vault-mcp-fixture', test.info().project.use.baseURL).href;
+  await page.route(endpoint, route => route.abort());
   await page.goto('/'); await showSettings(page); await addKey(page);
   const storage = () => page.evaluate(() => JSON.stringify(localStorage));
   expect(await storage()).not.toContain(fakeKey);
@@ -5713,23 +5726,89 @@ test('BYOK does not persist session keys; the encrypted vault reloads locked and
   expect(await storage()).toContain('ciphertext');
   expect(await storage()).not.toContain(fakeKey);
   expect(await storage()).not.toContain(passphrase);
-  await page.getByRole('button', { name: 'Lock vault' }).click();
+  await closeSettings(page);
+
+  await chooseChatModel(page);
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('Save this conversation.'); await composer.press('Enter');
+  const savedReply = page.getByText('Vault reply 1', { exact: true });
+  await expect(savedReply).toBeVisible();
+  await expect(page).toHaveURL(/\/c\/[0-9a-f-]{36}$/);
+  const conversation = page.url();
+
+  const zip = new ZipWriter(new BlobWriter('application/zip'));
+  await zip.add('vault-notes/SKILL.md', new TextReader('---\nname: vault-notes\ndescription: Organize notes.\n---\n\n# Notes\n'), { useWebWorkers: false });
+  const buffer = Buffer.from(await (await zip.close()).arrayBuffer());
+  const skillsPage = page.getByRole('button', { name: 'Skills', exact: true });
+  await skillsPage.click();
+  await page.getByRole('button', { name: 'Add skill', exact: true }).press('Enter');
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('menuitem', { name: 'Import', exact: true }).click();
+  await (await chooser).setFiles({ name: 'vault-notes.zip', mimeType: 'application/zip', buffer });
+  const skill = page.getByRole('article', { name: 'vault-notes', exact: true });
+  await expect(skill).toBeVisible();
+
+  const contextPage = page.getByRole('button', { name: 'Model Context', exact: true });
+  await contextPage.click();
+  const addServer = page.getByRole('button', { name: 'Add by URL', exact: true });
+  await addServer.click();
+  const editor = page.getByRole('dialog', { name: 'Add MCP server', exact: true });
+  await editor.getByLabel('Name', { exact: true }).fill('Vault fixture');
+  await editor.getByLabel('URL', { exact: true }).fill(endpoint);
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
+  const server = page.getByRole('heading', { name: 'Vault fixture', exact: true });
+  await expect(server).toBeVisible();
+
+  await page.goto(conversation);
+  const keys = await showSettings(page, 'API keys');
+  const requests: string[] = [];
+  const trackRequests = (request: { url(): string }) => {
+    const url = request.url();
+    if (url.includes('/gateway/') || url === endpoint) requests.push(url);
+  };
+  page.on('request', trackRequests);
+  await vault.getByRole('button', { name: 'Lock vault' }).click();
   await expect(page.getByText('Vault locked.')).toBeVisible();
+  await closeSettings(page);
+  await expect(savedReply).toBeVisible();
   await page.reload();
+  await expect(savedReply).toBeVisible();
   await expect(page.getByText(/Unlock your provider keys/)).toBeVisible();
-  await showSettings(page);
-  await expect(page.getByRole('tab', { name: 'Agents', exact: true })).toHaveCount(0);
-  await page.getByRole('tab', { name: 'API keys', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Add API key', exact: true })).toHaveCount(0);
+  await expect(modelPicker(page)).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+
+  await skillsPage.click();
+  await expect(skill).toBeVisible();
+  await page.getByRole('button', { name: 'Agents', exact: true }).click();
+  await expect(page.getByRole('article', { name: 'ChatAgent', exact: true })).toBeVisible();
+  await contextPage.click();
+  await expect(server).toBeVisible();
+  await expect(addServer).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Configure Vault fixture', exact: true })).toBeDisabled();
+
+  await page.goto(conversation);
+  await showSettings(page, 'API keys');
+  await expect(keys.getByRole('heading', { name: 'API keys', exact: true })).toBeVisible();
+  await expect(keys.getByText('Locked', { exact: true })).toBeVisible();
+  await expect(keys.getByRole('button', { name: 'Add API key', exact: true })).toHaveCount(0);
+  await expect(keys.getByRole('list', { name: 'Configured providers' })).toHaveCount(0);
+  page.off('request', trackRequests);
+  expect(requests).toEqual([]);
   await page.getByLabel('Vault passphrase').fill(passphrase);
   await page.getByRole('button', { name: 'Unlock vault' }).click();
   await expect(page.getByText('Vault unlocked.')).toBeVisible();
   await expect(page.getByRole('list', { name: 'Configured providers' })).toContainText('OpenAI');
-  await expect(page.getByRole('tab', { name: 'Agents', exact: true })).toBeVisible();
+  await closeSettings(page);
+  await chooseChatModel(page);
+  await composer.fill('Continue after unlocking.'); await composer.press('Enter');
+  await expect(page.getByText('Vault reply 2', { exact: true })).toBeVisible();
+  await showSettings(page, 'API keys');
   await page.getByRole('button', { name: 'Erase vault', exact: true }).click();
   await page.getByRole('button', { name: 'Confirm erase vault', exact: true }).click();
   await expect(page.getByText('Encrypted vault erased.')).toBeVisible();
   expect(await storage()).not.toContain('streaik.byok.vault');
+  await closeSettings(page);
+  await expect(savedReply).toBeVisible();
 });
 
 test('Entra sample starts signed out, without a provider-key surface or model requests', async ({ page }) => {
