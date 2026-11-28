@@ -880,7 +880,6 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   });
   const waitingForBrowserOutput = (part: Invocation) => !part.providerExecuted && part.state === 'approval-responded' && part.approval.approved;
   const pending = toolParts.find(({ part }) => (!toolComplete(part) || waitingForBrowserOutput(part)) && !turn?.resolved.has(part.toolCallId));
-  const needsExecutionApproval = (tool: ChatTool) => tool.source === 'mcp' || tool.source === 'mcp-resource' || (tool.source === 'local' && tool.plugin.approval);
   useEffect(() => () => { operation.current?.abort(); }, []);
 
   function requestBody(turn: Turn) {
@@ -910,7 +909,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       }
       if (waitingForBrowserOutput(part)) {
         if (isSearch(part)) void completeSearch(turn, part);
-        else if (tool) void completeTool(part, tool, 'run');
+        else if (tool) void completeTool(part, tool);
       } else if (part.state !== 'approval-requested' || (!tool && !isSearch(part))) {
         setToolNotice('The gateway did not return an approval for this client tool.');
         setTurn(undefined);
@@ -922,10 +921,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       return;
     }
     if (pending?.part.state === 'input-available' && pending.tool) {
-      const { part, tool } = pending;
-      const gatewayTool = turn.route.mode === 'gateway';
-      if (gatewayTool && needsExecutionApproval(tool)) return;
-      void completeTool(part, tool, 'run');
+      void completeTool(pending.part, pending.tool);
       return;
     }
     if (toolParts.every(({ part }) => toolComplete(part) && !waitingForBrowserOutput(part))) {
@@ -979,7 +975,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     }
   }
 
-  async function completeTool(part: Invocation, tool: ChatTool, action: 'run' | 'decline') {
+  async function completeTool(part: Invocation, tool: ChatTool) {
     if (!turn || turn.resolved.has(part.toolCallId) || operation.current || status !== 'ready') return;
     const controller = new AbortController();
     // The render snapshot can lag behind addToolOutput when message updates are throttled.
@@ -987,9 +983,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     operation.current = controller; setToolBusy(true);
     try {
       let output: unknown;
-      if (action === 'decline') {
-        output = { isError: true, content: [{ type: 'text', text: 'The user declined to run this tool.' }] };
-      } else if (tool.source === 'local') {
+      if (tool.source === 'local') {
         output = await runLocalTool(tool, part.input, { catalog: turn.catalog, history: tool.plugin.requiresHistory ? readHistory?.() ?? [] : [],
             searchConversationText: tool.plugin.requiresHistory ? searchConversationText : undefined,
             searchTools: goal => searchLocalToolCatalog(turn.toolSearchAgent, goal, turn.requestTools,
@@ -1040,30 +1034,26 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
 
   function answerTool(approved: boolean) {
     if (!turn || !pending || !last || toolBusy || operation.current || status !== 'ready') return;
-    const { part, tool } = pending;
+    const { part } = pending;
     if (!turn.hosted && turn.route.mode === 'direct' && !isNativeMcpApproval(part)) return;
-    if (turn.resolved.has(part.toolCallId)) return;
-    if (part.state === 'approval-requested') {
-      if (approved && isConvertedMcpReview(part)) {
-        const reviewed = mcpReviewOutput(part);
-        if (!reviewed) return;
-        turn.resolved.add(part.toolCallId);
-        const answered: Invocation = { ...part, state: 'output-available', output: reviewed.output, approval: { ...part.approval, approved: true } };
-        setMessages(current => current.map(message => message.id === last.id ? { ...message,
-          parts: message.parts.map(item => 'toolCallId' in item && item.toolCallId === part.toolCallId ? answered : item) } : message));
-      } else {
-        const controller = new AbortController();
-        operation.current = controller;
-        setToolBusy(true);
-        void Promise.resolve(addToolApprovalResponse({ id: part.approval.id, approved })).catch(() => {
-          if (!controller.signal.aborted) { setToolNotice('Could not record the tool approval.'); setTurn(undefined); }
-        }).finally(() => {
-          if (operation.current === controller) { operation.current = null; setToolBusy(false); }
-        });
-      }
-      return;
+    if (part.state !== 'approval-requested' || turn.resolved.has(part.toolCallId)) return;
+    if (approved && isConvertedMcpReview(part)) {
+      const reviewed = mcpReviewOutput(part);
+      if (!reviewed) return;
+      turn.resolved.add(part.toolCallId);
+      const answered: Invocation = { ...part, state: 'output-available', output: reviewed.output, approval: { ...part.approval, approved: true } };
+      setMessages(current => current.map(message => message.id === last.id ? { ...message,
+        parts: message.parts.map(item => 'toolCallId' in item && item.toolCallId === part.toolCallId ? answered : item) } : message));
+    } else {
+      const controller = new AbortController();
+      operation.current = controller;
+      setToolBusy(true);
+      void Promise.resolve(addToolApprovalResponse({ id: part.approval.id, approved })).catch(() => {
+        if (!controller.signal.aborted) { setToolNotice('Could not record the tool approval.'); setTurn(undefined); }
+      }).finally(() => {
+        if (operation.current === controller) { operation.current = null; setToolBusy(false); }
+      });
     }
-    if (!isApiChatTurn(turn) && tool && part.state === 'input-available') void completeTool(part, tool, approved ? 'run' : 'decline');
   }
 
   function createTurn(model: string): Turn {
@@ -1110,18 +1100,16 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   function pendingReview(): ToolReview | undefined {
     if (!turn || !pending || status !== 'ready') return;
     const { tool, part } = pending;
+    if (part.state !== 'approval-requested') return;
     const name = tool?.source === 'mcp' ? tool.tool.title || tool.tool.remoteName : invocationName(part);
     const details = { id: part.toolCallId, name, input: part.input, disabled: toolBusy || !connection.ready };
-    if (part.state === 'approval-requested' && (isNativeMcpApproval(part) || isHostedMcpApproval(part))) return { ...details, kind: 'execution' };
+    if (isNativeMcpApproval(part) || isHostedMcpApproval(part)) return { ...details, kind: 'execution' };
     if (!turn.hosted && turn.route.mode === 'direct') return;
-    if (part.state === 'approval-requested' && isApiChatTurn(turn) && isConvertedMcpReview(part)) {
+    if (isApiChatTurn(turn) && isConvertedMcpReview(part)) {
       const reviewed = mcpReviewOutput(part);
       if (reviewed) return { ...details, kind: 'result', ...reviewed };
     }
-    if (part.state === 'approval-requested' && isApiChatTurn(turn) && (tool || isSearch(part))) return { ...details, kind: 'execution' };
-    if (!isApiChatTurn(turn) && part.state === 'input-available' && tool && needsExecutionApproval(tool)) {
-      return { ...details, kind: 'execution' };
-    }
+    if (isApiChatTurn(turn) && (tool || isSearch(part))) return { ...details, kind: 'execution' };
   }
   const review = pendingReview();
   const busy = status === 'submitted' || status === 'streaming';

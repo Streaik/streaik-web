@@ -4774,17 +4774,26 @@ test('direct Responses approves native MCP inline and does not retry an uncertai
   expect(bodies).toHaveLength(2);
 });
 
-for (const endpoint of directToolRoutes) test(`Direct ${endpoint} runs browser tools and continues without review`, async ({ page }) => {
-  const anthropic = endpoint === '/v1/messages';
-  const testMcp = endpoint === '/v1/chat/completions';
-  const model = anthropic ? 'claude-sonnet-4-6' : 'gpt-4.1-mini';
+const browserToolRoutes = [
+  ...directToolRoutes.map(endpoint => ({ mode: 'Direct' as const, endpoint })),
+  { mode: 'Gateway', endpoint: '/v1/messages' },
+] as const;
+
+for (const { mode, endpoint } of browserToolRoutes) test(`${mode} ${endpoint} runs browser tools and continues without review`, async ({ page }) => {
+  const viaGateway = mode === 'Gateway';
+  const messagesEndpoint = endpoint === '/v1/messages';
+  const anthropic = messagesEndpoint && !viaGateway;
+  const testMcp = viaGateway || endpoint === '/v1/chat/completions';
+  const modelName = anthropic ? 'claude-sonnet-4-6' : 'gpt-4.1-mini';
+  const requestModel = viaGateway ? model : modelName;
   const uri = 'fixture://pages/guide';
   const mcpMethods: string[] = [];
   const requests: unknown[] = [];
   const toolName = 'local_conversations_list_all';
   const calls: FixtureToolCall[] = [{ id: 'call_local_history', name: toolName, input: {} }];
-  await page.route(url => url.pathname.startsWith('/gateway/'), route => route.abort());
-  if (testMcp) await page.route('**/mcp-direct-fixture', route => {
+  if (viaGateway) await mockModels(page);
+  else await page.route(url => url.pathname.startsWith('/gateway/'), route => route.abort());
+  if (testMcp) await page.route('**/mcp-browser-tool-fixture', route => {
     const { id, method, params } = route.request().postDataJSON();
     const reply = (result: object) => route.fulfill({ json: { jsonrpc: '2.0', id, result } });
     const complete = { resultType: 'complete', ttlMs: 0, cacheScope: 'private' };
@@ -4795,21 +4804,22 @@ for (const endpoint of directToolRoutes) test(`Direct ${endpoint} runs browser t
     mcpMethods.push(method);
     if (method === 'tools/call') {
       expect(params.name).toBe('lookup');
-      return reply({ ...complete, content: [{ type: 'text', text: 'Direct MCP lookup result' }] });
+      return reply({ ...complete, content: [{ type: 'text', text: 'Browser MCP lookup result' }] });
     }
     expect(method).toBe('resources/read');
     expect(params.uri).toBe(uri);
-    return reply({ ...complete, contents: [{ uri, text: 'Direct MCP resource result' }] });
+    return reply({ ...complete, contents: [{ uri, text: 'Browser MCP resource result' }] });
   });
   const base = `https://api.${anthropic ? 'anthropic' : 'openai'}.com`;
-  await page.route(`${base}/v1/**`, async route => {
+  await page.route(viaGateway ? `**/gateway${endpoint}` : `${base}/v1/**`, async route => {
     const request = route.request();
-    const headers = { 'access-control-allow-origin': 'http://localhost:15173', 'access-control-allow-methods': 'GET, POST, OPTIONS',
+    const headers: Record<string, string> = viaGateway ? {} : { 'access-control-allow-origin': 'http://localhost:15173', 'access-control-allow-methods': 'GET, POST, OPTIONS',
       'access-control-allow-headers': 'authorization, content-type, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access' };
     if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
-    if (request.method() === 'GET') return route.fulfill({ headers, json: { data: [{ id: model }] } });
-    expect(request.url()).toBe(`${base}${endpoint}`);
+    if (request.method() === 'GET') return route.fulfill({ headers, json: { data: [{ id: modelName }] } });
+    expect(request.url()).toBe(viaGateway ? new URL(`/gateway${endpoint}`, page.url()).href : `${base}${endpoint}`);
     const body = request.postDataJSON();
+    expect(body.model).toBe(requestModel);
     requests.push(body);
     const names = body.tools.map((tool: { name?: string; function?: { name: string } }) => tool.function?.name ?? tool.name);
     expect(names).toEqual(expect.arrayContaining([toolName, 'local_ai_models_search']));
@@ -4818,19 +4828,21 @@ for (const endpoint of directToolRoutes) test(`Direct ${endpoint} runs browser t
       const mcpTool = names.find((name: string) => name.endsWith('_lookup'));
       expect(mcpTool).toBeDefined();
       expect(names).toContain('read_resource');
-      const context = body.messages.filter(({ role }: { role: string }) => role === 'system' || role === 'developer')
-        .map(({ content }: { content: string }) => content).find((content: string) => content.includes('mcpResourceCatalog'));
+      const instructions: string[] = messagesEndpoint ? body.system.map(({ text }: { text: string }) => text)
+        : body.messages.filter(({ role }: { role: string }) => role === 'system' || role === 'developer')
+          .map(({ content }: { content: string }) => content);
+      const context = instructions.find(text => text.includes('mcpResourceCatalog'))!;
       const { serverId } = JSON.parse(context).mcpResourceCatalog.servers[0];
       calls.push({ id: 'call_mcp_lookup', name: mcpTool, input: {} }, { id: 'call_mcp_resource', name: 'read_resource', input: { serverId, uri } });
     }
-    const payload = nativeToolSse(endpoint, model, requests.length === 1 ? calls : [], 'Direct tool round complete.');
+    const payload = nativeToolSse(endpoint, requestModel, requests.length === 1 ? calls : [], 'Browser tool round complete.');
     return route.fulfill({ headers: { ...headers, 'content-type': 'text/event-stream' }, body: payload });
   });
   await page.goto('/');
-  await openRoute(page, 'Direct');
+  await openRoute(page, mode);
   await page.getByRole('menuitemradio', { name: endpoint, exact: true }).click();
   await showSettings(page); await addKey(page, anthropic ? 'Anthropic' : 'OpenAI'); await closeSettings(page);
-  await chooseModel(page, model);
+  await chooseModel(page, modelName);
 
   await page.getByRole('button', { name: 'Chat settings', exact: true }).click();
   const settings = page.getByRole('dialog', { name: 'Chat settings', exact: true });
@@ -4846,39 +4858,39 @@ for (const endpoint of directToolRoutes) test(`Direct ${endpoint} runs browser t
     await context.getByRole('tab', { name: 'Installed', exact: true }).click();
     await context.getByRole('button', { name: 'Add by URL' }).click();
     const editor = page.getByRole('dialog', { name: 'Add MCP server' });
-    await editor.getByLabel('Name', { exact: true }).fill('Direct fixture');
-    await editor.getByLabel('URL', { exact: true }).fill(new URL('/mcp-direct-fixture', page.url()).href);
+    await editor.getByLabel('Name', { exact: true }).fill('Browser fixture');
+    await editor.getByLabel('URL', { exact: true }).fill(new URL('/mcp-browser-tool-fixture', page.url()).href);
     await editor.getByRole('button', { name: 'Save', exact: true }).click();
-    await context.getByRole('switch', { name: 'Direct fixture' }).check();
+    await context.getByRole('switch', { name: 'Browser fixture' }).check();
     await expect(context.getByRole('status')).toHaveText('1 tools available');
     await context.getByRole('button', { name: 'Close', exact: true }).click();
   }
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   await composer.fill('Run my enabled tools.'); await composer.press('Enter');
-  await expect(page.getByText('Direct tool round complete.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Browser tool round complete.', { exact: true })).toBeVisible();
   await expect(page.getByRole('dialog', { name: /Review tool result|Approve tool execution/ })).toHaveCount(0);
   expect(requests).toHaveLength(2);
   const followup = requests[1] as { input: unknown[]; messages: { role: string; content: unknown }[] };
   const history = expect.stringContaining('"conversations"');
+  const outputs = [history, expect.stringContaining('Browser MCP lookup result'), expect.stringContaining('Browser MCP resource result')];
   const local = calls[0];
   if (endpoint === '/v1/responses') expect(followup.input).toEqual(expect.arrayContaining([
     expect.objectContaining({ type: 'function_call', call_id: local.id, name: toolName }),
     expect.objectContaining({ type: 'function_call_output', call_id: local.id, output: history }),
   ]));
-  else if (anthropic) {
+  else if (messagesEndpoint) {
     const blocks = followup.messages.flatMap(message => message.content);
-    expect(blocks).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'tool_use', id: local.id, name: toolName }),
-      expect.objectContaining({ type: 'tool_result', tool_use_id: local.id, content: history }),
-    ]));
+    expect(blocks.filter(block => (block as { type?: string }).type === 'tool_use')).toEqual(calls.map(({ id, name, input }) =>
+      expect.objectContaining({ type: 'tool_use', id, name, input })));
+    expect(blocks.filter(block => (block as { type?: string }).type === 'tool_result')).toEqual(calls.map(({ id }, index) =>
+      expect.objectContaining({ type: 'tool_result', tool_use_id: id, content: outputs[index] })));
   } else {
-    const outputs = [history, expect.stringContaining('Direct MCP lookup result'), expect.stringContaining('Direct MCP resource result')];
     expect(followup.messages).toEqual(expect.arrayContaining([
       expect.objectContaining({ role: 'assistant', tool_calls: calls.map(({ id, name }) => expect.objectContaining({ id, function: expect.objectContaining({ name }) })) }),
       ...calls.map(({ id }, index) => expect.objectContaining({ role: 'tool', tool_call_id: id, content: outputs[index] })),
     ]));
-    expect(mcpMethods).toEqual(['tools/call', 'resources/read']);
   }
+  if (testMcp) expect(mcpMethods).toEqual(['tools/call', 'resources/read']);
 });
 
 test('BYOK can chat and persist Direct performance and cost with every gateway request blocked', async ({ page }) => {

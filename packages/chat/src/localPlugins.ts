@@ -130,13 +130,13 @@ const historyTools = [
 export const localToolSearchPluginId = 'local-tool-search';
 
 export const localPlugins = [
-  { id: 'local-artificial-intelligence', label: 'Artificial Intelligence', approval: false, requiresHistory: false, tools: aiTools },
-  { id: 'local-conversations', label: 'Chat History', approval: true, requiresHistory: true, tools: historyTools },
-  { id: 'local-charts', label: 'Charts', approval: false, requiresHistory: false, tools: [
+  { id: 'local-artificial-intelligence', label: 'Artificial Intelligence', requiresHistory: false, tools: aiTools },
+  { id: 'local-conversations', label: 'Chat History', requiresHistory: true, tools: historyTools },
+  { id: 'local-charts', label: 'Charts', requiresHistory: false, tools: [
     define('local_chart_instructions', 'Get the format and an example for displaying a bar, line, or doughnut chart in your reply. Call when a chart would help.',
       {}, [], () => chartInstructions),
   ] },
-  { id: localToolSearchPluginId, label: 'Tool search', approval: false, requiresHistory: false, tools: [
+  { id: localToolSearchPluginId, label: 'Tool search', requiresHistory: false, tools: [
     define(clientToolSearchName, 'Find enabled tools that match a goal. Search before calling a deferred tool.',
       { goal: string('The task the requested tools should help with.') }, ['goal'], async ({ goal }, { searchTools }) => {
         if (!searchTools) throw new Error('The tool catalog is unavailable.');

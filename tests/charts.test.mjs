@@ -42,7 +42,6 @@ test('Charts opts in to one instructions tool without history and the tool examp
   assert.equal(tools.length, 1);
   const [tool] = tools;
   assert.equal(tool.source, 'local');
-  assert.equal(tool.plugin.approval, false);
   assert.equal(tool.definition.name, 'local_chart_instructions');
   assert.deepEqual(tool.definition.inputSchema.properties, {});
   const result = await runLocalTool(tool, {}, { catalog: [], history: [] });
