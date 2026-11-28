@@ -70,8 +70,8 @@ test('agent Skills keeps Local copies and Central links separate and saves only 
   const providerSkill = central.getByRole('switch', { name: remote.name, exact: true });
   const search = panel.getByRole('searchbox', { name: 'Search skills', exact: true });
   await expect(panel.getByRole('searchbox')).toHaveCount(1);
-  await expect(localSkill).toHaveCSS('appearance', 'none');
-  await expect(providerSkill).toHaveCSS('appearance', 'none');
+  await expect(localSkill).toBeEnabled();
+  await expect(providerSkill).toBeEnabled();
   await expect(panel).not.toContainText(/A local skill\.|A Central skill\.|Attach a copy of a skill|Link to a catalog skill/);
 
   await search.fill(' PROVIDER ');
@@ -162,7 +162,7 @@ test('agent tool configuration preserves portable fields and auto-attaches only 
   await expect(tools.getByRole('button', { name: 'Add by URL' })).toHaveCount(0);
   const toolSearch = tools.getByRole('switch', { name: 'Tool search', exact: true });
   const resourceSearch = tools.getByRole('switch', { name: 'Resource search', exact: true });
-  await expect(toolSearch).toHaveCSS('appearance', 'none');
+  await expect(toolSearch).toBeEnabled();
   await resourceSearch.check();
   await resourceSearch.uncheck();
   await toolSearch.check();

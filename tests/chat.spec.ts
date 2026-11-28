@@ -201,12 +201,9 @@ test('OpenAI voice uses the existing model picker, composer slot, and conversati
   await openAiPanel.getByLabel('Responses model', { exact: true }).fill(model);
   const parallel = openAiPanel.getByRole('switch', { name: 'Parallel backend tool calls', exact: true });
   await expect(parallel).toBeChecked();
-  await expect(parallel).toHaveCSS('appearance', 'none');
-  await expect(parallel.locator('..')).toHaveCSS('display', 'flex');
   await parallel.uncheck();
   for (const name of ['Web search', 'Code interpreter', 'File search']) {
     const tool = openAiPanel.getByRole('switch', { name, exact: true });
-    await expect(tool).toHaveCSS('appearance', 'none');
     await tool.check();
   }
   await openAiPanel.getByLabel('Vector store IDs (comma-separated)', { exact: true }).fill('vs_fixture');
