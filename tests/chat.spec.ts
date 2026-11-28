@@ -1474,7 +1474,7 @@ test('model picker groups and searches compatible models on a narrow screen, wit
   const list = popup.getByRole('listbox');
   const openAI = list.getByRole('group', { name: 'OpenAI', exact: true });
   const claude = list.getByRole('option', { name: 'Claude Example', exact: true });
-  await expect(page.locator('.chat-toolbar').getByRole('button')).toHaveCount(1);
+  await expect(page.locator('.chat-toolbar').getByRole('button', { name: 'Model', exact: true })).toHaveCount(1);
   await expect(picker).toHaveText('Select models');
   await picker.press('ArrowDown');
   await expect(search).toBeFocused();

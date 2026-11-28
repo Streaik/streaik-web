@@ -78,6 +78,7 @@ test('agent picker groups by owner, then each tag, then Central or Local', async
     { id: 'zulu-central', name: 'Zulu Central' },
     { id: 'alpha-central', name: 'alpha Central', tags: [' '] },
   ] } }));
+  await page.route('**/gateway/api/chat', route => route.fulfill(stream('Welcome')));
   await start(page);
   await agentPicker(page).click();
   const popup = page.getByRole('dialog', { name: 'Agent', exact: true });
