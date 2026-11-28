@@ -3098,7 +3098,7 @@ test('Gateway chat shares context, keeps composer reasoning through approval, an
   await expect(page.getByText('Chat reply 1', { exact: true })).toBeVisible();
   expect(requests[0].tools).toBeUndefined();
   expect(requests[0].providerMetadata).toBeUndefined();
-  expect(requests[0].reasoning).toBe('medium');
+  expect(requests[0]).not.toHaveProperty('reasoning');
   await page.getByRole('button', { name: 'New chat', exact: true }).click();
   await expect(page.getByText('Chat reply 1', { exact: true })).toHaveCount(0);
   await chooseChatModel(page);
@@ -3238,7 +3238,7 @@ test('Gateway chat shares context, keeps composer reasoning through approval, an
   await settings.getByRole('tab', { name: 'Tools' }).click();
   await history.uncheck();
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
-  await chooseReasoning('None');
+  await chooseReasoning('Default');
   await send('Continue without the history plugin.');
   await expect(page.getByText('Chat reply 4', { exact: true })).toBeVisible();
   expect(requests[3].tools).toHaveLength(5);
@@ -5164,6 +5164,33 @@ test('BYOK can chat and persist Direct performance and cost with every gateway r
   await expect(badge('Time to first token')).toHaveText(ttft!);
   await expect(badge('Tokens per second')).toHaveText(tps!);
   expect(gatewayCalls).toBe(0);
+});
+
+test('composer reasoning selection survives switching Gateway and Direct routes', async ({ page }) => {
+  await mockModels(page);
+  await page.route('https://api.openai.com/v1/models', route => route.fulfill({ json: { data: [{ id: 'gpt-4.1-mini' }] } }));
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await chooseChatModel(page);
+  const reasoning = page.getByRole('combobox', { name: 'Reasoning level', exact: true });
+  if (await reasoning.evaluate(el => el.tagName === 'SELECT')) {
+    await expect(reasoning).toHaveValue('none');
+    await reasoning.selectOption({ label: 'High' });
+  } else {
+    await expect(reasoning).toContainText('Default');
+    await reasoning.click();
+    await page.getByRole('option', { name: 'High', exact: true }).click();
+  }
+  for (const [mode, endpoint] of [
+    ['Gateway', '/v1/responses'], ['Gateway', '/v1/messages'], ['Gateway', '/v1/chat/completions'],
+    ['Direct', '/v1/chat/completions'], ['Gateway', '/api/chat'],
+  ] as const) {
+    await openRoute(page, mode);
+    await page.getByRole('menuitemradio', { name: endpoint, exact: true }).click();
+    await expect(reasoning).toBeVisible();
+    if (await reasoning.evaluate(el => el.tagName === 'SELECT')) await expect(reasoning).toHaveValue('high');
+    else await expect(reasoning).toContainText('High');
+  }
 });
 
 test('conversation cost survives switching between Gateway and Direct and reloading', async ({ page }) => {

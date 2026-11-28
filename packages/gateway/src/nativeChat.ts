@@ -1,4 +1,4 @@
-import { APICallError, convertToModelMessages, jsonSchema, streamText, StreamProviderError, tool } from 'ai';
+import { APICallError, convertToModelMessages, jsonSchema, streamText, StreamProviderError, tool, wrapLanguageModel } from 'ai';
 import type { ChatTransport, JSONSchema7, ToolSet } from 'ai';
 import { asRecord, createDirectMetrics } from './directMetrics.ts';
 import type { DirectMetricsOptions } from './directMetrics.ts';
@@ -14,6 +14,68 @@ import type { HostedMcpTool } from './hostedMcp.ts';
 import { responsesMcpOutput, responsesMcpReplay } from './responsesMcp.ts';
 import { hostedActivityHeader, hostedActivityRelay, withoutHostedActivity } from './hostedActivity.ts';
 import { isOpenAIMultiAgent, openAIResponsesCapture, prepareOpenAIResponsesHistory } from './openAIResponsesHistory.ts';
+
+function chatCompletionReasoning(model: Parameters<typeof wrapLanguageModel>[0]['model']) {
+  return wrapLanguageModel({ model, middleware: { specificationVersion: 'v4', async wrapStream({ doStream }) {
+    const result = await doStream();
+    let index = 0;
+    let active: string | undefined;
+    return { ...result, stream: result.stream.pipeThrough(new TransformStream({ transform(part, controller) {
+      // The OpenAI Chat adapter does not interpret compatible-provider reasoning extensions.
+      if (part.type === 'raw') {
+        const choices = asRecord(part.rawValue)?.choices;
+        const choice = Array.isArray(choices) ? choices.map(asRecord).find(choice => choice?.index === 0) : undefined;
+        const delta = asRecord(choice?.delta);
+        const text = [delta?.reasoning_content, delta?.reasoning].find(value => typeof value === 'string' && value.length > 0);
+        if (typeof text === 'string') {
+          if (!active) {
+            active = `chat-reasoning-${index++}`;
+            controller.enqueue({ type: 'reasoning-start', id: active });
+          }
+          controller.enqueue({ type: 'reasoning-delta', id: active, delta: text });
+        }
+      } else if (active && (part.type === 'text-start' || part.type === 'tool-input-start' || part.type === 'finish' || part.type === 'error')) {
+        controller.enqueue({ type: 'reasoning-end', id: active });
+        active = undefined;
+      }
+      controller.enqueue(part);
+    }, flush(controller) {
+      if (active) controller.enqueue({ type: 'reasoning-end', id: active });
+    } })) };
+  } } });
+}
+
+function withNativeReasoning(body: RequestInit['body'], endpoint: NativeChatEndpoint, effort: unknown): RequestInit['body'] {
+  if ((effort !== 'low' && effort !== 'medium' && effort !== 'high') || typeof body !== 'string') return body;
+  const request = asRecord(JSON.parse(body));
+  if (!request) return body;
+  const key = (name: string) => Object.keys(request).find(key => key.toLowerCase() === name) ?? name;
+  const addEffort = (name: string) => {
+    const field = key(name);
+    const config = asRecord(request[field]);
+    if (field in request && (!config || Object.keys(config).some(key => key.toLowerCase() === 'effort'))) return;
+    request[field] = { ...config, effort };
+  };
+  if (endpoint === '/v1/responses') addEffort('reasoning');
+  else if (endpoint === '/v1/chat/completions') {
+    if (!(key('reasoning_effort') in request)) request.reasoning_effort = effort;
+  } else {
+    const thinking = key('thinking');
+    if (!(thinking in request)) request.thinking = { type: 'adaptive' };
+    if (asRecord(request[thinking])?.type === 'adaptive') addEffort('output_config');
+  }
+  return JSON.stringify(request);
+}
+
+function reasoningHistory(messages: ChatMessage[], endpoint: NativeChatEndpoint, model: string) {
+  return messages.map(message => ({ ...message, parts: message.parts.filter(part => {
+    if (part.type !== 'reasoning') return true;
+    if (model !== message.metadata?.model) return false;
+    const anthropic = part.providerMetadata?.anthropic;
+    return endpoint === '/v1/messages' && (!!anthropic?.signature || !!anthropic?.redactedData)
+      || endpoint === '/v1/responses' && !!part.providerMetadata?.openai?.reasoningEncryptedContent;
+  }) }));
+}
 
 type NativeTarget = {
   url: string;
@@ -51,7 +113,8 @@ function nativeAttachmentMessages(messages: ChatMessage[], endpoint: NativeChatE
 export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (model: string, skills: readonly HostedSkill[], hostedMcp: readonly HostedMcpTool[]) => NativeTarget): ChatTransport<ChatMessage> {
   return {
     async sendMessages({ messages, body, headers, abortSignal }) {
-      const { model, tools: definitions, toolChoice, instructions: gatewayInstructions, mcpInstructions, providerMetadata, hostedSkills, hostedMcp } = asRecord(body) ?? {};
+      const { model, tools: definitions, toolChoice, instructions: gatewayInstructions, mcpInstructions, providerMetadata,
+        hostedSkills, hostedMcp, reasoning } = asRecord(body) ?? {};
       if (typeof model !== 'string') throw new GatewayError('Choose a model for this route.');
       const skills = Array.isArray(hostedSkills) ? hostedSkills as HostedSkill[] : [];
       const hosted = endpoint === '/v1/responses' && Array.isArray(hostedMcp) ? hostedMcp as HostedMcpTool[] : [];
@@ -76,7 +139,7 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
       const beta = openAIResponses ? new Headers(headers).get('openai-beta') : null;
       const multiAgent = openAIResponses && isOpenAIMultiAgent(providerMetadata);
       const agentOutput = multiAgent ? openAIResponsesCapture(model) : undefined;
-      const nativeHistory = prepareOpenAIResponsesHistory(mcpReplay?.messages ?? messages, model, multiAgent);
+      const nativeHistory = prepareOpenAIResponsesHistory(reasoningHistory(mcpReplay?.messages ?? messages, endpoint, model), model, multiAgent);
       const definitionsList = Array.isArray(definitions) ? definitions : [];
       const anthropicSearch = anthropic && endpoint === '/v1/messages' &&
         definitionsList.some(definition => asRecord(definition)?.name === clientToolSearchName);
@@ -99,6 +162,7 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
         let body = target.requestBody ? target.requestBody(init.body) : extendNativeTools(init.body, definitions, endpoint, model);
         if (openAIResponses) body = mergeOpenAIResponsesOptions(body, nativeOptions, registerSearch);
         if (anthropic && endpoint === '/v1/messages') body = mergeAnthropicMessagesOptions(body, anthropicOptions, toolChoice);
+        if (!target.requestBody) body = withNativeReasoning(body, endpoint, reasoning);
         if (target.gateway) body = withNativeHostedSkills(body, endpoint, skills, toolChoice);
         body = withResponsesHostedMcp(body, mcp, toolChoice);
         body = nativeHistory.body(body);
@@ -120,7 +184,8 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
       };
       const sdk = { baseURL, apiKey: 'supplied-by-scoped-fetch', fetch: fetcher };
       const openai = endpoint !== '/v1/messages' ? (await import('@ai-sdk/openai')).createOpenAI(sdk) : undefined;
-      const adapter = openai ? openai[endpoint === '/v1/responses' ? 'responses' : 'chat'](target.model)
+      const adapter = openai
+        ? endpoint === '/v1/responses' ? openai.responses(target.model) : chatCompletionReasoning(openai.chat(target.model))
         : (await import('@ai-sdk/anthropic')).createAnthropic(sdk)(target.model);
       abortSignal?.throwIfAborted();
 

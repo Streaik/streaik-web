@@ -58,6 +58,77 @@ async function send(transport, model, extras = {}) {
   return Array.fromAsync(await transport.sendMessages({ chatId: 'conversation', messages, body: { model }, trigger: 'submit-message', ...extras }));
 }
 
+for (const direct of [false, true]) test(`${direct ? 'Direct' : 'Gateway'} native routes serialize only their own reasoning fields`, async () => {
+  const expectations = {
+    [responses]: effort => ({ reasoning: { effort } }),
+    [messagesApi]: effort => ({ thinking: { type: 'adaptive' }, output_config: { effort } }),
+    [chat]: effort => ({ reasoning_effort: effort }),
+  };
+  for (const endpoint of nativeChatEndpoints) {
+    const model = endpoint === messagesApi ? 'anthropic/claude-sonnet-4-6' : 'openai/gpt-5';
+    let posted;
+    const fetcher = async (_url, init) => {
+      posted = JSON.parse(init.body);
+      return response(endpoint, posted.model);
+    };
+    const client = direct ? createDirectChat(providers, id => keys[id], fetcher) : createGateway(root, () => ({}), fetcher);
+    const transport = client.chatTransport(endpoint);
+    for (const reasoning of [undefined, 'low', 'medium', 'high']) {
+      const parts = await send(transport, model, { body: { model, reasoning } });
+      assert.ok(parts.some(part => part.type === 'text-delta'));
+      const fields = Object.fromEntries(Object.entries(posted).filter(([key]) => ['reasoning', 'thinking', 'output_config', 'reasoning_effort'].includes(key)));
+      assert.deepEqual(fields, reasoning ? expectations[endpoint](reasoning) : {}, endpoint);
+    }
+    if (endpoint === responses) {
+      await send(transport, model, { body: { model, reasoning: 'low', providerMetadata: { openai: { reasoning: { summary: 'auto' } } } } });
+      assert.deepEqual(posted.reasoning, { effort: 'low', summary: 'auto' });
+      await send(transport, model, { body: { model, reasoning: 'low', providerMetadata: { openai: { reasoning: { effort: 'high' } } } } });
+      assert.deepEqual(posted.reasoning, { effort: 'high' });
+    }
+    if (endpoint === messagesApi) {
+      const thinking = { type: 'enabled', budget_tokens: 1024 };
+      await send(transport, model, { body: { model, reasoning: 'low', providerMetadata: { anthropic: { thinking } } } });
+      assert.deepEqual(posted.thinking, thinking);
+      assert.equal(posted.output_config, undefined);
+    }
+  }
+});
+
+test('Chat Completions shows compatible reasoning deltas separately from the answer', async () => {
+  const model = 'openrouter/vendor/model';
+  const gateway = createGateway(root, () => ({}), async () => sse([
+    { id: 'c1', model, choices: [{ index: 0, delta: { reasoning_content: 'First. ' }, finish_reason: null }] },
+    { id: 'c1', model, choices: [{ index: 0, delta: { reasoning: 'Second.' }, finish_reason: null }] },
+    { id: 'c1', model, choices: [{ index: 0, delta: { content: 'Answer' }, finish_reason: 'stop' }] },
+    '[DONE]',
+  ]));
+  const parts = await send(gateway.chatTransport(chat), model);
+  assert.deepEqual(parts.filter(part => part.type === 'reasoning-delta').map(part => part.delta), ['First. ', 'Second.']);
+  assert.equal(parts.filter(part => part.type === 'reasoning-end').length, 1);
+  assert.equal(parts.find(part => part.type === 'text-delta')?.delta, 'Answer');
+});
+
+test('Messages follow-ups retain only signed reasoning for the same model', async () => {
+  const model = 'anthropic/claude-sonnet-4-6';
+  const history = [messages[0], { ...messages[1], metadata: { model }, parts: [
+    { type: 'reasoning', text: 'Provider thought', providerMetadata: { anthropic: { signature: 'signed-thought' } } },
+    { type: 'reasoning', text: 'Display only', providerMetadata: { anthropic: { signature: '' } } },
+    ...messages[1].parts,
+  ] }, messages[2]];
+  const requests = [];
+  const gateway = createGateway(root, () => ({}), async (_url, init) => {
+    requests.push(init.body);
+    return response(messagesApi, model);
+  });
+  const transport = gateway.chatTransport(messagesApi);
+  await send(transport, model, { messages: history });
+  await send(transport, 'anthropic/claude-opus-4-6', { messages: history });
+  assert.match(requests[0], /signed-thought/);
+  assert.doesNotMatch(requests[0], /Display only/);
+  assert.doesNotMatch(requests[1], /signed-thought|Provider thought|Display only/);
+  assert.match(requests[1], /Earlier reply/);
+});
+
 for (const useDirect of [true, false]) test(`${useDirect ? 'Direct' : 'Gateway'} OpenAI keeps agent activity separate and replays it across routes`, async () => {
   const model = 'openai/gpt-6-luna';
   const rootAgent = { agent_name: '/root' }, child = { agent_name: '/root/research' };

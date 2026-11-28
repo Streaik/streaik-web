@@ -57,7 +57,7 @@ export const composerToolDefaults: Pick<ChatPreferences, 'delay' | 'plugins' | '
 };
 export const defaultChatPreferences: ChatPreferences = { ...composerToolDefaults, ...toolConfigurationDefaults, convertAttachmentsToText: false, pinnedViews: [],
   dictate: true, showContextSize: true, showMessageTokens: true, showProviderLogo: true, showMetrics: false, showDecisions: false,
-  toolOutput: toolOutputDefaults, mcp: defaultMcpPreferences, transcriptionSplit: defaultTranscriptionSplit, providerSettings: {}, reasoning: 'medium' };
+  toolOutput: toolOutputDefaults, mcp: defaultMcpPreferences, transcriptionSplit: defaultTranscriptionSplit, providerSettings: {}, reasoning: 'none' };
 
 type StoredPreferences = Partial<Omit<ChatPreferences, 'toolOutput' | 'mcp' | 'providerSettings'> & {
   toolOutput: Partial<ToolOutputPreferences>; mcp: Partial<McpPreferences>; providerSettings: unknown;

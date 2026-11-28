@@ -294,7 +294,7 @@ export function ChatComposer(props: ComposerProps) {
             title={t('Chat settings')} aria-haspopup="dialog" onClick={props.onChatSettings}><ChatIcon name="settings" /></Button></span>
           {reasoning && <Tooltip content={t('Reasoning level')} visualOnly><span className="chat-composer-reasoning">
             <Select label={t('Reasoning level')} value={reasoning.value} disabled={busy || preparing}
-              options={[{ value: 'none', label: t('None') }, { value: 'low', label: t('Low') },
+              options={[{ value: 'none', label: t('Default') }, { value: 'low', label: t('Low') },
                 { value: 'medium', label: t('Medium') }, { value: 'high', label: t('High') }]}
               onValueChange={value => {
                 const level = reasoningLevels.find(level => level === value);

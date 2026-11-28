@@ -1104,7 +1104,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       resourceServers: new Map(resourceServers.map(({ record }) => [record.id, record.endpoint])),
       hosted: hostedRoute && hostedSelection ? { endpoint: hostedRoute.endpoint, selection: hostedSelection } : undefined,
       providerSettings: !hostedRoute ? turnProviderSettings : undefined,
-      reasoning: !hostedRoute && isApiChat(runRoute) && preferences.reasoning !== 'none' ? preferences.reasoning : undefined,
+      reasoning: !hostedRoute && !voiceProtocol && preferences.reasoning !== 'none' ? preferences.reasoning : undefined,
       skillArchives: chatSkills.archives.length ? { skills: chatSkills.archives, bundles: new Map() } : undefined };
   }
 
@@ -1544,7 +1544,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
             mcp={view === 'chat' && !hostedRoute && mcpServers.available ? { count: new Set([...mcpSelection.entries, ...agentMcp.entries].map(entry => entry.record.id)).size,
               disabled: routesLocked, open: () => setModelContextOpen(true), servers: connectedMcp, connect: mcpServers.connection } : undefined}
             onChatSettings={() => chatSettings.current?.showModal()} onViewContext={() => setContextOpen(true)}
-            reasoning={!voiceProtocol && !hostedRoute && isApiChat(runRoute) ? { value: preferences.reasoning,
+            reasoning={!voiceProtocol && !hostedRoute ? { value: preferences.reasoning,
               onChange: reasoning => onPreferences({ ...preferences, reasoning }) } : undefined}
             onSend={(parts) => {
               if (canSend && !chatVoiceRun.current) { setVoiceNotice(''); void submitChat(parts); }
