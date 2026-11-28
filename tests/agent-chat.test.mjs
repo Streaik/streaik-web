@@ -68,7 +68,8 @@ test('hosted catalog and API Chat scope credentials and send the conversation an
     assert.equal(init.headers.get('authorization'), null);
     if (url.endsWith('/v1/models')) {
       assert.equal(init.headers.get('x-openai-key'), null);
-      return Response.json({ data: [{ id: 'catalog/greeter', name: 'Greeting' }, { id: '..' }, { id: 'catalog/greeter' }] });
+      return Response.json({ data: [{ id: 'catalog/greeter', name: 'Greeting', owned_by: 'Team', tags: ['Support', 42] },
+        { id: '..' }, { id: 'catalog/greeter' }] });
     }
     if (url.endsWith('/v1/models/catalog%2Fgreeter')) {
       assert.equal(init.headers.get('x-openai-key'), null);
@@ -81,6 +82,8 @@ test('hosted catalog and API Chat scope credentials and send the conversation an
   });
   const agents = await backend.listAgents();
   assert.deepEqual(agents.map(agent => agent.id), ['catalog/greeter']);
+  assert.equal(agents[0].owned_by, 'Team');
+  assert.deepEqual(agents[0].tags, ['Support']);
   assert.deepEqual(await backend.getAgent(agents[0].id), definition);
   const stream = await backend.chatTransport('/api/chat', { id: definition.name, definition, modelIds: [modelId] }).sendMessages({
     chatId: 'chat', trigger: 'submit-message', messages: [message], headers: { authorization: 'Bearer ignored' }, body: { model: 'ignored', tools },

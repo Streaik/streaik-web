@@ -54,6 +54,21 @@ test('only model families usable with the current API Chat route appear', () => 
   assert.throws(() => readChatModels({ data: {} }), /invalid model list/);
 });
 
+test('model creation times survive catalog normalization, duplicate rows and chat projection', () => {
+  const payload = { data: [
+    { id: model, created: 1700000000 },
+    { id: model, created: null, created_at: 'not a date' },
+    { id: 'anthropic/claude-new', created_at: '2025-01-01T01:00:00+01:00' },
+    { id: 'anthropic/claude-priority', created: 42, created_at: 43 },
+    { id: 'anthropic/claude-undated', created_at: '0' },
+  ] };
+  const expected = [['anthropic/claude-new', 1735689600], ['anthropic/claude-priority', 42],
+    ['anthropic/claude-undated', undefined], [model, 1700000000]];
+  for (const models of [readModelCatalog(payload), readChatModels(payload)]) {
+    assert.deepEqual(models.map(({ id, created }) => [id, created]), expected);
+  }
+});
+
 test('gateway chat accepts Google agents and Fireworks chat without admitting transcription or decisions', () => {
   const data = [
     { id: 'google/agents/trip-planner', type: 'language', tags: ['agent'] },

@@ -62,6 +62,47 @@ async function send(page: Page, text: string) {
   await page.getByRole('button', { name: 'Send', exact: true }).click();
 }
 
+test('agent picker groups by owner, then each tag, then Central or Local', async ({ page }) => {
+  await page.addInitScript(() => {
+    const scope = JSON.stringify([new URL('/gateway/api/chat', location.href).href, 'byok']);
+    const key = `streaik.agents.v1:${scope}`;
+    const local = [
+      { id: 'alpha', definition: { name: 'alpha Desk', owned_by: ' Workspace ', tags: ['Ignored'] } },
+      { id: 'shared', definition: { name: 'Shared Agent', tags: [' Ops ', 'Ops', '', 'Support'] } },
+    ].map(({ id, definition }) => ({ id, definition: { description: 'Test agent', instructions: 'Answer briefly.', ...definition } }));
+    localStorage.setItem(key, JSON.stringify({ version: 1, assignments: {}, overrides: [], local }));
+  });
+  await page.route('**/test-agents/v1/models', route => route.fulfill({ json: { data: [
+    { id: 'zulu-desk', name: 'Zulu Desk', owned_by: 'Workspace', tags: ['Ignored'] },
+    { id: 'beta-ops', name: 'beta Ops', owned_by: ' ', tags: ['Ops', 42] },
+    { id: 'zulu-central', name: 'Zulu Central' },
+    { id: 'alpha-central', name: 'alpha Central', tags: [' '] },
+  ] } }));
+  await start(page);
+  await agentPicker(page).click();
+  const popup = page.getByRole('dialog', { name: 'Agent', exact: true });
+  const list = popup.getByRole('listbox');
+  const group = (name: string) => list.getByRole('group', { name, exact: true });
+  await expect(group('Workspace').getByRole('option')).toHaveText(['alpha Desk', 'Zulu Desk']);
+  await expect(group('Ops').getByRole('option')).toHaveText(['beta Ops', 'Shared Agent']);
+  await expect(group('Support').getByRole('option')).toHaveText('Shared Agent');
+  await expect(group('Central').getByRole('option')).toHaveText(['alpha Central', 'Zulu Central']);
+  await expect(group('Local').getByRole('option', { name: 'ChatAgent', exact: true })).toBeVisible();
+  await expect(group('Ignored')).toHaveCount(0);
+  await expect(list.getByRole('group')).toHaveCount(5);
+
+  const search = popup.getByRole('combobox', { name: 'Search agents', exact: true });
+  await search.fill('Shared Agent');
+  const opsId = await group('Ops').getByRole('option').getAttribute('id');
+  const supportId = await group('Support').getByRole('option').getAttribute('id');
+  expect(opsId).not.toBe(supportId);
+  await expect(search).toHaveAttribute('aria-activedescendant', opsId!);
+  await search.press('ArrowDown');
+  await expect(search).toHaveAttribute('aria-activedescendant', supportId!);
+  await search.press('Enter');
+  await expect(agentPicker(page)).toHaveText('Shared Agent');
+});
+
 test('agent mode prefers hosted API Chat and offers four hosted routes', async ({ page }) => {
   await page.route('**/test-agents/v1/models', async route => {
     expect(await route.request().headerValue('x-openai-key')).toBeNull();

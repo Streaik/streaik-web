@@ -29,7 +29,8 @@ export function useAgentChat({ active, backend, ready, scope, revision, entries,
   const hosted = !!remote;
   const route = resolveAgentChatRoute(requested, hosted, gateway, direct);
   const remoteOptions = (remote ?? []).map(agent => ({ ...agent, key: `remote:${agent.id}`, hosted: true }));
-  const localOptions = entries.map(entry => ({ key: entry.key, name: entry.definition.name, definition: entry.definition, id: entry.id }));
+  const localOptions = entries.map(({ key, definition, id }) => ({ key, name: definition.name, definition, id,
+    owned_by: typeof definition.owned_by === 'string' ? definition.owned_by : undefined, tags: definition.tags ?? undefined }));
   const options = [...localOptions, ...remoteOptions];
   const option = options.find(({ key }) => key === selectedKey);
   const remoteId = option && 'hosted' in option ? option.id : undefined;

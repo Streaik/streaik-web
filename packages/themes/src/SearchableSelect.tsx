@@ -9,6 +9,8 @@ type Props = (SelectProps | MultiSelectProps) & {
   search: SelectSearch; icons: Pick<IconSet, 'check' | 'chevronDown' | 'search'>; Tooltip: ComponentType<TooltipProps>;
 };
 const gutter = 8;
+// An option may share its selected value with a row in another group.
+const rowKey = ({ group, value }: SelectOption) => JSON.stringify([group?.id, value]);
 
 export function SearchableSelect(props: Props) {
   const { label, id, className, options, disabled, placeholder, search, icons, multiple, Tooltip } = props;
@@ -17,7 +19,7 @@ export function SearchableSelect(props: Props) {
   const popupId = `${baseId}-popup`;
   const [expanded, setExpanded] = useState(false);
   const [query, setQuery] = useState('');
-  const [activeValue, setActiveValue] = useState<string>();
+  const [activeKey, setActiveKey] = useState<string>();
   const root = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -37,7 +39,8 @@ export function SearchableSelect(props: Props) {
   });
 
   const selectedValues = new Set(multiple ? props.value : [props.value]);
-  const selected = options.filter(option => selectedValues.has(option.value));
+  const selected = [...new Map(options.filter(option => selectedValues.has(option.value))
+    .map(option => [option.value, option])).values()];
   const summary = multiple && selected.length > 1
     ? props.selectionSummary ?? selected.map(({ label }) => label).join(', ') : selected[0]?.label;
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -46,16 +49,16 @@ export function SearchableSelect(props: Props) {
     return terms.every(term => fields.some(field => field.includes(term)));
   }) : options) : [];
   const visible = sections.flatMap(({ items }) => items);
-  const active = visible.find(option => option.value === activeValue) ?? (terms.length ? visible[0] : undefined);
-  const optionIndices = new Map(open ? options.map(({ value }, index) => [value, index] as const) : []);
-  const optionId = (option: SelectOption) => `${baseId}-option-${optionIndices.get(option.value)}`;
+  const active = visible.find(option => rowKey(option) === activeKey) ?? (terms.length ? visible[0] : undefined);
+  const optionIndices = new Map(open ? options.map((option, index) => [option, index] as const) : []);
+  const optionId = (option: SelectOption) => `${baseId}-option-${optionIndices.get(option)}`;
   const activeId = active && optionId(active);
   const { check: Check, chevronDown: Chevron, search: Search } = icons;
 
   function close(restoreFocus = false) {
     setExpanded(false);
     setQuery('');
-    setActiveValue(undefined);
+    setActiveKey(undefined);
     if (restoreFocus) refs.reference.current?.focus({ preventScroll: true });
   }
 
@@ -63,7 +66,7 @@ export function SearchableSelect(props: Props) {
     if (props.multiple) {
       props.onValueChange(selectedValues.has(option.value)
         ? props.value.filter(value => value !== option.value) : [...props.value, option.value]);
-      setActiveValue(option.value);
+      setActiveKey(rowKey(option));
       input.current?.focus({ preventScroll: true });
       return;
     }
@@ -111,7 +114,8 @@ export function SearchableSelect(props: Props) {
         if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
         event.preventDefault();
         const ordered = groupSelectOptions(options).flatMap(({ items }) => items);
-        setActiveValue((event.key === 'ArrowDown' ? ordered[0] : ordered.at(-1))?.value);
+        const next = event.key === 'ArrowDown' ? ordered[0] : ordered.at(-1);
+        setActiveKey(next && rowKey(next));
         setExpanded(true);
         if (open) input.current?.focus({ preventScroll: true });
       }}>
@@ -137,7 +141,7 @@ export function SearchableSelect(props: Props) {
           aria-autocomplete={multiple ? undefined : 'list'} aria-activedescendant={activeId}
           autoComplete="off" value={query} placeholder={search.placeholder ?? 'Search…'} onChange={(event) => {
             setQuery(event.currentTarget.value);
-            setActiveValue(undefined);
+            setActiveKey(undefined);
             if (list.current) list.current.scrollTop = 0;
           }} onKeyDown={(event) => {
             if (event.nativeEvent.isComposing) return;
@@ -149,7 +153,8 @@ export function SearchableSelect(props: Props) {
               const index = active ? visible.indexOf(active) : -1;
               const next = event.key === 'ArrowDown' ? Math.min(index + 1, visible.length - 1)
                 : index < 0 ? visible.length - 1 : Math.max(0, index - 1);
-              setActiveValue(visible[next]?.value);
+              const nextOption = visible[next];
+              setActiveKey(nextOption && rowKey(nextOption));
             }
           }} />
       </div>

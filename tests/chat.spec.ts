@@ -1427,6 +1427,30 @@ test('composer attaches picked files, dropped files and links, with opt-in local
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('Summarize these documents.');
 });
 
+test('model picker sorts dated models newest first within each provider group', async ({ page }) => {
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [
+    { id: 'anthropic/claude-old', name: 'Claude A older', created: 1700000000 },
+    { id: 'anthropic/claude-new-b', name: 'Claude Z newest', created_at: '2025-01-01T00:00:00Z' },
+    { id: 'anthropic/claude-new-a', name: 'Claude Y newest', created: 1735689600 },
+    { id: 'anthropic/claude-undated', name: 'Claude B undated' },
+    { id: 'anthropic/claude-invalid', name: 'Claude C undated', created_at: 'invalid' },
+    { id: model, name: 'GPT Mini', created: 1800000000 },
+  ] } }));
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await modelPicker(page).click();
+  const popup = page.getByRole('dialog', { name: 'Model', exact: true });
+  const list = popup.getByRole('listbox');
+  const claude = list.getByRole('group', { name: 'Anthropic', exact: true });
+  await expect(list.getByRole('group').first()).toHaveAttribute('aria-label', 'Anthropic');
+  await expect(claude.getByRole('option')).toHaveText([
+    'Claude Y newest', 'Claude Z newest', 'Claude A older', 'Claude B undated', 'Claude C undated',
+  ]);
+  await expect(list.getByRole('group', { name: 'OpenAI', exact: true }).getByRole('option')).toHaveText('GPT Mini');
+  await popup.getByRole('searchbox', { name: 'Search models', exact: true }).fill('Claude newest');
+  await expect(claude.getByRole('option')).toHaveText(['Claude Y newest', 'Claude Z newest']);
+});
+
 test('model picker groups and searches compatible models on a narrow screen, with keyboard selection', async ({ page }) => {
   const secondModel = 'openai/gpt-5-nano';
   const longName = `Test Claude ${'with a longer model name '.repeat(8).trim()}`;

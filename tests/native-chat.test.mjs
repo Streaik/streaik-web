@@ -475,7 +475,7 @@ test('Direct discovers models only from keyed catalog providers, with native pag
     seen.push(url);
     if (url === 'https://api.openai.com/v1/models') {
       assert.equal(init.headers.get('authorization'), 'Bearer openai-key');
-      return Response.json({ data: [{ id: 'gpt-4.1-mini' }, { id: 'gpt-image-1' }] });
+      return Response.json({ data: [{ id: 'gpt-4.1-mini', created: 1700000000 }, { id: 'gpt-image-1' }] });
     }
     if (url === 'https://openrouter.ai/api/v1/models') {
       assert.equal(init.headers.get('authorization'), 'Bearer openrouter-key');
@@ -485,11 +485,11 @@ test('Direct discovers models only from keyed catalog providers, with native pag
     assert.equal(init.headers.get('authorization'), null);
     if (url === 'https://api.anthropic.com/v1/models') return Response.json({ data: [{ id: 'claude-one', type: 'model' }], has_more: true, last_id: 'id & suffix' });
     assert.equal(url, 'https://api.anthropic.com/v1/models?after_id=id%20%26%20suffix');
-    return Response.json({ data: [{ id: 'claude-two', type: 'model' }], has_more: false });
+    return Response.json({ data: [{ id: 'claude-two', type: 'model', created_at: '2025-01-01T00:00:00Z' }], has_more: false });
   });
   assert.deepEqual(direct.endpoints(), [...nativeChatEndpoints]);
-  assert.deepEqual((await direct.listModelCatalog()).map(model => model.id),
-    ['anthropic/claude-one', 'anthropic/claude-two', 'openai/gpt-4.1-mini', 'openrouter/vendor/model']);
+  assert.deepEqual((await direct.listModelCatalog()).map(({ id, created }) => [id, created]),
+    [['anthropic/claude-one', undefined], ['anthropic/claude-two', 1735689600], ['openai/gpt-4.1-mini', 1700000000], ['openrouter/vendor/model', undefined]]);
   assert.equal(seen.length, 4);
   await assert.rejects(send(direct.chatTransport(responses), 'openrouter/vendor/model'), /does not support/);
   assert.equal(seen.length, 4);

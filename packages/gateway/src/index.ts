@@ -73,7 +73,8 @@ export { maxSkillZipBytes } from './skills.ts';
 
 export type CredentialRequest = { kind: 'models' } | { kind: 'chat' | 'decision' | 'image' | 'video' | 'skill' | 'transcription' | 'speech' | 'realtime'; provider: string };
 export type Credentials = (request: CredentialRequest) => HeadersInit | Promise<HeadersInit>;
-export type ChatModel = { id: string; name: string; provider: string };
+/** `created` is the model creation time in Unix seconds, when the provider supplies it. */
+export type ChatModel = { id: string; name: string; provider: string; created?: number };
 export type CatalogModel = ChatModel & {
   type?: string;
   tags: readonly string[];
@@ -138,6 +139,14 @@ function tokenLimit(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
+function modelCreationTime(value: unknown): number | undefined {
+  if (typeof value === 'number') return Number.isSafeInteger(value) ? value : undefined;
+  // Direct Anthropic listings use ISO 8601 in created_at instead of Unix seconds.
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}(?:T.*(?:Z|[+-]\d{2}:\d{2}))?$/.test(value)) return;
+  const milliseconds = Date.parse(value);
+  if (Number.isFinite(milliseconds)) return milliseconds / 1000;
+}
+
 export function readModelCatalog(payload: unknown): CatalogModel[] {
   if (!payload || typeof payload !== 'object' || !('data' in payload) || !Array.isArray(payload.data)) {
     throw new GatewayError('The gateway returned an invalid model list.');
@@ -162,8 +171,10 @@ export function readModelCatalog(payload: unknown): CatalogModel[] {
     const key = JSON.stringify([id, type]);
     const previous = result.get(key);
     const pricing = readTokenPricing(item.pricing) ?? previous?.pricing;
+    const created = modelCreationTime(item.created) ?? modelCreationTime(item.created_at) ?? previous?.created;
     result.set(key, { id, provider, name: name && name !== id ? name : previous?.name ?? id.slice(slash + 1), type,
       tags: [...new Set([...(previous?.tags ?? []), ...tags])], description: text(item.description) ?? previous?.description,
+      ...(created !== undefined && { created }),
       ...(pricing && { pricing }),
       contextWindow: tokenLimit(item.context_window) ?? previous?.contextWindow, maxTokens: tokenLimit(item.max_tokens) ?? previous?.maxTokens });
   }
@@ -182,7 +193,8 @@ export function pickChatCatalogModels(models: readonly CatalogModel[]): CatalogM
 }
 
 export function pickChatModels(models: readonly CatalogModel[]): ChatModel[] {
-  return pickChatCatalogModels(models).map(({ id, name, provider }) => ({ id, name, provider }));
+  return pickChatCatalogModels(models).map(({ id, name, provider, created }) => ({ id, name, provider,
+    ...(created !== undefined && { created }) }));
 }
 
 export function openAiVoiceProtocol(id: string): 'live' | 'realtime' | undefined {

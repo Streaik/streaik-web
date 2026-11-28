@@ -5,7 +5,7 @@ import { expectEventStream, GatewayError, gatewayChatEndpoints, normalizeGateway
 import type { ChatMessage, GatewayChatEndpoint } from './index.ts';
 import { nativeChatTransport } from './nativeChat.ts';
 
-export type HostedAgent = { id: string; name: string; description?: string };
+export type HostedAgent = { id: string; name: string; description?: string; owned_by?: string; tags?: readonly string[] };
 export type HostedAgentSelection = { id: string; modelIds: readonly string[]; definition?: object };
 export type AgentBackendCredentials = (request: { kind: 'catalog' } | { kind: 'chat'; modelIds: readonly string[] }) => HeadersInit | Promise<HeadersInit>;
 
@@ -32,7 +32,9 @@ export function createAgentBackend(base: URL, credentials: AgentBackendCredentia
         if (!entry || typeof id !== 'string' || !id.trim() || id === '.' || id === '..' || seen.has(id)) return [];
         seen.add(id);
         return [{ id, name: typeof entry.name === 'string' && entry.name.trim() ? entry.name : id,
-          description: typeof entry.description === 'string' ? entry.description : undefined }];
+          description: typeof entry.description === 'string' ? entry.description : undefined,
+          ...(typeof entry.owned_by === 'string' && { owned_by: entry.owned_by }),
+          ...(Array.isArray(entry.tags) && { tags: entry.tags.filter((tag): tag is string => typeof tag === 'string') }) }];
       });
     },
     async getAgent(id: string, signal?: AbortSignal): Promise<unknown> {
