@@ -9,10 +9,10 @@ export type SpeechOptions = { voice?: string; outputFormat?: string; instruction
 type SpeechParameter = string | number | boolean | null | SpeechParameter[] | SpeechProviderConfig;
 export type SpeechProviderConfig = { [key: string]: SpeechParameter | undefined };
 export type SpeechRequest = SpeechOptions & {
-  model: string; text: string; streamFormat?: 'audio' | 'sse'; providerOptions?: Record<string, SpeechProviderConfig>;
+  model: string; text: string; outputSampleRate?: number; streamFormat?: 'audio' | 'sse'; providerOptions?: Record<string, SpeechProviderConfig>;
 };
 export type SpeechResponse = { audio: Blob; format?: string; model: string; timestamp: string; warnings: string[] };
-export type SpeechChunk = (bytes: Uint8Array<ArrayBuffer>, mediaType: string) => void | Promise<void>;
+export type SpeechChunk = (bytes: Uint8Array<ArrayBuffer>, mediaType: string, pcmRate?: number) => void | Promise<void>;
 
 const outputLimit = 25 * 1024 * 1024;
 const mediaTypes: Readonly<Record<string, string>> = {
@@ -22,7 +22,7 @@ const mediaTypes: Readonly<Record<string, string>> = {
   pcm16: 'application/octet-stream', 'pcm_s16le': 'application/octet-stream',
 };
 
-export function speechRequestBody(endpoint: GatewaySpeechEndpoint, { model, text, voice, outputFormat, instructions, speed, language,
+export function speechRequestBody(endpoint: GatewaySpeechEndpoint, { model, text, voice, outputFormat, outputSampleRate, instructions, speed, language,
   streamFormat, providerOptions }: SpeechRequest, provider: string) {
   const selected = providerOptions && Object.hasOwn(providerOptions, provider) ? providerOptions[provider] : undefined;
   const generic = { voice, instructions, speed };
@@ -34,7 +34,7 @@ export function speechRequestBody(endpoint: GatewaySpeechEndpoint, { model, text
   }
   const common = { ...generic, model, language, providerOptions: selected ? { [provider]: selected } : undefined };
   return endpoint === '/api/speech/stream'
-    ? { ...common, text: [{ type: 'text', text }], outputFormat: outputFormat ? { type: outputFormat } : undefined }
+    ? { ...common, text: [{ type: 'text', text }], outputFormat: outputFormat ? { type: outputFormat, rate: outputSampleRate } : undefined }
     : { ...common, text, outputFormat };
 }
 
@@ -131,12 +131,15 @@ export async function readSpeech(endpoint: GatewaySpeechEndpoint, response: Resp
   let format = request.outputFormat, timestamp = new Date().toISOString(), rate: number | undefined;
   const warnings: string[] = [], chunks: Uint8Array<ArrayBuffer>[] = [];
   let size = 0;
+  const isPcm = () => /^(?:pcm|pcm16|pcm_s16le|audio\/pcm|l16)$/i.test(format ?? '') &&
+    (type === 'application/octet-stream' || type === 'audio/pcm' || type === 'audio/l16' && request.model.startsWith('google/'));
+  const validRate = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 8000 && value <= 192000;
   async function append(bytes: Uint8Array<ArrayBuffer>, progressive: boolean) {
     if (!bytes.length) return;
     size += bytes.length;
     if (size > outputLimit) throw new GatewayError('Speech audio is too large.');
     chunks.push(bytes);
-    if (progressive) await onChunk?.(bytes, type);
+    if (progressive) await onChunk?.(bytes, type, isPcm() && validRate(rate) ? rate : undefined);
     signal?.throwIfAborted();
   }
 
@@ -189,10 +192,9 @@ export async function readSpeech(endpoint: GatewaySpeechEndpoint, response: Resp
   }
   signal?.throwIfAborted();
   if (!size) throw new GatewayError('The gateway did not return speech audio.');
-  if ((type === 'application/octet-stream' || type === 'audio/pcm' || type === 'audio/l16' && request.model.startsWith('google/')) &&
-      /^(?:pcm|pcm16|pcm_s16le|audio\/pcm|l16)$/i.test(format ?? '')) {
+  if (isPcm()) {
     rate ??= /^(openai|google)\//.test(request.model) ? 24000 : undefined;
-    if (rate && Number.isInteger(rate) && rate >= 8000 && rate <= 192000 && size % 2 === 0) {
+    if (validRate(rate) && size % 2 === 0) {
       chunks.unshift(wavHeader(size, rate));
       type = 'audio/wav';
       format = 'wav';

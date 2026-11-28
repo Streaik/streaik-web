@@ -29,6 +29,9 @@ import { useAgentChat } from './useAgentChat';
 import { defaultAgentModelIds, resolveModelSelection } from './modelSelection';
 import { selectDictationTarget } from './composerDictation';
 import type { ComposerDictation } from './composerDictation';
+import { chatVoiceSpeech, chatVoiceTranscription, transcriptionVoiceOptions } from './chatVoiceModels';
+import { createChatVoiceOutput } from './chatVoiceSpeech';
+import { runMicrophone } from './liveTranscription';
 import { dictationFormat } from './microphone';
 import { liveSession, realtimeSession } from './realtimeSettings';
 import { startVoiceConversation, voiceHistory } from './voiceConversation';
@@ -443,6 +446,8 @@ function HistoryChat({ appName, gateway, connection, scope, models, route, onRou
 
 type HostedTurn = { endpoint: GatewayChatEndpoint; selection: HostedAgentSelection };
 type VoiceRun = { controller: AbortController; session?: VoiceSession };
+type ChatVoiceRun = { controller: AbortController; output?: ReturnType<typeof createChatVoiceOutput>; queue: string[];
+  hearing: boolean; reply?: { userId: string; settled: boolean; silent: boolean; interrupted?: boolean } };
 type TurnDecision = { choice: ModelDecision; agent?: { context: DecisionAgentContext;
   settings: ReadonlyMap<string, ProviderChatSettings | undefined> } };
 type Turn = { model: string; route: ChatRoute; tools: ChatTool[]; context?: RequestContext; hosted?: HostedTurn;
@@ -525,12 +530,19 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const [deciding, setDeciding] = useState(false);
   const [turn, setTurn] = useState<Turn>();
   const voiceRun = useRef<VoiceRun | undefined>(undefined);
+  const chatVoiceRun = useRef<ChatVoiceRun | undefined>(undefined);
   const [voicePhase, setVoicePhase] = useState<'connecting' | 'active' | 'closing'>();
   const [voiceNotice, setVoiceNotice] = useState('');
+  const [voicePreview, setVoicePreview] = useState('');
+  const [, updateVoiceQueue] = useState(0);
   useEffect(() => () => {
     const run = voiceRun.current;
     voiceRun.current = undefined;
     run?.controller.abort();
+    const chat = chatVoiceRun.current;
+    chatVoiceRun.current = undefined;
+    chat?.controller.abort();
+    chat?.output?.close();
   }, []);
   const chatSettings = useRef<HTMLDialogElement>(null);
   const [contextOpen, setContextOpen] = useState(false);
@@ -556,12 +568,15 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const mediaView = view === 'images' || view === 'videos' || view === 'transcriptions' || view === 'speech';
   const dictateChat = preferences.dictate && view === 'chat' && !locationIssue;
   const dictateView = dictateChat || preferences.dictate && (view === 'images' || view === 'videos' || view === 'speech');
-  const transcriptionModelIds = dictateView ? defaultAgentModelIds(assignedAgent(agents, 'transcription')) : [];
-  const speechModelIds = defaultAgentModelIds(assignedAgent(agents, 'speech'));
+  const transcriptionAgent = assignedAgent(agents, 'transcription');
+  const speechAgent = assignedAgent(agents, 'speech');
+  const transcriptionModelIds = dictateView ? defaultAgentModelIds(transcriptionAgent) : [];
+  const speechModelIds = defaultAgentModelIds(speechAgent);
   const [speechSelection, setSpeechSelection] = useState<string[]>();
   useEffect(() => { if (view !== 'speech') setSpeechSelection(undefined); }, [view]);
   const fetchGatewayModels = route.mode === 'direct' && (view === 'agents' ||
-    hasGateway && (mediaView || transcriptionModelIds.length > 0 || view === 'chat' && !locationIssue && speechModelIds.length > 0));
+    hasGateway && (mediaView || transcriptionModelIds.length > 0 || view === 'chat' && !locationIssue &&
+      (speechModelIds.length > 0 || !!chatAgent?.transcription || !agentMode && !!transcriptionAgent)));
   const gatewayModels = useModels(gateway, connection.ready && fetchGatewayModels, connection.modelRevision ?? 0, scope);
   // Execution decisions are input for one request; completed receipts are the replayable history.
   const sentNativeApprovals = useRef(new Set<string>());
@@ -573,6 +588,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       async sendMessages(request) {
         const last = request.messages.at(-1);
         const previous = request.trigger === 'submit-message' && last?.role === 'assistant' ? last : undefined;
+        const usedIds = new Set(request.messages.map(message => message.id));
         request = { ...request, messages: withoutDecisionActivity(request.messages) };
         const { route, decision, context, providerSettings: initialSettings, clientToolSearch, hosted, loadHostedSkills, ...body } = (request.body ?? {}) as {
           model?: string; route?: ChatRoute; decision?: TurnDecision; context?: RequestContext; tools?: ChatRequestTool[];
@@ -631,7 +647,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           return withReplyMetadata(api ? stream.pipeThrough(new TransformStream({ transform(chunk, controller) {
             controller.enqueue(chunk.type === 'tool-input-available' ? { ...chunk,
               toolMetadata: { ...chunk.toolMetadata, streaikAgent: hosted.selection.id } } : chunk);
-          } })) : stream, body.model, previous);
+          } })) : stream, body.model, previous, usedIds);
         }
         let model = body.model;
         let providerSettings = initialSettings;
@@ -646,7 +662,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
                 if (chunk.type === 'error') throw new GatewayError(chunk.errorText);
                 controller.enqueue(chunk);
               },
-            })) : source, model, previous);
+            })) : source, model, previous, usedIds);
             return activity ? withDecisionActivity({ stream }, activity, model) : stream;
           } catch (error) {
             if (!activity || request.abortSignal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
@@ -1084,6 +1100,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     setToolBusy(false);
     setTurn(undefined);
     void stop();
+    closeChatVoice();
     const run = voiceRun.current;
     if (!run) return;
     if (run.session) { setVoicePhase('closing'); run.session.stop(); }
@@ -1112,11 +1129,13 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     : toolBusy && turn ? t('Running tool…') : undefined;
   const agentModels = route.mode === 'direct' ? gatewayModels.result : result;
   const mediaModels = hasGateway ? agentModels : undefined;
-  const dictationTarget = dictateView && transcriptionModelIds.length > 0 && mediaModels && !mediaModels.error &&
-    typeof globalThis.navigator?.mediaDevices?.getUserMedia === 'function' && selectDictationTarget(mediaModels.catalog, transcriptionModelIds, {
-      socket: typeof WebSocket !== 'undefined' && typeof AudioContext !== 'undefined' && typeof AudioWorkletNode !== 'undefined',
-      peer: typeof RTCPeerConnection !== 'undefined', recorder: !!dictationFormat(),
-    });
+  const microphone = typeof globalThis.navigator?.mediaDevices?.getUserMedia === 'function';
+  const capture = { socket: typeof WebSocket !== 'undefined' && typeof AudioContext !== 'undefined' && typeof AudioWorkletNode !== 'undefined',
+    peer: typeof RTCPeerConnection !== 'undefined' };
+  const dictationTarget = dictateView && transcriptionModelIds.length > 0 && mediaModels && !mediaModels.error && microphone &&
+    selectDictationTarget(mediaModels.catalog, transcriptionModelIds, { ...capture, recorder: !!dictationFormat() });
+  const voiceTranscriber = !voiceProtocol && view === 'chat' && !locationIssue && microphone && mediaModels && !mediaModels.error
+    ? chatVoiceTranscription(mediaModels.catalog, capture, chatAgent, agentMode ? undefined : transcriptionAgent) : undefined;
   const dictation: ComposerDictation = dictateView ? dictationTarget ? { ...dictationTarget, gateway } : null : undefined;
   const mediaRouter = (view === 'images' || view === 'speech') && mediaModels ? modelDecisionRouter(agents, mediaModels.catalog, decisions.selected) : undefined;
   const mediaStatus = !hasGateway ? t('No gateway is configured.') : !connection.ready ? connection.emptyMessage
@@ -1153,9 +1172,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     : undefined;
   const modelId = agentMode ? hostedSelection?.id ?? browserModel?.id : selected[0]?.id;
   const socketVoice = voiceProtocol === 'google' || voiceProtocol === 'xai';
-  const canUseVoice = typeof globalThis.navigator?.mediaDevices?.getUserMedia === 'function' && (socketVoice
-    ? typeof WebSocket !== 'undefined' && typeof AudioContext !== 'undefined' && typeof AudioWorkletNode !== 'undefined'
-    : typeof RTCPeerConnection !== 'undefined');
+  const canUseVoice = microphone && (socketVoice ? capture.socket : capture.peer);
   const voiceAgents = (agents?.entries ?? []).filter(({ definition }) => !!browserAgentModel(definition, textCatalog));
   const totalCost = useMemo(() => conversationCost(messages), [messages]);
   const contextUsage = preferences.showContextSize ? latestContextUsage(messages, agentMode ? browserModel ? [browserModel] : [] : selected) : undefined;
@@ -1196,9 +1213,100 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     : modelChoice && { choice: modelChoice };
   const routesLocked = busy || !!voicePhase || toolBusy || (status === 'ready' && toolParts.length > 0);
   const toolCapabilities = chatToolCapabilities(runRoute, modelId);
-  const canSend = connection.ready && !!modelId && !routesLocked && !restoringSkills && !connectingMcp &&
+  const chatReady = connection.ready && !!modelId && !restoringSkills && !connectingMcp &&
     (!agentMode || (!!agentRoute && !agentChat.checking && !agentChat.loadingDefinition)) &&
     !missingMcp.some(({ server }) => server.required === true) && (!voiceProtocol || canUseVoice);
+  const canSend = chatReady && !routesLocked;
+
+  function submitChat(parts: ChatMessage['parts'], id?: string) {
+    if (!modelId || voiceProtocol) return;
+    if (!latestMessages.current.length && !agentMode) prepareName();
+    return sendMessage({ id, role: 'user', parts, metadata: { timestamp: new Date().toISOString() } }, { body: beginTurn(modelId) });
+  }
+
+  function closeChatVoice() {
+    const run = chatVoiceRun.current;
+    if (!run) return;
+    chatVoiceRun.current = undefined;
+    run.controller.abort();
+    run.output?.close();
+    setVoicePhase(undefined);
+    setVoicePreview('');
+  }
+
+  function startChatVoice() {
+    if (!voiceTranscriber || !canSend || chatVoiceRun.current || voiceRun.current) return;
+    const speech = chatVoiceSpeech(speechModels, chatAgent, agentMode ? undefined : speechAgent);
+    const run: ChatVoiceRun = { controller: new AbortController(), queue: [], hearing: false,
+      output: speech && createChatVoiceOutput(gateway, speech, scope) };
+    chatVoiceRun.current = run;
+    const { signal } = run.controller;
+    setVoiceNotice('');
+    setVoicePhase('connecting');
+    // Stop aborts capture rather than flushing it: an uncompleted draft isn't a user message.
+    void runMicrophone(gateway, voiceTranscriber.id, transcriptionVoiceOptions(voiceTranscriber), {
+      signal, stop: signal, ready: () => { if (!signal.aborted) setVoicePhase('active'); }, update: () => {},
+    }, {
+      preview: text => {
+        run.hearing = !!text;
+        if (text) {
+          run.output?.interrupt();
+          if (run.reply) run.reply.silent = true;
+        }
+        setVoicePreview(text);
+      },
+      turn: text => {
+        run.output?.interrupt();
+        if (run.reply) run.reply.silent = true;
+        if (run.queue.length >= 8) { setVoiceNotice('Wait for the assistant before speaking again.'); return; }
+        run.queue.push(text);
+        updateVoiceQueue(count => count + 1);
+      },
+    }).catch(error => {
+      if (signal.aborted) return;
+      setVoiceNotice(errorMessage(error, 'The voice session ended.'));
+      closeChatVoice();
+    });
+  }
+
+  // This uses the same pending tools/approval state as typed chat, including
+  // continuations. Keep queued speech out of history until actually submitted.
+  useEffect(() => {
+    const run = chatVoiceRun.current;
+    if (!run || voicePhase !== 'active' || view !== 'chat' || locationIssue || !connection.ready) return;
+    const reply = run.reply;
+    if (busy) {
+      // Interrupt only when tools are explicitly disabled. A hosted/approved
+      // operation might not be visible yet and must follow the normal flow.
+      if (run.queue.length && reply && !reply.interrupted && turn?.toolChoice === 'none' && !turn.hosted && !turn.nativeApprovalSubmitting) {
+        reply.interrupted = true;
+        void stop();
+      }
+      return;
+    }
+    if (!chatReady || toolBusy || toolParts.length || operation.current) return;
+    if (reply) {
+      if (!reply.settled) return;
+      run.reply = undefined;
+      const user = messages.findIndex(message => message.id === reply.userId);
+      if (status === 'ready' && user >= 0 && !reply.silent && !run.hearing && !run.queue.length && last?.role === 'assistant' && messages.indexOf(last) > user) {
+        const text = last.parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n\n').trim();
+        if (text) void run.output?.speak(text).catch(error => {
+          if (chatVoiceRun.current === run && !(error instanceof DOMException && error.name === 'AbortError')) {
+            setVoiceNotice(errorMessage(error, 'Could not play this message.'));
+          }
+        });
+      }
+    }
+    const text = run.queue.shift();
+    if (!text) return;
+    const next = { userId: crypto.randomUUID(), settled: false, silent: false };
+    run.reply = next;
+    void submitChat([{ type: 'text', text }], next.userId)?.catch(() => { /* Chat displays transport errors. */ }).finally(() => {
+      next.settled = true;
+      if (chatVoiceRun.current === run) updateVoiceQueue(count => count + 1);
+    });
+  });
 
   function publishVoice(message: ChatMessage, model: string) {
     const withMetadata = { ...message, metadata: { timestamp: new Date().toISOString(), ...(message.role === 'assistant' && { model }) } };
@@ -1314,6 +1422,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   useEffect(() => {
     if (!voicePhase || view === 'chat' && !locationIssue && connection.ready) return;
     voiceRun.current?.controller.abort();
+    if (chatVoiceRun.current) stopTurn();
   }, [voicePhase, view, locationIssue, connection.ready]);
 
   useEffect(() => {
@@ -1379,7 +1488,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
       <main className="chat-main" data-empty={!messages.length} hidden={view !== 'chat' || !!locationIssue}>
         {messages.length ? <Transcript messages={messages} showMessageTokens={preferences.showMessageTokens}
           showProviderLogo={preferences.showProviderLogo} showMetrics={preferences.showMetrics} showDecisions={preferences.showDecisions}
-          gateway={gateway} speechModel={speechModel} speechRoute={resolveSpeechRoute(speech.selected, speechModel)} scope={scope} menuContainer={menuContainer}
+          gateway={gateway} speechModel={chatVoiceRun.current ? undefined : speechModel} speechRoute={resolveSpeechRoute(speech.selected, speechModel)} scope={scope} menuContainer={menuContainer}
           pendingReply={(busy || toolBusy || pending || voicePhase && turn?.voiceMessage) && last?.role === 'assistant' ? last.id : undefined} /> : null}
         <div className="chat-column chat-dock">
            {!messages.length && !locationIssue && <WelcomeHeading request={welcomeRequest} discovering={!agentMode && connection.ready && !result && welcomeModels.length > 0} />}
@@ -1394,7 +1503,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
             <Button disabled={!canSend} onClick={() => { if (modelId && canSend) void regenerate({ body: beginTurn(modelId) }); }}>{t('Retry')}</Button>
           </div>}
           {toolNotice && <p className="chat-notice" role="status">{t(toolNotice)}</p>}
-          {voiceProtocol && voiceNotice && <p className="chat-notice chat-error" role="alert">{t(voiceNotice)}</p>}
+           {voiceNotice && <p className="chat-notice chat-error" role="alert">{t(voiceNotice)}</p>}
           {voiceProtocol && !canUseVoice && <p className="chat-notice" role="status">{t(socketVoice
             ? 'Voice requires microphone access, WebSocket, and Web Audio.' : 'Voice requires microphone access and WebRTC.')}</p>}
           {!connectingMcp && missingMcp.length > 0 && <p className="chat-notice" role="status">
@@ -1405,7 +1514,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           <ComposerUsage context={contextUsage} cost={totalCost} />
           <ChatComposer busy={busy || (status === 'ready' && toolParts.length > 0)} canSend={canSend} onStop={stopTurn}
             voice={voiceProtocol ? { phase: voicePhase, start: () => { void startVoice(); }, stop: stopTurn,
-              manualTurn: () => voiceRun.current?.session?.manualTurn() } : undefined}
+              manualTurn: () => voiceRun.current?.session?.manualTurn() } : modelId && (voiceTranscriber || chatVoiceRun.current)
+              ? { emptyOnly: true, phase: voicePhase, preview: voicePreview, start: startChatVoice, stop: stopTurn } : undefined}
             convert={preferences.convertAttachmentsToText} badges={badges} dictation={dictateChat ? dictation : undefined}
             mcp={view === 'chat' && !hostedRoute && mcpServers.available ? { count: new Set([...mcpSelection.entries, ...agentMcp.entries].map(entry => entry.record.id)).size,
               disabled: routesLocked, open: () => setModelContextOpen(true), servers: connectedMcp, connect: mcpServers.connection } : undefined}
@@ -1413,9 +1523,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
             reasoning={!voiceProtocol && !hostedRoute && isApiChat(runRoute) ? { value: preferences.reasoning,
               onChange: reasoning => onPreferences({ ...preferences, reasoning }) } : undefined}
             onSend={(parts) => {
-              if (!modelId || !canSend || voiceProtocol) return;
-              if (!messages.length && !agentMode) prepareName();
-              void sendMessage({ role: 'user', parts, metadata: { timestamp: new Date().toISOString() } }, { body: beginTurn(modelId) });
+              if (canSend && !chatVoiceRun.current) { setVoiceNotice(''); void submitChat(parts); }
             }} />
         </div>
       </main>

@@ -17,9 +17,10 @@ export function isOpenAIHostedTool(part: Part) {
 }
 
 function readReplay(part: Part) {
-  const metadata = 'toolCallId' in part ? isOpenAIHostedTool(part) ? part.resultProviderMetadata : undefined
+  const metadata = 'toolCallId' in part
+    ? isOpenAIHostedTool(part) && 'resultProviderMetadata' in part ? asRecord(part.resultProviderMetadata) : undefined
     : part.type === 'text' || part.type === 'reasoning' ? part.providerMetadata : undefined;
-  const replay = asRecord(metadata?.openai?.[replayKey]);
+  const replay = asRecord(asRecord(metadata?.openai)?.[replayKey]);
   if (typeof replay?.model !== 'string' || !Array.isArray(replay.items)) return;
   return { model: replay.model, items: records(replay.items) };
 }

@@ -1,11 +1,14 @@
 import { GatewayError, googleLiveTranscriptionSetup, openAITranscriptionSocket } from '@streaik/gateway';
 import type { Gateway, Transcript, TranscriptSegment } from '@streaik/gateway';
 import { assemblyAITranscript, deepgramTranscript } from './binaryTranscription';
+import { chatTranscriptionTurns, commitOnSilence } from './chatTranscriptionTurns';
+import type { TranscriptionTurns } from './chatTranscriptionTurns';
 import { getMicrophone, stopTracks } from './microphone';
 
 type Update = (transcript: Transcript, partial: string) => void;
-type Stop = { signal: AbortSignal; stop: AbortSignal; ready: () => void; update: Update };
 type EventData = Record<string, unknown>;
+type Stop = { signal: AbortSignal; stop: AbortSignal; ready: () => void; update: Update };
+type Capture = Stop & { turnEvent?: (event: EventData) => void };
 
 function record(input: unknown): EventData {
   return input && typeof input === 'object' ? input as EventData : {};
@@ -36,29 +39,37 @@ function pcmBase64(bytes: ArrayBuffer) {
   return btoa(String.fromCharCode(...new Uint8Array(bytes)));
 }
 
-export async function runMicrophone(gateway: Gateway, model: string, options: Parameters<Gateway['liveTranscriptionCredential']>[1], events: Stop) {
-  const stream = await getMicrophone(events.signal);
+export async function runMicrophone(gateway: Gateway, model: string, options: Parameters<Gateway['liveTranscriptionCredential']>[1],
+  callbacks: Stop, turns?: TranscriptionTurns) {
+  const { signal } = callbacks;
+  const stream = await getMicrophone(signal);
   const release = () => stopTracks(stream);
-  events.signal.addEventListener('abort', release, { once: true });
+  signal.addEventListener('abort', release, { once: true });
   try {
-    events.signal.throwIfAborted();
-    const credential = await gateway.liveTranscriptionCredential(model, options, AbortSignal.any([events.signal, AbortSignal.timeout(20_000)]));
-    events.signal.throwIfAborted();
+    signal.throwIfAborted();
+    const credential = await gateway.liveTranscriptionCredential(model, options, AbortSignal.any([signal, AbortSignal.timeout(20_000)]));
+    signal.throwIfAborted();
+    const events: Capture = { ...callbacks, turnEvent: turns && chatTranscriptionTurns(credential.provider, {
+      preview: text => { if (!signal.aborted) turns.preview(text); },
+      turn: text => { if (!signal.aborted) turns.turn(text); },
+    }) };
     if (credential.provider === 'openai') {
       if (openAITranscriptionSocket(model)) await openAISocket(stream, credential.secret, events);
       else await openAI(stream, credential.secret, events);
     } else if (credential.provider === 'google') {
       await google(stream, credential.url, googleLiveTranscriptionSetup(model, typeof options === 'string' ? options : options?.google ?? options?.language), events);
     } else if (credential.provider === 'deepgram') {
-      await binarySocket(stream, credential.url, events, {
-        name: 'Deepgram', subprotocols: ['bearer', credential.secret], stop: 'CloseStream', terminal: 'Metadata', message: deepgramTranscript(events.update),
+      const url = new URL(credential.url);
+      if (turns) url.searchParams.set('endpointing', '500');
+      await binarySocket(stream, url.href, events, {
+        name: 'Deepgram', subprotocols: ['bearer', credential.secret], stop: 'CloseStream', terminal: 'Metadata', message: events.turnEvent ?? deepgramTranscript(events.update),
       });
     } else if (credential.provider === 'assemblyai') {
       await binarySocket(stream, credential.url, events, {
-        name: 'AssemblyAI', begin: 'Begin', stop: 'Terminate', terminal: 'Termination', minBytes: 640, message: assemblyAITranscript(events.update),
+        name: 'AssemblyAI', begin: 'Begin', stop: 'Terminate', terminal: 'Termination', minBytes: 640, message: events.turnEvent ?? assemblyAITranscript(events.update),
       });
     } else await gladia(stream, credential.url, events);
-  } finally { events.signal.removeEventListener('abort', release); release(); }
+  } finally { signal.removeEventListener('abort', release); release(); }
 }
 
 export async function capturePcm(stream: MediaStream, rate: number, signal: AbortSignal, setup: AbortSignal, write: (bytes: ArrayBuffer) => void) {
@@ -184,7 +195,7 @@ async function binarySocket(stream: MediaStream, url: string, events: Stop, prot
   }
 }
 
-async function openAISocket(stream: MediaStream, secret: string, events: Stop) {
+async function openAISocket(stream: MediaStream, secret: string, events: Capture) {
   const failure = new AbortController();
   const signal = AbortSignal.any([events.signal, failure.signal]);
   const startup = AbortSignal.any([signal, AbortSignal.timeout(25_000)]);
@@ -201,12 +212,20 @@ async function openAISocket(stream: MediaStream, secret: string, events: Stop) {
   const close = () => socket.close();
   const sendAudio = (bytes: ArrayBuffer) => {
     if (socket.readyState !== WebSocket.OPEN || socket.bufferedAmount > 128_000) { fail(); return; }
-    socket.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: pcmBase64(bytes) }));
-    bytesSent += bytes.byteLength;
+    try {
+      socket.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: pcmBase64(bytes) }));
+      bytesSent += bytes.byteLength;
+    } catch { fail(); }
   };
+  const send = events.turnEvent ? commitOnSilence(sendAudio, () => {
+    if (signal.aborted) return;
+    try { socket.send(JSON.stringify({ type: 'input_audio_buffer.commit' })); bytesSent = 0; }
+    catch { fail(); }
+  }) : sendAudio;
   const message = (event: MessageEvent) => {
     const part = readEvent(event.data);
     if (part.type === 'error' || part.type === 'conversation.item.input_audio_transcription.failed') { fail(); return; }
+    if (events.turnEvent) { events.turnEvent(part); return; }
     const id = typeof part.item_id === 'string' ? part.item_id : '';
     if (committing && part.type === 'input_audio_buffer.committed') committedId = id;
     if (part.type !== 'conversation.item.input_audio_transcription.delta' && part.type !== 'conversation.item.input_audio_transcription.completed') return;
@@ -230,10 +249,11 @@ async function openAISocket(stream: MediaStream, secret: string, events: Stop) {
   socket.addEventListener('message', message);
   try {
     await wait(socket, 'open', startup, () => socket.readyState === WebSocket.OPEN);
-    capture = await capturePcm(stream, 24000, signal, startup, sendAudio);
+    capture = await capturePcm(stream, 24000, signal, startup, send);
     startup.throwIfAborted();
     events.ready();
     await untilStop(events.stop, signal);
+    if (events.turnEvent) return;
     await capture.flush();
     stopTracks(stream);
     if (!bytesSent) return;
@@ -257,7 +277,7 @@ async function openAISocket(stream: MediaStream, secret: string, events: Stop) {
   }
 }
 
-async function openAI(stream: MediaStream, secret: string, events: Stop) {
+async function openAI(stream: MediaStream, secret: string, events: Capture) {
   const failure = new AbortController();
   const signal = AbortSignal.any([events.signal, failure.signal]);
   const startup = AbortSignal.any([signal, AbortSignal.timeout(25_000)]);
@@ -276,6 +296,11 @@ async function openAI(stream: MediaStream, secret: string, events: Stop) {
     const part = readEvent(event.data);
     const id = typeof part.item_id === 'string' ? part.item_id : undefined;
     const type = part.type;
+    if (events.turnEvent) {
+      if (type === 'error' || type === 'conversation.item.input_audio_transcription.failed') fail();
+      else events.turnEvent(part);
+      return;
+    }
     if (type === 'error') {
       const error = record(part.error);
       if (awaitingCommit && error.event_id === commitId && error.code === 'input_audio_buffer_commit_empty') {
@@ -335,6 +360,7 @@ async function openAI(stream: MediaStream, secret: string, events: Stop) {
     await wait(channel, 'open', startup, () => channel.readyState === 'open');
     events.ready();
     await untilStop(events.stop, signal);
+    if (events.turnEvent) return;
     stopTracks(stream);
     if (speaking) {
       awaitingCommit = true;
@@ -359,7 +385,7 @@ async function openAI(stream: MediaStream, secret: string, events: Stop) {
   }
 }
 
-async function google(stream: MediaStream, url: string, setup: ReturnType<typeof googleLiveTranscriptionSetup>, events: Stop) {
+async function google(stream: MediaStream, url: string, setup: ReturnType<typeof googleLiveTranscriptionSetup>, events: Capture) {
   const failure = new AbortController();
   const signal = AbortSignal.any([events.signal, failure.signal]);
   const startup = AbortSignal.any([signal, AbortSignal.timeout(25_000)]);
@@ -386,6 +412,7 @@ async function google(stream: MediaStream, url: string, setup: ReturnType<typeof
       changes.dispatchEvent(new Event('setup'));
     }
     if (!setupReady || signal.aborted) return;
+    if (events.turnEvent) { events.turnEvent(part); return; }
     const content = record(part.serverContent);
     const final = record(content.inputTranscription).text;
     const interim = record(content.interimInputTranscription).text;
@@ -438,7 +465,7 @@ async function google(stream: MediaStream, url: string, setup: ReturnType<typeof
   }
 }
 
-async function gladia(stream: MediaStream, url: string, events: Stop) {
+async function gladia(stream: MediaStream, url: string, events: Capture) {
   const failure = new AbortController();
   const signal = AbortSignal.any([events.signal, failure.signal]);
   const startup = AbortSignal.any([signal, AbortSignal.timeout(25_000)]);
@@ -458,6 +485,7 @@ async function gladia(stream: MediaStream, url: string, events: Stop) {
     if (part.type === 'error') { fail(); return; }
     const data = record(part.data);
     if (stopping && part.type === 'post_final_transcript') { finished = true; changes.dispatchEvent(new Event('finished')); }
+    if (events.turnEvent) { events.turnEvent(part); return; }
     if (part.type !== 'transcript') return;
     const { text, start, end, speaker, language } = record(data.utterance);
     if (typeof text !== 'string') return;

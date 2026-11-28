@@ -32,7 +32,8 @@ type ComposerMcp = { count: number; disabled: boolean; open: () => void; servers
 type ComposerProps = { busy: boolean; canSend: boolean; dictation?: ComposerDictation } & (
   { image?: undefined; video?: undefined; speech?: undefined; convert: boolean; onSend: (parts: AttachmentPart[]) => void; onChatSettings: () => void; onViewContext: () => void;
     mcp?: ComposerMcp; badges?: readonly ComposerBadge[]; onStop: () => void;
-    voice?: { phase?: 'connecting' | 'active' | 'closing'; start: () => void; stop: () => void; manualTurn?: () => void };
+    voice?: { phase?: 'connecting' | 'active' | 'closing'; start: () => void; stop: () => void; manualTurn?: () => void;
+      emptyOnly?: boolean; preview?: string };
     reasoning?: { value: ReasoningLevel; onChange: (value: ReasoningLevel) => void } } |
   { image: { draft: ImageDraft; onChange: (value: ImageDraft) => void; onSend: () => void; onSettings: () => void }; video?: undefined; speech?: undefined; onStop: () => void } |
   { image?: undefined; video: { prompt: string; onChange: (prompt: string) => void; onSend: () => void }; speech?: undefined; onStop?: undefined } |
@@ -62,6 +63,8 @@ export function ChatComposer(props: ComposerProps) {
   const draft = image?.draft.prompt ?? video?.prompt ?? speech?.text ?? localDraft;
   const attachments = image?.draft.attachments ?? localAttachments;
   const fileCount = attachments.length + resources.length;
+  const voiceAction = voice && (!voice.emptyOnly || voice.phase || (!draft.trim() && !fileCount && !busy));
+  const capture = !!voice?.emptyOnly && !!voice.phase;
   const byteCount = attachments.reduce((sum, item) => sum + ('file' in item ? item.file.size : 0), 0) + resources.reduce((sum, item) => sum + item.size, 0);
   const setDraft = (prompt: string) => image ? image.onChange({ prompt, attachments }) : video ? video.onChange(prompt) : speech ? speech.onChange(prompt) : setLocalDraft(prompt);
   const setAttachments = (items: DraftAttachment[]) => image ? image.onChange({ prompt: draft, attachments: items }) : setLocalAttachments(items);
@@ -114,7 +117,7 @@ export function ChatComposer(props: ComposerProps) {
   }
 
   async function addFiles(files: FileList) {
-    if (pending.current || (media && busy) || !files.length) return;
+    if (capture || pending.current || (media && busy) || !files.length) return;
     if (speech) {
       if (dictation.active()) return;
       pending.current = true;
@@ -141,7 +144,7 @@ export function ChatComposer(props: ComposerProps) {
 
   function addLink(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (image && busy) return;
+    if (capture || image && busy) return;
     if (!link) { setLinkError(true); return; }
     if (fileCount >= attachmentCountLimit) { setNotice('Add up to 10 attachments per message.'); dialog.current?.close(); return; }
     const item = { id: Math.max(0, ...attachments.map(item => item.id)) + 1, name: `${link.host}${link.pathname === '/' ? '' : link.pathname}`,
@@ -153,7 +156,7 @@ export function ChatComposer(props: ComposerProps) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (voice) {
+    if (voiceAction) {
       if (voice.phase === 'active' && !draft.trim() && !fileCount) voice.manualTurn?.();
       return;
     }
@@ -212,11 +215,11 @@ export function ChatComposer(props: ComposerProps) {
         event.preventDefault();
         if (video) return;
         dragDepth.current++;
-        if (!pending.current && !(speech && (busy || dictating))) setDragging(true);
+        if (!capture && !pending.current && !(speech && (busy || dictating))) setDragging(true);
       }} onDragOver={event => {
         if (!event.dataTransfer.types.includes('Files')) return;
         event.preventDefault();
-        event.dataTransfer.dropEffect = video || pending.current || (speech && (busy || dictating)) ? 'none' : 'copy';
+        event.dataTransfer.dropEffect = video || capture || pending.current || (speech && (busy || dictating)) ? 'none' : 'copy';
       }} onDragLeave={() => {
         dragDepth.current = Math.max(0, dragDepth.current - 1);
         if (!dragDepth.current) setDragging(false);
@@ -245,7 +248,7 @@ export function ChatComposer(props: ComposerProps) {
       </ul>}
       <Textarea aria-label={t(image ? 'Image prompt' : video ? 'Video prompt' : speech ? 'Speech text' : 'Message')}
         placeholder={t(image ? 'Describe a new image' : video ? 'Describe a new video' : speech ? 'Enter text to generate speech' : 'Ask anything')} rows={media ? 3 : 2}
-        value={appendDictation(draft, dictation.preview ?? '')} readOnly={dictating || preparing || media && busy}
+        value={capture ? voice?.preview ?? '' : appendDictation(draft, dictation.preview ?? '')} readOnly={capture || dictating || preparing || media && busy}
         onChange={event => { if (!dictation.active()) setDraft(event.currentTarget.value); }} onKeyDown={event => {
           if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
             event.preventDefault();
@@ -261,7 +264,7 @@ export function ChatComposer(props: ComposerProps) {
           {speech ? <Button className="chat-composer-icon" type="button" variant="subtle" aria-label={t('Import text files')} title={t('Import text files')}
             disabled={busy || dictating || preparing} onClick={() => picker.current?.click()}><ChatIcon name="attachment" /></Button> : <span ref={trigger}><Button className="chat-composer-icon" type="button" variant="subtle" aria-label={plusLabel}
             title={plusLabel} aria-haspopup="menu" aria-expanded={menuOpen} aria-controls={menuOpen ? `${id}-menu` : undefined}
-            disabled={preparing || !!image && busy} onClick={() => setMenuOpen(!menuOpen)} onKeyDown={event => {
+            disabled={capture || preparing || !!image && busy} onClick={() => setMenuOpen(!menuOpen)} onKeyDown={event => {
               if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setMenuOpen(true); }
             }}><ChatIcon name="add" /></Button></span>}
           {menuOpen && <div ref={menu} id={`${id}-menu`} className="chat-attachment-menu" role="menu" aria-label={plusLabel} onKeyDown={menuKeys}>
@@ -307,10 +310,10 @@ export function ChatComposer(props: ComposerProps) {
             disabled={dictation.phase === 'finishing' || !props.dictation || busy || preparing || !!voice?.phase} onClick={() => { if (!pending.current) void dictation.toggle(); }}>
             <ChatIcon name={dictating ? 'stop' : 'mic'} />
           </Button>}
-          {voice ? <Button key="voice" className="chat-send" type="button" variant="primary" aria-label={voiceLabel} title={voiceLabel}
+          {voiceAction ? <Button key="voice" className="chat-send" type="button" variant="primary" aria-label={voiceLabel} title={voiceLabel}
             aria-pressed={!!voice.phase} aria-busy={voice.phase === 'connecting' || voice.phase === 'closing' || undefined}
             disabled={voice.phase === 'closing' || !voice.phase && (busy || !canSend || preparing || dictating)}
-            onClick={voice.phase ? voice.stop : voice.start}>{voice.phase ? <ChatIcon name="stop" /> :
+            onClick={() => { if (voice.phase) voice.stop(); else if (!pending.current && !dictation.active()) voice.start(); }}>{voice.phase ? <ChatIcon name="stop" /> :
               <svg className="chat-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
                 strokeLinecap="round" aria-hidden="true" focusable="false"><path d="M4 10v4m4-7v10m4-14v18m4-14v10m4-7v4" /></svg>}</Button>
           : busy && onStop ? <Button key="stop" className="chat-send" type="button" aria-label={t('Stop')} title={t('Stop')}

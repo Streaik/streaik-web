@@ -66,27 +66,28 @@ export function progressiveSpeech(audio: HTMLAudioElement, type: string, onClose
 }
 // Open within the user's Send/Read aloud gesture. PCM plays as it arrives while the
 // transport assembles the final WAV. Playback failure doesn't discard that clip.
-export function pcmSpeechPlayback(onStart?: () => void) {
+export function pcmSpeechPlayback(onStart?: () => void, shared?: AudioContext) {
   let context: AudioContext;
-  try { context = new AudioContext(); } catch { return; }
+  try { context = shared ?? new AudioContext(); } catch { return; }
   const sources = new Set<AudioBufferSourceNode>();
   let end = 0, carry: number | undefined, played = false, closed = false, interrupted = false, drained: (() => void) | undefined;
   const close = () => {
     if (closed) return;
     closed = true;
-    context.onstatechange = null;
+    context.removeEventListener('statechange', changed);
     for (const source of sources) {
       source.onended = null;
       try { source.stop(); } catch { /* Already ended. */ }
       source.disconnect();
     }
     sources.clear();
-    void context.close().catch(() => {});
+    if (!shared) void context.close().catch(() => {});
     drained?.();
   };
   const interrupt = () => { interrupted = played; close(); };
   void context.resume().catch(interrupt);
-  context.onstatechange = () => { if (played && context.state !== 'running') interrupt(); };
+  function changed() { if (played && context.state !== 'running') interrupt(); }
+  context.addEventListener('statechange', changed);
 
   return {
     append(bytes: Uint8Array, rate: number) {

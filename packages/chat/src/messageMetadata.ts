@@ -65,12 +65,16 @@ export function messageTime(timestamp: unknown): number | undefined {
   return Number.isFinite(time) ? time : undefined;
 }
 
-export function withReplyMetadata(stream: ReplyStream, model: string | undefined, previous?: ChatMessage): ReplyStream {
+export function withReplyMetadata(stream: ReplyStream, model: string | undefined, previous?: ChatMessage, usedIds?: ReadonlySet<string>): ReplyStream {
   let timestamp: string | undefined;
   let fallback: ChatMessageMetadata | undefined;
   return stream.pipeThrough(new TransformStream<ReplyChunk, ReplyChunk>({
     transform(chunk, controller) {
       if (chunk.type === 'start') {
+        if (chunk.messageId && chunk.messageId !== previous?.id && usedIds?.has(chunk.messageId)) {
+          // Some providers reuse their reply ID across separate user turns.
+          chunk = { ...chunk, messageId: previous?.id ?? crypto.randomUUID() };
+        }
         const continuation = previous && (chunk.messageId === undefined || chunk.messageId === previous.id) ? previous.metadata : undefined;
         const supplied = chunk.messageMetadata as ChatMessageMetadata | undefined;
         timestamp = messageTime(continuation?.timestamp) !== undefined ? continuation?.timestamp
