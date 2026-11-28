@@ -1715,6 +1715,7 @@ test('Provider Model Context sends authenticated MCP upstream without browser di
     requests.push(route.request().postDataJSON());
     const events = [
       { type: 'start', messageId: 'provider-mcp-reply' }, { type: 'start-step' },
+      { type: 'text-start', id: 'intro' }, { type: 'text-delta', id: 'intro', delta: 'I will look that up.' }, { type: 'text-end', id: 'intro' },
       { type: 'tool-input-available', toolCallId: 'native-approval', toolName: 'streaik_mcp_execution_approval', title: 'Run MCP tool: lookup', input: { item: 'abc' },
         toolMetadata: { streaikMcpArguments: '{"item":"abc"}' }, providerExecuted: true, dynamic: true },
       { type: 'tool-approval-request', toolCallId: 'native-approval', approvalId: 'protected-approval', approvalDescriptor: { input: { item: 'abc' } } },
@@ -1755,8 +1756,14 @@ test('Provider Model Context sends authenticated MCP upstream without browser di
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   await composer.fill('Call provider MCP'); await composer.press('Enter');
   const approval = page.getByRole('dialog', { name: 'Approve tool execution', exact: true });
+  await expect(approval).toBeVisible();
+  const replies = page.getByRole('article', { name: 'Assistant', exact: true });
+  const firstBody = replies.first().locator('.chat-message-body > *');
+  await expect(firstBody).toHaveText(['I will look that up.', /Run MCP tool: lookup/]);
   await approval.getByRole('button', { name: 'Approve and run', exact: true }).click();
-  await expect(page.getByText('Provider MCP reply', { exact: true })).toBeVisible();
+  await expect(replies).toHaveCount(2);
+  await expect(replies.last().getByText('Provider MCP reply', { exact: true })).toBeVisible();
+  await expect(firstBody).toHaveText(['I will look that up.', /Run MCP tool: lookup/]);
   const descriptor = { server_label: expect.stringMatching(/^[A-Za-z][A-Za-z0-9_-]*$/), server_url: endpoint, execution: 'server',
     headers: { authorization: 'Bearer provider-mcp-fixture-token' } };
   expect(requests).toHaveLength(2);
@@ -2901,12 +2908,8 @@ test('OpenAI chat settings pair fields when wide and persist the encrypted reaso
   expect(requests[0].providerMetadata).toEqual({ openai: { include: [] } });
 });
 
-test('Activity pager follows streamed items until the user navigates', async ({ page }) => {
-  await mockModels(page);
+async function mockActivityStream(page: Page, initialEvents: object[]) {
   const encode = (events: object[]) => events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('');
-  const reasoning = (id: string, delta: string) => [
-    { type: 'reasoning-start', id }, { type: 'reasoning-delta', id, delta }, { type: 'reasoning-end', id },
-  ];
   await page.addInitScript(firstChunk => {
     const nativeFetch = window.fetch.bind(window);
     window.fetch = async (input, init) => {
@@ -2928,12 +2931,23 @@ test('Activity pager follows streamed items until the user navigates', async ({ 
       } });
       return new Response(body, { headers: { 'Content-Type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' } });
     };
-  }, encode([
-    { type: 'start', messageId: 'activity-reply' }, { type: 'start-step' }, ...reasoning('first', 'First reasoning item.'),
-  ]));
-  const append = (events: object[], done = false) => page.evaluate(detail => {
+  }, encode([{ type: 'start', messageId: 'activity-reply' }, { type: 'start-step' }, ...initialEvents]));
+  return (events: object[], done = false) => page.evaluate(detail => {
     window.dispatchEvent(new CustomEvent('fixture-activity-chunk', { detail }));
   }, { chunk: encode(events) + (done ? 'data: [DONE]\n\n' : ''), done });
+}
+
+const activityFrames = (type: 'text' | 'reasoning', id: string, delta: string) => [
+  { type: `${type}-start`, id }, { type: `${type}-delta`, id, delta }, { type: `${type}-end`, id },
+];
+const lookupActivity = [
+  { type: 'tool-input-available', toolCallId: 'lookup', toolName: 'fixture_lookup', input: {}, dynamic: true, providerExecuted: true },
+  { type: 'tool-output-available', toolCallId: 'lookup', output: 'Found', dynamic: true, providerExecuted: true },
+];
+
+test('Activity pager follows streamed items until the user navigates', async ({ page }) => {
+  await mockModels(page);
+  const append = await mockActivityStream(page, activityFrames('reasoning', 'first', 'First reasoning item.'));
 
   await page.goto('/');
   await showSettings(page); await addKey(page); await closeSettings(page);
@@ -2943,10 +2957,7 @@ test('Activity pager follows streamed items until the user navigates', async ({ 
   const activity = page.getByRole('region', { name: 'Assistant activity' });
   await expect(activity).toContainText('First reasoning item.');
 
-  await append([
-    { type: 'tool-input-available', toolCallId: 'lookup', toolName: 'fixture_lookup', input: {}, dynamic: true, providerExecuted: true },
-    { type: 'tool-output-available', toolCallId: 'lookup', output: 'Found', dynamic: true, providerExecuted: true },
-  ]);
+  await append(lookupActivity);
   await expect(activity).toHaveCount(1);
   await expect(activity).toContainText('2 of 2');
   await expect(activity).toContainText('fixture_lookup');
@@ -2954,12 +2965,48 @@ test('Activity pager follows streamed items until the user navigates', async ({ 
   await expect(next).toBeDisabled();
   await activity.getByRole('button', { name: 'Previous activity' }).click();
 
-  await append([...reasoning('last', 'Last reasoning item.'), { type: 'finish-step' }, { type: 'finish', finishReason: 'stop' }], true);
+  await append([...activityFrames('reasoning', 'last', 'Last reasoning item.'), { type: 'finish-step' }, { type: 'finish', finishReason: 'stop' }], true);
   await expect(activity).toContainText('1 of 3');
   await expect(activity).toContainText('First reasoning item.');
   await next.click();
   await next.click();
   await expect(activity).toContainText('Last reasoning item.');
+});
+
+for (const precedingGroup of [false, true]) test(`Trailing activity moves above the final text only after streaming (${precedingGroup ? 'merge' : 'no prior group'})`, async ({ page }) => {
+  await mockModels(page);
+  const append = await mockActivityStream(page, [
+    ...(precedingGroup ? [...activityFrames('text', 'intro', 'Working on it.'), ...activityFrames('reasoning', 'early', 'Earlier reasoning.')] : []),
+    ...activityFrames('text', 'final', 'Final answer.'),
+  ]);
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await chooseChatModel(page);
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('Show progress.'); await composer.press('Enter');
+  const reply = page.getByRole('article', { name: 'Assistant', exact: true });
+  const body = reply.locator('.chat-message-body > *');
+  const activity = reply.getByRole('region', { name: 'Assistant activity' });
+  const stop = page.getByRole('button', { name: 'Stop', exact: true });
+  await expect(reply.getByText('Final answer.', { exact: true })).toBeVisible();
+
+  await append([...lookupActivity, ...activityFrames('reasoning', 'late', 'Late reasoning.')]);
+  await expect(body).toHaveText(precedingGroup
+    ? ['Working on it.', /Earlier reasoning/, 'Final answer.', /Late reasoning/]
+    : ['Final answer.', /Late reasoning/]);
+  await expect(stop).toBeVisible();
+
+  await append([{ type: 'finish-step' }, { type: 'finish', finishReason: 'stop' }], true);
+  await expect(body).toHaveText(precedingGroup ? ['Working on it.', /Late reasoning/, 'Final answer.'] : [/Late reasoning/, 'Final answer.']);
+  await expect(activity).toHaveCount(1);
+  const previous = activity.getByRole('button', { name: 'Previous activity' });
+  await previous.click();
+  await expect(activity).toContainText('fixture_lookup');
+  if (precedingGroup) {
+    await previous.click();
+    await expect(activity).toContainText('Earlier reasoning.');
+  }
+  await expect(previous).toBeDisabled();
 });
 
 test('Gateway chat shares context, keeps composer reasoning through approval, and replays approved results once', async ({ page }) => {
@@ -4781,6 +4828,85 @@ const browserToolRoutes = [
   ...directToolRoutes.map(endpoint => ({ mode: 'Direct' as const, endpoint })),
   { mode: 'Gateway', endpoint: '/v1/messages' },
 ] as const;
+
+for (const endpoint of ['/v1/responses', '/v1/messages'] as const) test(`browser resource search defers metadata and reads on ${endpoint}`, async ({ page }) => {
+  const selector = 'openai/gpt-6-luna', uri = 'fixture://deferred/manual';
+  let rounds = 0, decisions = 0, reads = 0, serverId = '';
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [
+    { id: model, type: 'language' }, { id: selector, type: 'decision' },
+  ] } }));
+  await page.route('**/mcp-deferred-resources', route => {
+    const { id, method, params } = route.request().postDataJSON();
+    const reply = (result: object) => route.fulfill({ json: { jsonrpc: '2.0', id, result } });
+    const complete = { resultType: 'complete', ttlMs: 0, cacheScope: 'private' };
+    if (method === 'server/discover') return reply({ supportedVersions: ['2026-07-28'], capabilities: { resources: {} } });
+    if (method === 'resources/list') return reply({ ...complete, resources: [{ name: 'Deferred manual', uri }] });
+    if (method === 'resources/templates/list') return reply({ ...complete, resourceTemplates: [] });
+    expect(method).toBe('resources/read');
+    expect(params.uri).toBe(uri);
+    expect(decisions).toBe(1);
+    reads++;
+    return reply({ ...complete, contents: [{ uri, text: 'Deferred MCP content' }] });
+  });
+  await page.route('**/gateway/v1/decisions', route => {
+    const body = route.request().postDataJSON();
+    expect(body.model).toBe(selector);
+    expect(body.questions).toHaveLength(1);
+    expect(body.questions[0].instructions).toContain(uri);
+    expect(reads).toBe(0);
+    decisions++;
+    return route.fulfill({ json: { answers: [{ type: 'predicate', name: body.questions[0].name, probability: .9 }] } });
+  });
+  await page.route(`**/gateway${endpoint}`, route => {
+    const body = route.request().postDataJSON();
+    expect(body.model).toBe(model);
+    const wire = JSON.stringify(body);
+    let calls: FixtureToolCall[] = [];
+    if (rounds === 0) {
+      expect(wire).not.toContain(uri);
+      expect(wire).not.toContain('Deferred manual');
+      expect(wire).not.toContain('mcpResourceCatalog');
+      serverId = /"serverId":"([^"]+)"/.exec(wire.replaceAll('\\"', '"'))?.[1] ?? '';
+      expect(serverId).not.toBe('');
+      expect(body.tools.map((tool: { name: string }) => tool.name)).toEqual(expect.arrayContaining(['client_resource_search', 'read_resource']));
+      calls = [{ id: 'find_resource', name: 'client_resource_search', input: { serverId, query: 'manual' } }];
+    } else if (rounds === 1) {
+      expect(wire).toContain(uri);
+      expect(reads).toBe(0);
+      calls = [{ id: 'fetch_resource', name: 'read_resource', input: { serverId, uri } }];
+    } else {
+      expect(wire).toContain('Deferred MCP content');
+    }
+    rounds++;
+    return route.fulfill({ contentType: 'text/event-stream', body: nativeToolSse(endpoint, model, calls, 'Deferred resource read complete.') });
+  });
+  await page.goto('/');
+  await openRoute(page, 'Gateway');
+  await page.getByRole('menuitemradio', { name: endpoint, exact: true }).click();
+  await showSettings(page); await addKey(page, 'OpenAI'); await closeSettings(page);
+  await chooseModel(page, 'gpt-4.1-mini');
+  await page.getByRole('button', { name: 'Chat settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Chat settings', exact: true });
+  await settings.getByRole('tab', { name: 'Tools', exact: true }).click();
+  await settings.getByRole('switch', { name: 'Resource search', exact: true }).check();
+  await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.getByRole('button', { name: 'Add to message', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Model Context', exact: true }).click();
+  const context = page.getByRole('dialog', { name: 'Model Context', exact: true });
+  await context.getByRole('tab', { name: 'Installed', exact: true }).click();
+  await context.getByRole('button', { name: 'Add by URL' }).click();
+  const editor = page.getByRole('dialog', { name: 'Add MCP server' });
+  await editor.getByLabel('Name', { exact: true }).fill('Deferred resources fixture');
+  await editor.getByLabel('URL', { exact: true }).fill(new URL('/mcp-deferred-resources', page.url()).href);
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
+  await context.getByRole('switch', { name: 'Deferred resources fixture' }).check();
+  await expect(context.getByRole('status')).toHaveText('Connected');
+  await context.getByRole('button', { name: 'Close', exact: true }).click();
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('Find and read the manual.'); await composer.press('Enter');
+  await expect(page.getByText('Deferred resource read complete.', { exact: true })).toBeVisible();
+  expect([rounds, decisions, reads]).toEqual([3, 1, 1]);
+});
 
 for (const { mode, endpoint } of browserToolRoutes) test(`${mode} ${endpoint} runs browser tools and continues without review`, async ({ page }) => {
   const viaGateway = mode === 'Gateway';

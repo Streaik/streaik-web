@@ -176,13 +176,13 @@ function AssistantHeader({ message, showProviderLogo }: { message: ChatMessage; 
 }
 
 const Message = memo(function Message({ message, showMessageTokens, showProviderLogo, showMetrics, showDecisions, pendingReply, speechState,
-  onReadAloud, attachments, menuContainer }: {
-  message: ChatMessage; pendingReply: boolean; speechState?: MessageSpeechState; onReadAloud?: ToggleMessageSpeech;
+  onReadAloud, attachments, menuContainer, foldTrailingActivity }: {
+  message: ChatMessage; pendingReply: boolean; foldTrailingActivity: boolean; speechState?: MessageSpeechState; onReadAloud?: ToggleMessageSpeech;
   attachments?: readonly OutputAttachment[]; menuContainer: HTMLDivElement | null;
 } & MessagePreferences) {
   const { t } = useAppTranslation();
   const user = message.role === 'user';
-  const groups = groupMessageParts(message.parts, user, showDecisions);
+  const groups = groupMessageParts(message.parts, user, showDecisions, foldTrailingActivity);
   if (!groups.length && !attachments?.length) return null;
   return <><article className="chat-message" data-role={message.role} aria-label={t(user ? 'You' : 'Assistant')}>
     {user ? <MessageTime timestamp={message.metadata?.timestamp} /> : <AssistantHeader message={message} showProviderLogo={showProviderLogo} />}
@@ -212,9 +212,10 @@ const Message = memo(function Message({ message, showMessageTokens, showProvider
   </>;
 });
 
-function Transcript({ messages, showMessageTokens, showProviderLogo, showMetrics, showDecisions, gateway, speechModel, speechRoute, scope, pendingReply, menuContainer }: {
+function Transcript({ messages, showMessageTokens, showProviderLogo, showMetrics, showDecisions, gateway, speechModel, speechRoute, scope, pendingReply,
+  menuContainer, latestReplySettled }: {
   messages: ChatMessage[]; gateway: Gateway; speechModel?: CatalogModel; speechRoute: SpeechRoute; scope?: string; pendingReply?: string;
-  menuContainer: HTMLDivElement | null;
+  menuContainer: HTMLDivElement | null; latestReplySettled: boolean;
 } & MessagePreferences) {
   const { t } = useAppTranslation();
   const speech = useMessageSpeech(gateway, speechModel, speechRoute, scope);
@@ -224,14 +225,15 @@ function Transcript({ messages, showMessageTokens, showProviderLogo, showMetrics
   useLayoutEffect(() => {
     const node = scroll.current;
     if (node && follow.current) node.scrollTop = node.scrollHeight;
-  }, [messages, showMessageTokens, showProviderLogo, showMetrics, showDecisions]);
+  }, [messages, showMessageTokens, showProviderLogo, showMetrics, showDecisions, latestReplySettled]);
   return <section ref={scroll} onScroll={() => {
     const node = scroll.current;
     if (node) follow.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
   }} className="chat-transcript" aria-label={t('Conversation')} tabIndex={0}>
-    <MessageClock><div className="chat-column">{messages.map((message) => <Message key={message.id} message={message}
+    <MessageClock><div className="chat-column">{messages.map((message, index) => <Message key={message.id} message={message}
       attachments={attachments.get(message.id)} menuContainer={menuContainer}
       pendingReply={message.id === pendingReply} speechState={speech.state?.id === message.id ? speech.state : undefined}
+      foldTrailingActivity={message.role === 'assistant' && (index === messages.length - 1 ? latestReplySettled : messages[index + 1].role !== 'assistant')}
       onReadAloud={message.role === 'assistant' ? speech.toggle : undefined}
       showMessageTokens={showMessageTokens} showProviderLogo={showProviderLogo} showMetrics={showMetrics} showDecisions={showDecisions} />)}</div></MessageClock>
   </section>;
@@ -1144,6 +1146,8 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   }
   const review = pendingReview();
   const busy = status === 'submitted' || status === 'streaming';
+  // Ready can also mean waiting for approval or about to submit a tool continuation.
+  const latestReplySettled = status === 'ready' && !toolBusy && !toolParts.length && !voiceRun.current;
   const progress = busy ? deciding ? t('Choosing a model…') : t('Assistant is responding…')
     : toolBusy && turn ? t('Running tool…') : undefined;
   const agentModels = route.mode === 'direct' ? gatewayModels.result : result;
@@ -1508,6 +1512,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         {messages.length ? <Transcript messages={messages} showMessageTokens={preferences.showMessageTokens}
           showProviderLogo={preferences.showProviderLogo} showMetrics={preferences.showMetrics} showDecisions={preferences.showDecisions}
           gateway={gateway} speechModel={chatVoiceRun.current ? undefined : speechModel} speechRoute={resolveSpeechRoute(speech.selected, speechModel)} scope={scope} menuContainer={menuContainer}
+          latestReplySettled={latestReplySettled}
           pendingReply={(busy || toolBusy || pending || voicePhase && turn?.voiceMessage) && last?.role === 'assistant' ? last.id : undefined} /> : null}
         <div className="chat-column chat-dock">
            {!messages.length && !locationIssue && <WelcomeHeading request={welcomeRequest} discovering={!agentMode && connection.ready && !result && welcomeModels.length > 0} />}

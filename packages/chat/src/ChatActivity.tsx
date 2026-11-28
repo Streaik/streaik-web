@@ -16,7 +16,7 @@ type ActivityPart = Extract<Part, { type: 'reasoning' }> | Invocation;
 type Group = { type: 'text'; start: number; text: string } | { type: 'activity'; start: number; parts: ActivityPart[] }
   | { type: 'attachment'; start: number; name?: string; part: AttachmentPart };
 
-export function groupMessageParts(parts: readonly Part[], user = false, showDecisions = true): Group[] {
+export function groupMessageParts(parts: readonly Part[], user = false, showDecisions = true, foldTrailingActivity = false): Group[] {
   const groups: Group[] = [];
   parts.forEach((part, start) => {
     const last = groups.at(-1);
@@ -32,6 +32,19 @@ export function groupMessageParts(parts: readonly Part[], user = false, showDeci
       else groups.push({ type: 'activity', start, parts: [part] });
     }
   });
+  if (foldTrailingActivity && !user) {
+    const trailing = groups.at(-1);
+    const finalText = groups.at(-2);
+    if (trailing?.type === 'activity' && finalText?.type === 'text') {
+      const preceding = groups.at(-3);
+      if (preceding?.type === 'activity') {
+        preceding.parts.push(...trailing.parts);
+        groups.pop();
+      } else {
+        groups.splice(-2, 2, trailing, finalText);
+      }
+    }
+  }
   return groups;
 }
 
