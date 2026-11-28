@@ -1850,11 +1850,13 @@ test('chat Model Context opts into Gateway-hosted MCP and preserves per-route ap
   const nativeApproval = { type: 'mcp_approval_request', id: 'mcpr_inventory', name: 'lookup', server_label: 'Inventory fixture', arguments: '{"item":"xyz"}' };
   const nativeResult = { type: 'mcp_call', id: 'mcp_streaik_inventory', name: 'lookup', server_label: 'Inventory fixture', arguments: '{"item":"xyz"}',
     approval_request_id: nativeApproval.id, status: 'completed', output: '{"content":[{"type":"text","text":"Found"}]}' };
+  const hostedActivity = { name: 'streaik_resource_search', callId: 'hosted-resource-fixture', input: { query: 'widget' } };
   await page.route('**/gateway/v1/responses', route => {
+    expect(route.request().headers()['x-streaik-hosted-tool-activity']).toBe('1');
     responsesRequests.push(route.request().postDataJSON());
     const stage = responsesRequests.length;
     const item = stage === 1 ? nativeApproval : nativeResult;
-    let body = nativeToolSse('/v1/responses', model, [], stage === 1 ? '' : 'Responses hosted reply');
+    let body = nativeToolSse('/v1/responses', model, [], stage === 1 ? '' : stage === 2 ? 'Responses hosted reply' : 'Responses follow-up');
     if (stage <= 2) body = body.split('\n').flatMap(line => {
       if (!line.startsWith('data: {')) return [line];
       const frame = JSON.parse(line.slice(6));
@@ -1865,6 +1867,11 @@ test('chat Model Context opts into Gateway-hosted MCP and preserves per-route ap
       return [`data: ${JSON.stringify({ type: 'response.output_item.added', sequence_number: 97, output_index: 1, item })}`, '',
         `data: ${JSON.stringify({ type: 'response.output_item.done', sequence_number: 98, output_index: 1, item })}`, '', `data: ${JSON.stringify(frame)}`];
     }).join('\n');
+    if (stage === 2) {
+      const type = 'streaik.hosted_tool_activity';
+      body = [hostedActivity, { ...hostedActivity, output: { resources: [] } }]
+        .map(activity => `event: ${type}\ndata: ${JSON.stringify({ type, activity })}\n\n`).join('') + body;
+    }
     return route.fulfill({ contentType: 'text/event-stream', body });
   });
 
@@ -1997,6 +2004,7 @@ test('chat Model Context opts into Gateway-hosted MCP and preserves per-route ap
   expect(responsesRequests).toHaveLength(1);
   await run.getByRole('button', { name: 'Approve and run' }).click();
   await expect(page.getByText('Responses hosted reply', { exact: true })).toBeVisible();
+  await expect(page.getByText(hostedActivity.name, { exact: true })).toBeVisible();
   expect(responsesRequests[1].input).toEqual(expect.arrayContaining([nativeApproval,
     { type: 'mcp_approval_response', approval_request_id: nativeApproval.id, approve: true }]));
   expect(responsesRequests[1].streaik_mcp_approvals).toEqual({ [nativeApproval.id]: 'gateway-proof' });
@@ -2005,7 +2013,7 @@ test('chat Model Context opts into Gateway-hosted MCP and preserves per-route ap
   await serverSearch.uncheck();
   await expect(toolSearch).toBeChecked();
   await closeSettingsDialog();
-  await submit('Use hosted Responses with no approval', 'Responses hosted reply');
+  await submit('Use hosted Responses with no approval', 'Responses follow-up');
   expect(responsesRequests[2].tools).toEqual([expect.objectContaining({ type: 'function', name: 'local_chart_instructions' }),
     { type: 'mcp', name: 'mcp', ...descriptor, require_approval: 'never' },
     ...searches.map(type => ({ type, name: type }))]);
@@ -2013,6 +2021,7 @@ test('chat Model Context opts into Gateway-hosted MCP and preserves per-route ap
   expect(responsesRequests[2].input).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'mcp_call', id: nativeResult.id })]));
   expect(responsesRequests[2].streaik_mcp_history).toEqual({ [nativeResult.id]: 'gateway-history-receipt' });
   expect(responsesRequests[2].input.some(item => item.type?.startsWith('mcp_approval_'))).toBe(false);
+  expect(JSON.stringify(responsesRequests[2].input)).not.toContain(hostedActivity.callId);
   expect(methods).toEqual(['server/discover', 'tools/list']);
 
   await openContext();

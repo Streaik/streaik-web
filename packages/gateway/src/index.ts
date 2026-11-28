@@ -2,6 +2,7 @@ import { DefaultChatTransport } from 'ai';
 import type { UIMessage } from 'ai';
 import { readGatewayError, sanitizeChatErrors } from './errorDetails.ts';
 import { nativeChatTransport } from './nativeChat.ts';
+import { hostedActivityHeader } from './hostedActivity.ts';
 import { apiChatHostedSkillProviders, apiChatHostedSkills, hostedSkillProviders } from './hostedSkills.ts';
 import type { HostedSkill } from './hostedSkills.ts';
 export type { HostedSkill, HostedSkillReference, HostedInlineSkill } from './hostedSkills.ts';
@@ -527,9 +528,10 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
         return { url, model, gateway: true, fetch: async (_input, init) => {
           const headers = new Headers(init?.headers);
           const beta = endpoint === '/v1/responses' && provider === 'openai' && headers.get('openai-beta');
-          return expectEventStream(await request(url, { kind: 'chat', provider }, init,
-            provider === 'anthropic' ? anthropicChatProtocolHeaders(headers) : beta ? { 'OpenAI-Beta': beta } : undefined,
-            hostedSkillProviders(skills)));
+          const protocol = provider === 'anthropic' ? anthropicChatProtocolHeaders(headers) : new Headers();
+          if (beta) protocol.set('OpenAI-Beta', beta);
+          if (endpoint === '/v1/responses' && headers.get(hostedActivityHeader) === '1') protocol.set(hostedActivityHeader, '1');
+          return expectEventStream(await request(url, { kind: 'chat', provider }, init, protocol, hostedSkillProviders(skills)));
         } };
       });
       return new GatewayChatTransport({

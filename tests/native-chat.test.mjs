@@ -58,6 +58,66 @@ async function send(transport, model, extras = {}) {
   return Array.fromAsync(await transport.sendMessages({ chatId: 'conversation', messages, body: { model }, trigger: 'submit-message', ...extras }));
 }
 
+test('Gateway Responses streams hosted call cards and excludes them from the next stateless request', async () => {
+  const model = 'mistral/mistral-large-latest';
+  const requests = [];
+  const hostedMcp = [{ type: 'mcp', server_label: 'inventory', server_url: 'https://inventory.example.test/mcp', require_approval: 'never' }];
+  const activity = { callId: 'fixture_hosted_call', name: 'streaik_inventory_lookup', input: { sku: 'A-1' }, output: null, error: null };
+  const frame = fields => new TextEncoder().encode(`event: streaik.hosted_tool_activity\ndata: ${JSON.stringify({
+    type: 'streaik.hosted_tool_activity', activity: { ...activity, ...fields },
+  })}\n\n`);
+  let downstream;
+  const gateway = createGateway(root, () => ({ authorization: 'Bearer model-key' }), async (_url, init) => {
+    assert.equal(new Headers(init.headers).get('x-streaik-hosted-tool-activity'), '1');
+    const body = JSON.parse(init.body);
+    requests.push(body);
+    if (requests.length > 1) return response(responses, model);
+    return new Response(new ReadableStream({ start(controller) {
+      downstream = controller;
+      controller.enqueue(frame({ callId: 'unmatched', output: 'Not a result to render' }));
+      controller.enqueue(frame({}));
+    } }), { headers: { 'content-type': 'text/event-stream' } });
+  });
+  const transport = gateway.chatTransport(responses);
+  const body = { model, hostedMcp };
+  const user = messages[0];
+  const chunks = await transport.sendMessages({ chatId: 'conversation', messages: [user], body, trigger: 'submit-message', abortSignal: AbortSignal.timeout(5000) });
+  const replies = readUIMessageStream({ stream: chunks, terminateOnError: true })[Symbol.asyncIterator]();
+  try {
+    let reply;
+    do {
+      const next = await replies.next();
+      assert.equal(next.done, false, 'expected hosted tool activity before the model reply');
+      reply = next.value;
+    } while (!reply.parts.some(part => part.type === 'dynamic-tool'));
+    const [part] = reply.parts;
+    assert.equal(part.state, 'input-available');
+    assert.equal(part.providerExecuted, true);
+    assert.equal(part.toolMetadata.streaikHosted, true);
+    assert.deepEqual(part.input, { sku: 'A-1' });
+    downstream.enqueue(frame({ name: 'wrong_tool', output: 'Wrong name' }));
+    downstream.enqueue(frame({ output: { result: 'Found' } }));
+    downstream.enqueue(frame({ output: 'Duplicate' }));
+    downstream.enqueue(new Uint8Array(await response(responses, model).arrayBuffer()));
+    downstream.close();
+    for (;;) {
+      const next = await replies.next();
+      if (next.done) break;
+      reply = next.value;
+    }
+    assert.deepEqual(reply.parts.filter(part => part.type === 'dynamic-tool').map(part => part.output), [{ result: 'Found' }]);
+    assert.ok(reply.parts.some(part => part.type === 'text' && part.text === 'native reply'));
+
+    await send(transport, model, { messages: [user, reply, messages[2]], body });
+    assert.equal(requests.length, 2);
+    assert.equal(requests[1].store, false);
+    assert.match(JSON.stringify(requests[1].input), /native reply/);
+    assert.doesNotMatch(JSON.stringify(requests[1].input), /fixture_hosted_call|streaik_inventory_lookup|Found|function_call/);
+  } finally {
+    await replies.return();
+  }
+});
+
 for (const endpoint of gatewayChatEndpoints) test(`Gateway sends named hosted skills on ${endpoint} and scopes the skill key`, async () => {
   const api = endpoint === '/api/chat';
   const model = endpoint === messagesApi ? 'anthropic/claude-sonnet-4-6' : 'openai/gpt-4.1-mini';

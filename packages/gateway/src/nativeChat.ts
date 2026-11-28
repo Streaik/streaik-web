@@ -12,6 +12,7 @@ import type { HostedSkill } from './hostedSkills.ts';
 import { withResponsesHostedMcp } from './hostedMcp.ts';
 import type { HostedMcpTool } from './hostedMcp.ts';
 import { responsesMcpOutput, responsesMcpReplay } from './responsesMcp.ts';
+import { hostedActivityHeader, hostedActivityRelay, withoutHostedActivity } from './hostedActivity.ts';
 
 type NativeTarget = {
   url: string;
@@ -58,6 +59,8 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
       const previous = messages.at(-1);
       const mcpOutput = rawMcp ? responsesMcpOutput(target.url, model, previous?.role === 'assistant' ? previous : undefined) : undefined;
       const mcp = target.gateway && endpoint === '/v1/responses' && Array.isArray(hostedMcp) ? hostedMcp as HostedMcpTool[] : [];
+      const hostedActivity = target.gateway && endpoint === '/v1/responses' && (mcp.length || skills.length)
+        ? hostedActivityRelay() : undefined;
       const openAIResponses = !target.requestBody && endpoint === '/v1/responses' && model.startsWith('openai/');
       const anthropic = !target.requestBody && model.startsWith('anthropic/');
       const anthropicOptions = anthropic ? asRecord(asRecord(providerMetadata)?.anthropic) : undefined;
@@ -94,15 +97,17 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
         if (target.gateway) body = withNativeHostedSkills(body, endpoint, skills, toolChoice);
         body = withResponsesHostedMcp(body, mcp, toolChoice);
         if (mcpReplay) body = mcpReplay.body(body);
-        if (!beta && !anthropic) return target.fetch(input, body === init.body ? init : { ...init, body });
+        if (!beta && !anthropic && !hostedActivity) return target.fetch(input, body === init.body ? init : { ...init, body });
         const outgoing = new Headers(init.headers);
         if (beta) outgoing.set('OpenAI-Beta', beta);
+        if (hostedActivity) outgoing.set(hostedActivityHeader, '1');
         if (anthropic) {
           outgoing.delete('anthropic-version');
           outgoing.delete('anthropic-beta');
           anthropicChatProtocolHeaders(new Headers(headers), deferred.size > 0).forEach((value, name) => outgoing.set(name, value));
         }
-        return target.fetch(input, { ...init, body, headers: outgoing });
+        const response = target.fetch(input, { ...init, body, headers: outgoing });
+        return hostedActivity ? response.then(hostedActivity.tap) : response;
       };
       const sdk = { baseURL, apiKey: 'supplied-by-scoped-fetch', fetch: fetcher };
       const openai = endpoint !== '/v1/messages' ? (await import('@ai-sdk/openai')).createOpenAI(sdk) : undefined;
@@ -125,7 +130,7 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
       let gateway: ChatMessageMetadata['gateway'];
       let diagnostic: string | undefined;
       const result = streamText({
-        model: adapter, messages: await convertToModelMessages(nativeAttachmentMessages(mcpReplay?.messages ?? messages, endpoint), { tools, ignoreIncompleteToolCalls: true }),
+        model: adapter, messages: await convertToModelMessages(nativeAttachmentMessages(withoutHostedActivity(mcpReplay?.messages ?? messages), endpoint), { tools, ignoreIncompleteToolCalls: true }),
         instructions, tools, toolChoice: Object.keys(tools).length || nativeTools.length || target.gateway && skills.length || mcp.length
           ? chatToolChoice(toolChoice) : undefined,
         ...(typeof anthropicLimit === 'number' && { maxOutputTokens: anthropicLimit }),
@@ -137,8 +142,9 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
         experimental_download: async (files) => files.map(() => null),
         onError: () => {},
       });
-      return result.toUIMessageStream<ChatMessage>({
+      const stream = result.toUIMessageStream<ChatMessage>({
         originalMessages: messages,
+        sendStart: !hostedActivity,
         onError: (error) => {
           if (error instanceof GatewayError) return error.message;
           if (target.gateway) {
@@ -166,6 +172,7 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
             ...(metrics && { providerMetadata: { gateway: metrics } }) };
         },
       });
+      return hostedActivity ? hostedActivity.merge(stream, messages) : stream;
     },
     async reconnectToStream() { return null; },
   };
