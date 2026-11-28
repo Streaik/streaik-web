@@ -158,6 +158,8 @@ export const chatMessages = {
   'Add a reference image to edit.': ['Voeg een referentieafbeelding toe om te bewerken.', 'Añade una imagen de referencia para editar.'],
   'No gateway is configured.': ['Er is geen gateway ingesteld.', 'No hay ninguna puerta de enlace configurada.'],
   'Attachments': ['Bijlagen', 'Archivos adjuntos'],
+  'Download {{filename}}': ['{{filename}} downloaden', 'Descargar {{filename}}'],
+  'Open file: {{filename}}': ['Bestand openen: {{filename}}', 'Abrir archivo: {{filename}}'],
   'Add attachments': ['Bijlagen toevoegen', 'Añadir archivos adjuntos'],
   'Add to message': ['Aan bericht toevoegen', 'Añadir al mensaje'],
   'Files': ['Bestanden', 'Archivos'],

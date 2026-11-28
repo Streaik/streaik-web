@@ -2,9 +2,11 @@ import type { ChatMessage } from '@streaik/gateway';
 import { Button, Tooltip } from '@streaik/themes';
 import type { IconName } from '@streaik/themes';
 import { useState } from 'react';
+import { OutputAttachmentMenu } from './AssistantAttachments';
 import { ChatIcon } from './ChatIcon';
 import { browserNumberFormat, useAppTranslation } from './i18n';
 import { messageTokens, nonnegativeNumber } from './messageMetadata';
+import type { OutputAttachment } from './outputAttachments';
 import type { MessageSpeechState, ToggleMessageSpeech } from './useMessageSpeech';
 
 const integer = browserNumberFormat({ maximumFractionDigits: 0 });
@@ -21,9 +23,10 @@ function Badge({ icon, label, value, format, unit = '', details }: {
     aria-label={`${label}: ${text}${details ? ` (${details})` : ''}`}><ChatIcon name={icon} />{text}</span></Tooltip>;
 }
 
-export function MessageActions({ message, userText, showMessageTokens, showMetrics, pendingReply, speechState, onReadAloud }: {
+export function MessageActions({ message, userText, showMessageTokens, showMetrics, pendingReply, speechState, onReadAloud, attachments, menuContainer }: {
   message: ChatMessage; userText?: string; showMessageTokens: boolean; showMetrics: boolean;
   pendingReply: boolean; speechState?: MessageSpeechState; onReadAloud?: ToggleMessageSpeech;
+  attachments?: readonly OutputAttachment[]; menuContainer: HTMLDivElement | null;
 }) {
   const { t } = useAppTranslation();
   const [copyStatus, setCopyStatus] = useState('');
@@ -48,6 +51,7 @@ export function MessageActions({ message, userText, showMessageTokens, showMetri
     {spokenText && <Button type="button" variant="subtle" className="chat-read-aloud" disabled={!onReadAloud}
       aria-label={speechLabel} title={onReadAloud ? speechLabel : t('No configured speech model is available.')}
       onClick={() => { void onReadAloud?.(message.id, spokenText); }}><ChatIcon name={speaking ? 'stop' : 'audio'} /></Button>}
+    {!!attachments?.length && menuContainer && <OutputAttachmentMenu files={attachments} container={menuContainer} />}
     {showMessageTokens && <Badge icon="tokens" label={t(tokens !== undefined ? 'Total tokens' : input !== undefined ? 'Input tokens' : 'Output tokens')}
       value={tokens ?? input ?? output} format={integer} details={tokens !== undefined ? breakdown : undefined} />}
     <Badge icon="cost" label={t(costLabel)} value={metrics?.cost} format={costFormat} />

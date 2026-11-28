@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { selectKeyProvider } from './provider-key-picker';
+import { recordVideoFixture } from './video-fixtures';
 
 const model = 'google/veo-3.1-generate';
 const openVideos = (page: Page) => page.getByRole('button', { name: 'Videos', exact: true }).click();
@@ -27,31 +28,6 @@ async function addKey(page: Page) {
   await settings.getByRole('button', { name: 'Save Google Gemini key' }).click();
   await expect(settings.getByRole('status')).toHaveText('Provider key saved.');
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
-}
-
-async function recordFixture(page: Page) {
-  const bytes = await page.evaluate(async () => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 32;
-    canvas.height = 24;
-    const ctx = canvas.getContext('2d')!;
-    const stream = canvas.captureStream(20);
-    const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' });
-    const chunks: Blob[] = [];
-    recorder.ondataavailable = ({ data }) => chunks.push(data);
-    const stopped = new Promise<void>(resolve => { recorder.onstop = () => resolve(); });
-    recorder.start();
-    for (let frame = 0; frame < 5; frame++) {
-      ctx.fillStyle = frame % 2 ? 'green' : 'blue';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      await new Promise(resolve => setTimeout(resolve, 70));
-    }
-    recorder.stop();
-    await stopped;
-    stream.getTracks().forEach(track => track.stop());
-    return [...new Uint8Array(await new Blob(chunks).arrayBuffer())];
-  });
-  return Buffer.from(bytes).toString('base64');
 }
 
 test('a pending video resumes after reload and its playable result is saved', async ({ page }) => {
@@ -86,7 +62,7 @@ test('a pending video resumes after reload and its playable result is saved', as
   await expect(page.getByText('Generating video…', { exact: true })).toBeVisible();
   await expect(page.locator('.video-preview.image-shimmer')).toBeVisible();
   await expect.poll(() => checks).toBeGreaterThanOrEqual(1);
-  const fixture = await recordFixture(page);
+  const fixture = await recordVideoFixture(page);
 
   await page.reload();
   await openVideos(page);

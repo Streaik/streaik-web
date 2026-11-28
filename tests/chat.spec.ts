@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { BlobWriter, TextReader, ZipWriter } from '@zip.js/zip.js';
 import { faviconEndpoint, iconResponse, openAiFavicon } from './icon-fixtures';
 import { selectKeyProvider } from './provider-key-picker';
+import { recordVideoFixture } from './video-fixtures';
 
 const directory = JSON.parse(readFileSync(new URL('../packages/chat/src/provider-directory.json', import.meta.url), 'utf8')) as {
   providers: { id: string; country?: string; regions?: string[]; tokenPricing?: Partial<Record<string, TokenRates>> }[];
@@ -1596,6 +1597,110 @@ function sse(text: string, turn: number, answerModel = model) {
     { type: 'finish', finishReason: 'stop', messageMetadata: { model: answerModel } },
   ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n';
 }
+
+const attachmentPixel = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg==';
+const imageFile = { type: 'file', mediaType: 'image/png', url: `data:image/png;base64,${attachmentPixel}` };
+
+function attachmentStream(events: object[]) {
+  return { headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' }, body: [
+    { type: 'start' }, { type: 'start-step' }, ...events, { type: 'finish-step' }, { type: 'finish', finishReason: 'stop' },
+  ].map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n' };
+}
+
+test('chat output attachments show an image-only reply and download the image with the keyboard', async ({ page }) => {
+  await mockModels(page);
+  await page.route('**/gateway/api/chat', route => route.fulfill(attachmentStream([
+    imageFile, { type: 'text-start', id: 'empty' }, { type: 'text-end', id: 'empty' },
+  ])));
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await chooseChatModel(page);
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('Make one image'); await composer.press('Enter');
+  const reply = page.getByRole('article', { name: 'Assistant', exact: true });
+  await expect(reply).toHaveCount(1);
+  const image = reply.getByRole('img', { name: 'image-1.png' });
+  await expect(image).toBeVisible();
+  await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(1);
+  const trigger = reply.getByRole('button', { name: 'Attachments', exact: true });
+  await trigger.press('Enter');
+  const item = page.getByRole('menuitem', { name: 'Download image-1.png', exact: true });
+  await expect(item).toBeFocused();
+  const download = page.waitForEvent('download');
+  await item.press('Enter');
+  const downloaded = await download;
+  expect(downloaded.suggestedFilename()).toBe('image-1.png');
+  expect(readFileSync(await downloaded.path())).toEqual(Buffer.from(attachmentPixel, 'base64'));
+  await expect(trigger).toBeFocused();
+});
+
+test('chat output attachments share one menu across MCP and API files, preserve playable video cards, and survive reload', async ({ page }) => {
+  await mockModels(page);
+  const pdf = Buffer.from('%PDF-1.4\n%%EOF\n');
+  const presentation = { type: 'file', mediaType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    url: 'data:application/vnd.openxmlformats-officedocument.presentationml.presentation;base64,c2xpZGVz' };
+  let turn = 0;
+  let clip: string;
+  const link = { type: 'resource_link', mimeType: 'image/png', name: 'Cloud image.png', uri: 'https://files.example.test/share/image' };
+  await page.route('**/gateway/api/chat', route => {
+    if (++turn === 2) return route.fulfill(attachmentStream([presentation]));
+    const call = { toolCallId: 'fixture-tool', dynamic: true, providerExecuted: true };
+    return route.fulfill(attachmentStream([
+      { type: 'tool-input-available', toolName: 'fixture_media', input: {}, ...call },
+      { type: 'tool-output-available', ...call, output: { content: [
+        { type: 'image', mimeType: 'image/png', data: attachmentPixel, name: 'Tool image.png' },
+        { type: 'resource', resource: { uri: 'video://generated/tool.webm', mimeType: 'video/webm', blob: clip } },
+        { type: 'resource', resource: { uri: 'artifact://generated/Report.pdf', mimeType: 'application/pdf', blob: pdf.toString('base64') } },
+        link,
+      ] } },
+      { type: 'finish-step' }, { type: 'start-step' }, imageFile,
+      { type: 'file', mediaType: 'video/webm', url: `data:video/webm;base64,${clip}` },
+      { type: 'text-start', id: 'caption' }, { type: 'text-delta', id: 'caption', delta: 'Here are your files.' }, { type: 'text-end', id: 'caption' },
+    ]));
+  });
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await closeSettings(page);
+  await chooseChatModel(page);
+  clip = await recordVideoFixture(page);
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('Generate a gallery, videos, and a report'); await composer.press('Enter');
+  const reply = page.getByRole('article', { name: 'Assistant', exact: true }).filter({ hasText: 'Here are your files.' });
+  const assertMixedReply = async () => {
+    await expect(reply.locator('.chat-output-images')).toHaveCount(1);
+    await expect(reply.locator('.chat-output-images img')).toHaveCount(2);
+    await expect(reply.getByRole('region', { name: 'Assistant activity' })).toBeVisible();
+    const videoCards = page.getByRole('article', { name: 'Generated video', exact: true });
+    await expect(videoCards).toHaveCount(2);
+    await expect(videoCards.getByRole('button', { name: 'Attachments', exact: true })).toHaveCount(0);
+    for (const index of [0, 1]) {
+      await expect(videoCards.nth(index).locator('video[controls][playsinline]')).toHaveCount(1);
+      await expect.poll(() => videoCards.nth(index).locator('video').evaluate((video: HTMLVideoElement) => video.videoWidth)).toBe(32);
+    }
+  };
+  await assertMixedReply();
+  const trigger = reply.getByRole('button', { name: 'Attachments', exact: true });
+  await trigger.click();
+  const menu = page.getByRole('menu', { name: 'Attachments', exact: true });
+  await expect(menu.getByRole('menuitem')).toHaveCount(6);
+  await expect(menu.getByRole('menuitem', { name: 'Download tool.webm' })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Download video-6.webm' })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Open file: Cloud image.png' })).toHaveAttribute('href', link.uri);
+  const download = page.waitForEvent('download');
+  await menu.getByRole('menuitem', { name: 'Download Report.pdf' }).click();
+  const downloaded = await download;
+  expect(downloaded.suggestedFilename()).toBe('Report.pdf');
+  expect(readFileSync(await downloaded.path())).toEqual(pdf);
+
+  await composer.fill('Just a presentation'); await composer.press('Enter');
+  const documentReply = page.getByRole('article', { name: 'Assistant', exact: true }).filter({ hasNotText: 'Here are your files.' });
+  await documentReply.getByRole('button', { name: 'Attachments', exact: true }).click();
+  await expect(menu.getByRole('menuitem', { name: 'Download attachment-1.pptx' })).toBeVisible();
+  await expect(page).toHaveURL(/\/c\/[0-9a-f-]{36}$/);
+  await page.reload();
+  await assertMixedReply();
+  await documentReply.getByRole('button', { name: 'Attachments', exact: true }).click();
+  await expect(menu.getByRole('menuitem', { name: 'Download attachment-1.pptx' })).toBeVisible();
+});
 
 test('Provider Model Context sends authenticated MCP upstream without browser discovery', async ({ page }) => {
   await mockModels(page);
