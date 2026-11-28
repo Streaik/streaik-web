@@ -523,6 +523,61 @@ for (const policy of ['unlimited', 'maximum', 'stop tool'] as const) {
   });
 }
 
+test('Gemini API Chat round-trips browser history tool results and native replay metadata', async ({ page }) => {
+  const gemini = 'google/gemini-3.8-flash';
+  const toolName = 'local_conversations_list_all';
+  const toolCallId = 'gcall_fixture';
+  const approval = { id: 'approval-fixture', signature: 'v1.approval-fixture', approved: true };
+  const providerMetadata = { google: { googleInteractionsReplay: { model: 'gemini-3.8-flash', steps: [
+    { type: 'thought', signature: 'google-thought-fixture' },
+  ] } } };
+  const requests: { model: string; messages: { role: string; parts: unknown[] }[] }[] = [];
+  const headers = { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' };
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [{ id: gemini, type: 'language' }] } }));
+  await page.route('**/gateway/api/chat', async route => {
+    requests.push(route.request().postDataJSON());
+    expect(requests.at(-1)?.model).toBe(gemini);
+    if (requests.length === 1) {
+      const frames = [
+        { type: 'start-step' },
+        { type: 'tool-input-available', toolCallId, toolName, input: {}, dynamic: true, providerExecuted: false },
+        { type: 'tool-approval-request', toolCallId, approvalId: approval.id, signature: approval.signature },
+        { type: 'reasoning-start', id: 'gemini-replay' },
+        { type: 'reasoning-end', id: 'gemini-replay', providerMetadata },
+        { type: 'finish', finishReason: 'tool-calls' },
+      ];
+      return route.fulfill({ headers, body: frames.map(frame => `data: ${JSON.stringify(frame)}\n\n`).join('') + 'data: [DONE]\n\n' });
+    }
+    return route.fulfill({ headers, body: sse(requests.length === 2 ? 'Browser history received.' : 'Follow-up complete.', requests.length, gemini) });
+  });
+  await page.goto('/');
+  await showSettings(page); await addKey(page, 'Google Gemini', 'google-fixture-key'); await closeSettings(page);
+  await chooseModel(page, 'gemini-3.8-flash');
+  await page.getByRole('button', { name: 'Chat settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Chat settings', exact: true });
+  await settings.getByRole('tab', { name: 'Tools', exact: true }).click();
+  await settings.getByRole('switch', { name: 'Chat History', exact: true }).check();
+  await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true });
+  await composer.fill('List my conversations.'); await composer.press('Enter');
+  await page.getByRole('dialog', { name: 'Approve tool execution', exact: true }).getByRole('button', { name: 'Approve and run' }).click();
+  await expect(page.getByText('Browser history received.', { exact: true })).toBeVisible();
+  await composer.fill('What else?'); await composer.press('Enter');
+  await expect(page.getByText('Follow-up complete.', { exact: true })).toBeVisible();
+  expect(requests).toHaveLength(3);
+  for (const request of requests.slice(1)) {
+    const history = request.messages.filter(message => message.role === 'assistant').flatMap(message => message.parts);
+    expect(history).toEqual(expect.arrayContaining([
+      { type: 'step-start' },
+      expect.objectContaining({ type: 'dynamic-tool', toolCallId, toolName, state: 'output-available', approval,
+        output: expect.objectContaining({ structuredContent: expect.objectContaining({
+          conversations: expect.arrayContaining([expect.objectContaining({ metadata: { name: 'List my conversations.' } })]),
+        }) }) }),
+      expect.objectContaining({ type: 'reasoning', text: '', providerMetadata }),
+    ]));
+  }
+});
+
 for (const outcome of ['completed', 'unknown'] as const) {
   test(`hosted approval is submitted once and replays only ${outcome} history`, async ({ page }) => {
     await mockModels(page);
