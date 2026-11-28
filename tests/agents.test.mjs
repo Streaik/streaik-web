@@ -4,7 +4,8 @@ import { primaryAgentModel } from '../packages/chat/src/agentDefinition.ts';
 import { agentIconSources, createAgentDraft, saveAgentDraft } from '../packages/chat/src/agentDraft.ts';
 import { buildAgentCatalog, defaultAgentKey, emptyAgentData, readAgentData, removeAgentChange, roleAssignment,
   saveAgentDefinition, serializeAgentData, setRoleAssignment } from '../packages/chat/src/agentCatalog.ts';
-import { agentProviderOptions, agentProviderRequest, withAgentProviderOptions } from '../packages/chat/src/agentProviderSettings.ts';
+import { agentProviderOptions, agentProviderRequest, patchAgentProviderModels, sharedAgentProviderOptions,
+  withAgentProviderOptions } from '../packages/chat/src/agentProviderSettings.ts';
 
 const fixture = {
   name: 'ExampleAgent', description: 'An example.', instructions: 'Use the supplied context.',
@@ -84,6 +85,56 @@ test('agent provider edits round-trip as flat, model-specific native metadata', 
   assert.deepEqual(legacyEdit.model, editedModel);
   assert.equal(legacyEdit.models, undefined);
   assert.deepEqual(withAgentProviderOptions(model, {}), { id: model.id, type: model.type, providerHeaders: model.providerHeaders });
+});
+
+test('All applies only edited provider options and preserves model-specific nested values', () => {
+  const first = { id: 'openai/main', type: 'language', providerMetadata: { service_tier: 'flex', reasoning: { effort: 'low', summary: 'auto' } } };
+  const second = { id: 'openai/router', type: 'decision', providerMetadata: { service_tier: 'priority', reasoning: { summary: 'detailed', effort: 'low' }, future: [0, false, null] } };
+  const other = { id: 'cerebras/gpt-oss-120b', providerMetadata: { seed: 0 } };
+  const models = [first, other, second];
+  const shared = sharedAgentProviderOptions([first, second]);
+  assert.deepEqual(shared, { reasoning: { effort: 'low' } });
+
+  const edited = patchAgentProviderModels(models, 'openai', shared, { reasoning: { effort: 'high' }, service_tier: 'scale' });
+  assert.deepEqual(edited, [
+    { ...first, providerMetadata: { service_tier: 'scale', reasoning: { effort: 'high', summary: 'auto' } } },
+    other,
+    { ...second, providerMetadata: { service_tier: 'scale', reasoning: { summary: 'detailed', effort: 'high' }, future: [0, false, null] } },
+  ]);
+  assert.equal(edited[1], other);
+
+  const common = sharedAgentProviderOptions([edited[0], edited[2]]);
+  const [cleared] = patchAgentProviderModels(edited, 'openai', common, { ...common, service_tier: undefined });
+  assert.deepEqual(cleared.providerMetadata, { reasoning: { effort: 'high', summary: 'auto' } });
+});
+
+test('All edits individual provider tools and response includes without losing model-specific entries', () => {
+  const web = { type: 'web_search', search_context_size: 'high' };
+  const code = { type: 'code_interpreter', container: { type: 'auto' } };
+  const image = { type: 'image_generation' };
+  const first = { id: 'openai/one', providerMetadata: { tools: [web], include: ['web_search_call.action.sources'] } };
+  const second = { id: 'openai/two', providerMetadata: { tools: [web, code], include: ['code_interpreter_call.outputs'] } };
+  const models = [first, second];
+  const shared = sharedAgentProviderOptions(models);
+  assert.deepEqual(shared, { tools: [web] });
+  const include = 'image_generation_call.outputs';
+  const edited = patchAgentProviderModels(models, 'openai', shared, { tools: [image], include: [include] });
+  assert.deepEqual(edited, [
+    { ...first, providerMetadata: { tools: [image], include: [...first.providerMetadata.include, include] } },
+    { ...second, providerMetadata: { tools: [code, image], include: [...second.providerMetadata.include, include] } },
+  ]);
+});
+
+test('All saves Anthropic header options without replacing unrelated per-model headers', () => {
+  const first = { id: 'anthropic/one', providerHeaders: { 'Anthropic-Version': '2023-06-01', 'X-Extra': 'one' } };
+  const second = { id: 'anthropic/two', providerMetadata: { future: true }, providerHeaders: { 'X-Extra': 'two' } };
+  const models = [first, second];
+  const shared = sharedAgentProviderOptions(models);
+  assert.deepEqual(shared, {});
+  assert.deepEqual(patchAgentProviderModels(models, 'anthropic', shared, { 'anthropic-beta': 'example-beta' }), [
+    { ...first, providerHeaders: { 'anthropic-version': '2023-06-01', 'anthropic-beta': 'example-beta', 'X-Extra': 'one' } },
+    { ...second, providerHeaders: { 'anthropic-beta': 'example-beta', 'X-Extra': 'two' } },
+  ]);
 });
 
 test('agent requests adapt only the selected model and agent storage redacts session-only options', () => {

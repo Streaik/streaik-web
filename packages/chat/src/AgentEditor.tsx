@@ -12,7 +12,7 @@ import { AgentProviderFields, agentProviderGroups } from './AgentProviderFields'
 import { AgentSkillFields } from './AgentSkillFields';
 import { ChatExecutionField } from './ChatExecutionField';
 import { agentSkillsTool, patchAgentSkills } from './agentTools';
-import { withAgentProviderOptions } from './agentProviderSettings';
+import { patchAgentProviderModels, withAgentProviderOptions } from './agentProviderSettings';
 import { ChatIcon } from './ChatIcon';
 import { DialogTabs } from './DialogTabs';
 import { useAppTranslation } from './i18n';
@@ -81,6 +81,11 @@ export function AgentEditor({ entry, seed, catalog, catalogStatus, tags, mcpServ
     setError(undefined);
   }
 
+  function patchProvider(provider: ChatProviderId, previous: NativeOptions, next: NativeOptions) {
+    setDraft(old => ({ ...old, models: patchAgentProviderModels(old.models, provider, previous, next) }));
+    setError(undefined);
+  }
+
   function save(event: FormEvent<HTMLFormElement>, close: () => void) {
     event.preventDefault();
     if (skillBusy) return;
@@ -114,7 +119,7 @@ export function AgentEditor({ entry, seed, catalog, catalogStatus, tags, mcpServ
         </section>)}
         {providerTabs.map(({ key, provider, entries }) => <section key={key} className="agent-panel" id={`${id}-${key}-panel`}
           role="tabpanel" aria-labelledby={`${id}-${key}-tab`} hidden={key !== tab}>
-          <AgentProviderFields provider={provider} entries={entries} onChange={patchModel} />
+          <AgentProviderFields provider={provider} entries={entries} onChange={patchModel} onChangeAll={patchProvider} />
         </section>)}
       </div>
       {error && <p ref={alert} className="chat-error agent-save-error" role="alert" tabIndex={-1}>{t(error.message)}</p>}

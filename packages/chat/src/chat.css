@@ -330,8 +330,8 @@ body { margin: 0; }
 .chat-settings-panel > .chat-settings-section { border: 0; margin: 0; padding: 0; }
 @media (max-width: 42rem) {
   .chat-settings-layout { grid-template-columns: auto minmax(0, 1fr); }
-  .chat-settings-tabs button { justify-content: center; width: 2.75rem; padding: .25rem; }
-  .chat-settings-tabs button span { display: none; }
+  .chat-settings-dialog .chat-settings-tabs button { justify-content: center; width: 2.75rem; padding: .25rem; }
+  .chat-settings-dialog .chat-settings-tabs button span { display: none; }
   .chat-settings-panel .appearance-row { flex-wrap: wrap; }
 }
 .chat-start { max-width: 48rem; padding: 2rem; margin-inline: auto; }
@@ -424,6 +424,14 @@ body { margin: 0; }
 .agent-form .agent-actions { border-top: 1px solid var(--border); padding-top: .7rem; }
 .agent-panels { min-height: 0; overflow: auto; padding: .15rem .2rem .3rem; }
 .agent-panel:not([hidden]), .agent-field, .agent-icon-entry, .agent-field-group { display: grid; gap: .65rem; min-width: 0; }
+.agent-provider-models { display: grid; grid-template-columns: minmax(0, 31%) minmax(0, 1fr); gap: .65rem; }
+.agent-provider-tabs { position: sticky; inset-block-start: 0; max-block-size: min(45dvh, 20rem); }
+.agent-provider-tabs button { min-inline-size: 0; overflow-wrap: anywhere; }
+.agent-provider-model-panel:not([hidden]) { display: grid; gap: .65rem; min-inline-size: 0; }
+@media (max-width: 30rem) {
+  .agent-provider-models { grid-template-columns: minmax(0, 1fr); }
+  .agent-provider-tabs { position: static; max-block-size: 9rem; }
+}
 .agent-field { gap: .3rem; }
 .agent-field label { font-weight: 600; }
 .agent-form :is(.agent-input, .ui-textarea, .ui-select) { box-sizing: border-box; min-width: 0; width: 100%; }

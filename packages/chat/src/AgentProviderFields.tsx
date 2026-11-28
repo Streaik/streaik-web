@@ -2,7 +2,7 @@ import type { CatalogModel, ChatModel } from '@streaik/gateway';
 import { useId, useState } from 'react';
 import { agentCatalogModel, agentModelKey } from './agentDefinition';
 import type { AgentModel } from './agentDefinition';
-import { agentProviderOptions } from './agentProviderSettings';
+import { agentProviderOptions, sharedAgentProviderOptions } from './agentProviderSettings';
 import { useAppTranslation } from './i18n';
 import { ProviderChatForm } from './providerChat/forms';
 import { chatProviderForModel, chatProviders } from './providerChat/settings';
@@ -28,26 +28,60 @@ export function agentProviderGroups(models: readonly AgentModel[], catalog: read
   return groups;
 }
 
-export function AgentProviderFields({ provider, entries, onChange }: {
+export function AgentProviderFields({ provider, entries, onChange, onChangeAll }: {
   provider: ChatProviderId; entries: readonly ProviderModel[]; onChange: (index: number, options: NativeOptions) => void;
+  onChangeAll: (provider: ChatProviderId, previous: NativeOptions, next: NativeOptions) => void;
 }) {
   const { t } = useAppTranslation();
   const id = useId();
-  const [selected, setSelected] = useState<string>();
-  const active = entries.find(({ key }) => key === selected)?.key ?? entries[0]?.key;
-  return <div className="chat-provider-fields">
-    {entries.length > 1 && <div className="chat-provider-select">
-      <label htmlFor={id}>{t('Model')}</label>
-      <select id={id} value={active} onChange={(event) => setSelected(event.currentTarget.value)}>
-        {entries.map(({ key, info, model }) => <option key={key} value={key}>
-          {info.name === info.id ? info.id : `${info.name} (${info.id})`}
-          {entries.some(entry => entry.key !== key && entry.model.id === model.id && entry.model.type !== model.type) &&
-            (model.type === 'decision' ? ` · ${t('Decision')}` : ` · ${t('Language')}`)}
-        </option>)}
-      </select>
+  const [selected, setSelected] = useState('all');
+  const multiple = entries.length > 1;
+  const active = entries.some(({ key }) => key === selected) ? selected : 'all';
+  const shared = multiple ? sharedAgentProviderOptions(entries.map(({ model }) => model)) : {};
+  const tabs = [
+    { key: 'all', label: t('All'), description: undefined },
+    ...entries.map(({ key, model }) => {
+      const label = model.id.slice(provider.length + 1);
+      const description = entries.some(entry => entry.key !== key && entry.model.id === model.id && entry.model.type !== model.type)
+        ? `${label} · ${t(model.type === 'decision' ? 'Decision' : 'Language')}` : undefined;
+      return { key, label, description };
+    }),
+  ];
+
+  function select(key: string, button: HTMLButtonElement) {
+    if (key === active) return;
+    setSelected(key);
+    button.closest('.agent-panels')?.scrollTo({ top: 0 });
+  }
+
+  return <div className={multiple ? 'agent-provider-models' : undefined}>
+    {multiple && <div className="chat-settings-tabs agent-provider-tabs" role="tablist" aria-label={t('Models')} aria-orientation="vertical">
+      {tabs.map(({ key, label, description }, index) => <button key={key} type="button" role="tab" id={`${id}-${index}-tab`}
+        aria-label={description} title={description ?? label} aria-selected={key === active} aria-controls={`${id}-${index}-panel`}
+        tabIndex={key === active ? 0 : -1} onClick={event => select(key, event.currentTarget)} onKeyDown={event => {
+          let next: number;
+          switch (event.key) {
+            case 'ArrowDown': next = (index + 1) % tabs.length; break;
+            case 'ArrowUp': next = (index + tabs.length - 1) % tabs.length; break;
+            case 'Home': next = 0; break;
+            case 'End': next = tabs.length - 1; break;
+            default: return;
+          }
+          event.preventDefault();
+          select(tabs[next].key, event.currentTarget);
+          event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
+        }}>{label}</button>)}
+    </div>}
+    {multiple && <div className="agent-provider-model-panel" role="tabpanel" id={`${id}-0-panel`} aria-labelledby={`${id}-0-tab`} hidden={active !== 'all'}>
+      <fieldset className="chat-provider-fields" aria-label={chatProviders[provider].label}>
+        <ProviderChatForm provider={provider} models={entries.map(({ info }) => info)} value={shared}
+          onChange={options => onChangeAll(provider, shared, options)} />
+      </fieldset>
     </div>}
     {/* Keep model-specific field state mounted when switching model or provider. */}
-    {entries.map(({ key, index, model, info }) => <div key={key} hidden={key !== active}>
+    {entries.map(({ key, index, model, info }, position) => <div key={key} className="agent-provider-model-panel"
+      role={multiple ? 'tabpanel' : undefined} id={multiple ? `${id}-${position + 1}-panel` : undefined}
+      aria-labelledby={multiple ? `${id}-${position + 1}-tab` : undefined} hidden={multiple && key !== active}>
       <fieldset className="chat-provider-fields" aria-label={chatProviders[provider].label}>
         <ProviderChatForm provider={provider} models={[info]} value={agentProviderOptions(model) ?? {}}
           onChange={options => onChange(index, options)} />
