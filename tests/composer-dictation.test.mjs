@@ -32,6 +32,12 @@ test('dictation requires a configured, available transcription model and a compa
   assert.deepEqual(selectDictationTarget([models[0], { ...models[1], tags: [] }], [realtime, recorded], capture), { mode: 'recorded', model: recorded });
 });
 
+test('GPT Transcribe uses WebRTC when available and the same model for recorded dictation otherwise', () => {
+  const catalog = [{ ...models[0], tags: ['realtime'] }];
+  assert.deepEqual(selectDictationTarget(catalog, [recorded], { ...capture, socket: false }), { mode: 'realtime', model: recorded });
+  assert.deepEqual(selectDictationTarget(catalog, [recorded], { ...capture, peer: false }), { mode: 'recorded', model: recorded });
+});
+
 test('a dictation take appends without rewriting existing draft whitespace', () => {
   assert.equal(appendDictation('First', '  second  '), 'First second');
   assert.equal(appendDictation('First\n', 'second'), 'First\nsecond');

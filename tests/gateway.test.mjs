@@ -2,11 +2,34 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import test from 'node:test';
 import { createGateway, GatewayError, normalizeGatewayBase, pickChatModels, readChatModels, readModelCatalog, requestHttp } from '../packages/gateway/src/index.ts';
+import { gatewayTranscriptionEndpoints, isSpeechCatalogModel, isVoiceCatalogModel, supportsFileTranscription, supportsRealtimeSpeech } from '../packages/gateway/src/index.ts';
 import { providerHeaders } from '../samples/byok/src/providerKeys.ts';
 
 const root = normalizeGatewayBase('/gateway', 'http://localhost:5173');
 const model = 'openai/gpt-4.1-mini';
 const keys = { openai: 'test-openai', anthropic: 'test-anthropic' };
+
+test('OpenAI speech-capable Realtime variants remain conversational audio and do not include transcription or legacy models', () => {
+  const audio = id => ({ id: `openai/${id}`, type: 'audio', tags: ['realtime', 'realtime-speech'] });
+  for (const id of ['gpt-realtime-2.1-mini', 'gpt-realtime-2.1', 'gpt-realtime-2', 'gpt-realtime-1.5', 'gpt-realtime-2.1-mini-2026-10-01']) {
+    const [model] = readModelCatalog({ data: [audio(id)] });
+    assert.equal(isSpeechCatalogModel(model), true);
+    assert.equal(supportsRealtimeSpeech(model), true);
+    assert.equal(isVoiceCatalogModel(model), true);
+    assert.equal(supportsRealtimeSpeech({ ...model, tags: ['realtime'] }), false);
+  }
+  for (const id of ['gpt-realtime-mini', 'gpt-realtime-whisper', 'gpt-realtime-2-transcribe', 'gpt-live-1']) {
+    assert.equal(isSpeechCatalogModel(audio(id)), false);
+  }
+});
+
+test('file transcription routes remain enabled for GPT Transcribe but not the live-only models', () => {
+  for (const route of gatewayTranscriptionEndpoints) {
+    assert.equal(supportsFileTranscription(route, 'openai/gpt-transcribe'), true);
+    assert.equal(supportsFileTranscription(route, 'openai/gpt-live-transcribe'), false);
+    assert.equal(supportsFileTranscription(route, 'openai/gpt-realtime-whisper'), false);
+  }
+});
 
 test('gateway HTTP errors keep structured diagnostics and fall back for unsafe or unreadable details', async () => {
   const exact = 'Unsupported parameter: reasoning.effort is not supported with this model.';

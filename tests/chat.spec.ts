@@ -3745,6 +3745,7 @@ const speechSockets = [
   { id: 'deepgram/aura-2-asteria-en', url: 'wss://api.deepgram.com/v1/speak?model=aura-2-asteria-en', token: 'deepgram-fixture' },
   { id: 'cartesia/tts/sonic-3.6/fixture-voice', url: 'wss://api.cartesia.ai/tts/websocket?cartesia_version=2026-08-14', token: 'cartesia-fixture' },
   { id: 'mistral/voxtral-mini-tts-3-0', url: 'wss://api.mistral.ai/v1/audio/speech/realtime?model=voxtral-mini-tts-3-0', token: 'rt_fixture' },
+  { id: 'openai/gpt-realtime-2.1-mini', url: 'wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1-mini', token: 'ek_fixture' },
 ];
 
 async function prepareRealtimeSpeech(page: Page, id: string) {
@@ -3753,6 +3754,11 @@ async function prepareRealtimeSpeech(page: Page, id: string) {
     const key = `streaik.agents.v1:${scope}`;
     if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify({ version: 1, assignments: {}, local: [],
       overrides: [{ id: 'speech', definition: { name: 'SpeechAgent', description: 'Creates speech.', instructions: 'Create speech', model: { id } } }] }));
+    if (id.startsWith('openai/')) window.WebSocket = new Proxy(WebSocket, { construct(target, args) {
+      if (String(args[0]).startsWith('wss://api.openai.com/v1/realtime?'))
+        document.documentElement.dataset.speechSocketProtocols = JSON.stringify(args[1]);
+      return Reflect.construct(target, args);
+    } });
     const start = AudioBufferSourceNode.prototype.start;
     AudioBufferSourceNode.prototype.start = function (...args: Parameters<typeof start>) {
       start.apply(this, args);
@@ -3760,8 +3766,10 @@ async function prepareRealtimeSpeech(page: Page, id: string) {
       root.dataset.pcmStarts = String(Number(root.dataset.pcmStarts ?? 0) + 1);
     };
   }, id);
+  const openAI = id.startsWith('openai/');
   await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [
-    { id: model }, { id, name: 'Realtime Speech Fixture', type: 'speech', tags: ['realtime', 'realtime-token'] },
+    { id: model }, { id, name: 'Realtime Speech Fixture', type: openAI ? 'audio' : 'speech',
+      tags: ['realtime', openAI ? 'realtime-speech' : 'realtime-token'] },
     { id: openaiSpeech, type: 'speech' },
   ] } }));
   await page.route('**/gateway/v1/skills?*', route => route.fulfill({ json: { data: [], has_more: false } }));
@@ -3769,7 +3777,7 @@ async function prepareRealtimeSpeech(page: Page, id: string) {
   await showSettings(page);
   await addKey(page);
   const provider = id.split('/')[0];
-  await addKey(page, provider[0].toUpperCase() + provider.slice(1), `test-${provider}-key`);
+  if (!openAI) await addKey(page, provider[0].toUpperCase() + provider.slice(1), `test-${provider}-key`);
   await closeSettings(page);
   await page.getByRole('button', { name: 'Speech', exact: true }).click();
   await expect(page).toHaveURL(/\/speech$/);
@@ -3783,8 +3791,15 @@ for (const { id, url, token } of speechSockets) {
     let complete: (() => void) | undefined;
     const inputs: string[] = [];
     const wave = speechWav(), pcm = wave.subarray(44);
-    await page.route(`**/gateway/api/realtime/token/${id}`, route => {
+    await page.route(provider === 'openai' ? '**/gateway/v1/realtime/client_secrets' : `**/gateway/api/realtime/token/${id}`, async route => {
       tokens++;
+      if (provider === 'openai') {
+        expect(await route.request().headerValue('x-openai-key')).toBe(fakeKey);
+        expect(route.request().postDataJSON()).toMatchObject({ session: { type: 'realtime', model: id,
+          output_modalities: ['audio'], tools: [], tool_choice: 'none', audio: { input: { turn_detection: null },
+            output: { format: { type: 'audio/pcm', rate: 24000 } } } }, expires_after: { anchor: 'created_at', seconds: 60 } });
+        return route.fulfill({ json: { value: token, expires_at: Math.floor(Date.now() / 1000) + 60 } });
+      }
       expect(route.request().postDataJSON()).toEqual({});
       return route.fulfill({ json: { url, token, expiresAt: Math.floor(Date.now() / 1000) + 60 } });
     });
@@ -3813,6 +3828,19 @@ for (const { id, url, token } of speechSockets) {
             send({ type: 'chunk', context_id: event.context_id, data: pcm.toString('base64') });
             complete = () => send({ type: 'done', context_id: event.context_id });
           }
+        } else if (provider === 'openai') {
+          if (event.type === 'session.update') {
+            expect(event.session.model).toBeUndefined();
+            send({ type: 'session.updated', session: event.session });
+          } else {
+            expect(event).toMatchObject({ type: 'response.create', response: { conversation: 'none', tools: [], tool_choice: 'none' } });
+            inputs.push(event.response.input[0].content[0].text);
+            const responseId = `speech-${inputs.length}`;
+            send({ type: 'response.created', response: { id: responseId, metadata: event.response.metadata } });
+            send({ type: 'response.output_audio.delta', response_id: 'unrelated-response', delta: 'ignored' });
+            send({ type: 'response.output_audio.delta', response_id: responseId, delta: pcm.toString('base64') });
+            complete = () => send({ type: 'response.done', response: { id: responseId, status: 'completed' } });
+          }
         } else {
           if (event.type === 'session.update') send({ type: 'session.updated', session: event.session });
           if (event.type === 'input_text.append') text += event.text;
@@ -3840,6 +3868,8 @@ for (const { id, url, token } of speechSockets) {
     const starts = () => page.locator('html').evaluate(el => Number((el as HTMLElement).dataset.pcmStarts ?? 0));
     await sendSpeech('Realtime input');
     await expect.poll(starts).toBeGreaterThan(0);
+    if (provider === 'openai') await expect(page.locator('html')).toHaveAttribute('data-speech-socket-protocols',
+      JSON.stringify(['realtime', `openai-insecure-api-key.${token}`]));
     const downloads = page.getByRole('link', { name: 'Download' });
     await expect(downloads).toHaveCount(0);
     complete!();
@@ -3856,9 +3886,11 @@ for (const { id, url, token } of speechSockets) {
     const read = reply.getByRole('button', { name: 'Read aloud', exact: true });
     await read.click();
     await expect(reply.getByRole('button', { name: 'Stop reading aloud', exact: true })).toBeVisible();
+    await expect.poll(() => inputs.length).toBe(2);
     complete!();
     await expect(read).toBeEnabled();
     await read.click();
+    await expect.poll(() => inputs.length).toBe(3);
     await reply.getByRole('button', { name: 'Stop reading aloud', exact: true }).click();
     await expect.poll(() => closed).toBe(3);
     await expect(read).toBeEnabled();
@@ -3867,6 +3899,13 @@ for (const { id, url, token } of speechSockets) {
     expect(http).toBe(0);
     await page.getByRole('button', { name: 'Speech', exact: true }).click();
     await expect(downloads).toHaveCount(1);
+    if (provider === 'openai') {
+      await openRoute(page, 'Gateway');
+      await page.getByRole('menuitemradio', { name: '/api/speech', exact: true }).click();
+      await sendSpeech('Do not retry over HTTP');
+      await expect(page.getByRole('alert')).toContainText('This speech model requires Direct WebSocket.');
+      expect([http, tokens]).toEqual([0, 3]);
+    }
   });
 }
 

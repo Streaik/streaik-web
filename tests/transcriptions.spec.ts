@@ -870,7 +870,7 @@ test('Agent chat gates voice on the selected agent’s own transcription setting
   await expect(voice).toBeEnabled();
 });
 
-test('OpenAI microphone uses only the ephemeral secret, saves confirmed turns and releases capture', async ({ page }) => {
+for (const model of [liveModel, composerModel]) test(`${model} microphone uses only the ephemeral secret, saves confirmed turns and releases capture`, async ({ page }) => {
   await mockAudio(page);
   await page.addInitScript(() => {
     class Events extends EventTarget {
@@ -899,7 +899,9 @@ test('OpenAI microphone uses only the ephemeral secret, saves confirmed turns an
   await page.route('**/gateway/v1/realtime/client_secrets', async route => {
     secretRequests++;
     expect(await route.request().headerValue('x-openai-key')).toBe('fixture-provider-key');
-    expect(route.request().postDataJSON()).toMatchObject({ session: { type: 'transcription', audio: { input: { transcription: { model: liveModel } } } } });
+    expect(route.request().postDataJSON()).toEqual({ session: { type: 'transcription', audio: { input: {
+      transcription: { model }, turn_detection: { type: 'server_vad' },
+    } } } });
     await route.fulfill({ json: { value: 'test-ephemeral-secret', expires_at: expired ? 1 : Math.floor(Date.now() / 1000) + 60 } });
   });
   await page.route('https://api.openai.com/v1/realtime/calls', async route => {
@@ -910,9 +912,11 @@ test('OpenAI microphone uses only the ephemeral secret, saves confirmed turns an
     expect(route.request().postData()).toBe('fixture-offer');
     return route.fulfill({ contentType: 'application/sdp', headers, body: 'fixture-answer' });
   });
-  await openTranscriptions(page);
+  await openTranscriptions(page, 'OpenAI', [
+    { id: batchModel, type: 'transcription' }, { id: model, type: 'transcription', tags: ['realtime'] },
+  ]);
   await expect(start(page)).toBeDisabled();
-  await chooseModel(page, liveModel);
+  await chooseModel(page, model);
   await start(page).click();
   await expect(page.getByText('Listening…', { exact: true })).toBeVisible();
   async function event(type: string, fields: Record<string, string>) {

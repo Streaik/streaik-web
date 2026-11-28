@@ -38,6 +38,17 @@ test('speech is optional, interprets the portable agent settings, and can fall b
   assert.equal(chatVoiceSpeech(catalog, { model: fallback.model }), undefined);
 });
 
+test('the sample agent can select GPT Transcribe and GPT Realtime speech without reclassifying conversational audio', () => {
+  const transcription = { ...file, tags: ['realtime'] };
+  const audio = model('openai/gpt-realtime-2.1-mini', 'audio', ['realtime', 'realtime-speech']);
+  const agent = { transcription: { id: transcription.id }, speech: { model: { id: audio.id } } };
+  assert.equal(chatVoiceTranscription([transcription], capture, agent).id, transcription.id);
+  assert.equal(chatVoiceSpeech([audio], agent).model, audio);
+  assert.equal(chatVoiceSpeech([audio], { speech: { model: { id: audio.id, type: 'audio' } } }).model, audio);
+  assert.equal(chatVoiceSpeech([{ ...audio, tags: ['realtime'] }], agent), undefined);
+  assert.equal(chatVoiceSpeech([speech], agent, { model: { id: speech.id } }), undefined);
+});
+
 function collect(provider) {
   const previews = [], turns = [];
   const event = chatTranscriptionTurns(provider, { preview: text => previews.push(text), turn: text => turns.push(text) });
