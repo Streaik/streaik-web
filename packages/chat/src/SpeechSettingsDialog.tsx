@@ -1,4 +1,4 @@
-import { speechFormats } from '@streaik/gateway';
+import { isRealtimeOnlySpeechModel, speechFormats } from '@streaik/gateway';
 import type { CatalogModel } from '@streaik/gateway';
 import { Button, Switch } from '@streaik/themes';
 import { useId, useLayoutEffect, useRef, useState } from 'react';
@@ -11,13 +11,14 @@ import type { NativeSpeechOptions, SpeechPreferences, SpeechRoute } from './spee
 
 const voices = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer', 'verse', 'marin', 'cedar'];
 
-function SpeechFields({ options, onChange, compatible, native }: {
+function SpeechFields({ options, onChange, compatible, native, realtimeOnly }: {
   options: NativeSpeechOptions & { language?: string }; onChange: (value: typeof options) => void; compatible?: boolean; native?: boolean;
+  realtimeOnly?: boolean;
 }) {
   const { t } = useAppTranslation();
   const [custom, setCustom] = useState(() => !!options.voice && !voices.includes(options.voice));
   return <div className="image-settings-fields">
-    <label><span>{t('Speed')}</span><input type="number" placeholder="1" min={compatible ? 0.25 : 0.5} max={compatible ? 4 : 2} step="0.01"
+    <label><span>{t('Speed')}</span><input type="number" placeholder="1" min={compatible ? 0.25 : 0.5} max={realtimeOnly ? 1.5 : compatible ? 4 : 2} step="0.01"
       value={options.speed ?? ''} onChange={event => {
         const speed = event.currentTarget.valueAsNumber;
         onChange({ ...options, speed: Number.isFinite(speed) ? speed : undefined });
@@ -33,15 +34,15 @@ function SpeechFields({ options, onChange, compatible, native }: {
         onChange={event => onChange({ ...options, voice: event.currentTarget.value })} /></label>}
     </> : <label><span>{t('Voice')}</span><input maxLength={200} value={options.voice ?? ''}
       onChange={event => onChange({ ...options, voice: event.currentTarget.value })} /></label>}
-    <label><span>{t(native ? 'Response format' : 'Output format')}</span><select value={options.outputFormat ?? ''}
+    {!realtimeOnly && <label><span>{t(native ? 'Response format' : 'Output format')}</span><select value={options.outputFormat ?? ''}
       onChange={event => onChange({ ...options, outputFormat: event.currentTarget.value || undefined })}>
       <option value="">{t('Default')}</option>{speechFormats.map(format => <option key={format} value={format}>{format.toUpperCase()}</option>)}
-    </select></label>
+    </select></label>}
     {native && <label><span>{t('Stream format')}</span><select value={options.streamFormat ?? ''}
       onChange={event => onChange({ ...options, streamFormat: event.currentTarget.value === 'sse' ? 'sse' : event.currentTarget.value === 'audio' ? 'audio' : undefined })}>
       <option value="">{t('Default')}</option><option value="audio">{t('Audio')}</option><option value="sse">SSE</option>
     </select></label>}
-    {!compatible && <label><span>{t('Language')}</span><input maxLength={35} value={options.language ?? ''}
+    {!compatible && !realtimeOnly && <label><span>{t('Language')}</span><input maxLength={35} value={options.language ?? ''}
       onChange={event => onChange({ ...options, language: event.currentTarget.value })} /></label>}
     <label className="speech-instructions"><span>{t('Instructions')}</span><textarea rows={3} maxLength={4096} value={options.instructions ?? ''}
       onChange={event => onChange({ ...options, instructions: event.currentTarget.value })} /></label>
@@ -60,8 +61,9 @@ export function SpeechSettingsDialog({ route, models, initial, onSave, onClose }
   const [tab, setTab] = useState('general');
   const [reset, setReset] = useState(0);
   const native = route === '/v1/audio/speech';
+  const realtimeOnly = route === 'websocket' && models.length > 0 && models.every(model => isRealtimeOnlySpeechModel(model.id));
   const providers = [...new Set(models.map(({ id }) => id.split('/', 1)[0]))].filter(provider =>
-    Object.hasOwn(speechProviderFields, provider) || provider === 'openai' && !native);
+    Object.hasOwn(speechProviderFields, provider) || provider === 'openai' && !native && !realtimeOnly);
   const tabs = [['general', t('General')] as const, ...providers.map(provider => [provider, providerName(provider)] as const)];
   const active = tabs.some(([key]) => key === tab) ? tab : 'general';
   return <dialog ref={dialog} className="chat-settings chat-tools-dialog image-settings-dialog" aria-labelledby={`${id}-title`} onClose={onClose}>
@@ -74,7 +76,7 @@ export function SpeechSettingsDialog({ route, models, initial, onSave, onClose }
       {tabs.map(([key]) => <div key={key} role="tabpanel" id={`${id}-${key}-panel`} aria-labelledby={`${id}-${key}-tab`}
         hidden={key !== active} onInvalid={() => setTab(key)}>
         <section className="chat-tool-card">
-          {key === 'general' ? <SpeechFields key={`${route}:${reset}`} options={native ? value.native : value.general} native={native} compatible={native}
+          {key === 'general' ? <SpeechFields key={`${route}:${reset}`} options={native ? value.native : value.general} native={native} compatible={native} realtimeOnly={realtimeOnly}
             onChange={options => setValue(current => ({ ...current, [native ? 'native' : 'general']: options }))} />
           : key === 'openai' ? <SpeechFields key={reset} options={value.native} compatible
               onChange={native => setValue(current => ({ ...current, native }))} />

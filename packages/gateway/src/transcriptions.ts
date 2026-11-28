@@ -37,6 +37,7 @@ export function transcriptionMediaType(file: File): string | undefined {
 const openAILive = /^openai\/gpt-live-transcribe(?:-\d{4}-\d{2}-\d{2})?$/;
 const openAIWhisper = /^openai\/gpt-realtime-whisper(?:-\d{4}-\d{2}-\d{2})?$/;
 const openAILegacyLive = /^openai\/gpt-realtime(?:-[\w-]+)?-transcribe(?:-|$)/;
+const openAIDualTranscription = 'openai/gpt-transcribe';
 const googleLiveSocket = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained';
 const deepgramLiveSocket = 'wss://api.deepgram.com/v1/listen';
 const assemblyAILiveSocket = 'wss://streaming.assemblyai.com/v3/ws';
@@ -51,7 +52,7 @@ export function isLiveTranscriptionModel(model: string) {
 }
 
 export function liveTranscriptionProvider(model: string) {
-  if (openAILive.test(model) || openAIWhisper.test(model) || openAILegacyLive.test(model)) return 'openai';
+  if (model === openAIDualTranscription || openAITranscriptionSocket(model) || openAILegacyLive.test(model)) return 'openai';
   if (model === 'gladia/solaria-1') return 'gladia';
   if (googleLiveTranscription(model)) return 'google';
   if (model === 'deepgram/nova-3' || model === 'deepgram/nova-2') return 'deepgram';
@@ -84,7 +85,7 @@ export function googleLiveTranscriptionSetup(model: string, config?: GoogleLiveT
 
 export function supportsFileTranscription(route: GatewayTranscriptionEndpoint, model: string) {
   if (googleLiveTranscription(model) || !/^(openai|openrouter|google|gladia|deepgram)\//.test(model) ||
-      (model.startsWith('openai/') && (isLiveTranscriptionModel(model) || /^openai\/gpt-(?:4o-)?realtime/.test(model)))) return false;
+      openAITranscriptionSocket(model) || /^openai\/gpt-(?:4o-)?realtime/.test(model)) return false;
   return route !== '/api/transcriptions/stream' || /^openai\/gpt-(?:4o(?:-mini)?-)?transcribe(?:$|-(?!diarize))/.test(model) || model.startsWith('deepgram/');
 }
 

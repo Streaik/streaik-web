@@ -1,4 +1,4 @@
-import { gatewaySpeechEndpoints, isSpeechEndpoint, speechFormats, supportsRealtimeSpeech } from '@streaik/gateway';
+import { gatewaySpeechEndpoints, isRealtimeOnlySpeechModel, isSpeechEndpoint, speechFormats, supportsRealtimeSpeech } from '@streaik/gateway';
 import type { CatalogModel, GatewaySpeechEndpoint, SpeechOptions, SpeechProviderConfig, SpeechRequest } from '@streaik/gateway';
 import { useState } from 'react';
 
@@ -91,6 +91,11 @@ export function writeSpeechPreferences(scope: string | undefined, value: SpeechP
 }
 
 export function speechOptionsForModel(route: SpeechRoute, model: string, settings: SpeechPreferences): Omit<SpeechRequest, 'model' | 'text'> {
+  if (route === 'websocket' && isRealtimeOnlySpeechModel(model)) {
+    // HTTP preferences (including encoded formats) do not configure a Realtime session.
+    const { voice, instructions, speed } = settings.general;
+    return { voice, instructions, speed };
+  }
   const provider = model.split('/', 1)[0];
   const native = route === '/v1/audio/speech';
   const options: NativeSpeechOptions & { language?: string } = native ? { ...settings.native } : { ...settings.general };

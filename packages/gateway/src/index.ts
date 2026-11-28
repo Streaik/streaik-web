@@ -19,7 +19,7 @@ import { readVideoOperation, readVideoStatus, videoOperationParts } from './vide
 import type { VideoRequest, VideoStatus } from './videos.ts';
 import { isSpeechEndpoint, readSpeech, speechRequestBody } from './speech.ts';
 import type { GatewaySpeechEndpoint, SpeechChunk, SpeechRequest } from './speech.ts';
-import { realtimeSpeechProvider, streamRealtimeSpeech } from './realtimeSpeech.ts';
+import { isRealtimeOnlySpeechModel, realtimeSpeechProvider, streamRealtimeSpeech } from './realtimeSpeech.ts';
 import type { SpeechPcm } from './realtimeSpeech.ts';
 import { googleLiveTranscriptionSetup, isTranscriptionEndpoint, liveTranscriptionProvider, openAITranscriptionSession, readLiveTranscriptionCredential, readNativeTranscript, readTranscript, readTranscriptStream, supportsFileTranscription, transcriptionBody } from './transcriptions.ts';
 import type { GatewayTranscriptionEndpoint, LiveTranscriptionOptions, TranscriptionOptions } from './transcriptions.ts';
@@ -38,7 +38,7 @@ export type { GatewayImageEndpoint, ImageFileInput, ImageInput, ImageJsonObject,
 export type { VideoAsset, VideoRequest, VideoStatus } from './videos.ts';
 export { gatewaySpeechEndpoints, isSpeechEndpoint, speechFormats } from './speech.ts';
 export type { GatewaySpeechEndpoint, SpeechChunk, SpeechOptions, SpeechProviderConfig, SpeechRequest, SpeechResponse } from './speech.ts';
-export { supportsRealtimeSpeech } from './realtimeSpeech.ts';
+export { isRealtimeOnlySpeechModel, isSpeechCatalogModel, supportsRealtimeSpeech } from './realtimeSpeech.ts';
 export type { TokenRates } from './tokenPricing.ts';
 
 export const nativeChatEndpoints = ['/v1/responses', '/v1/messages', '/v1/chat/completions'] as const;
@@ -421,6 +421,7 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
       if (!root) throw new GatewayError('No gateway is configured.');
       const match = /^([a-z0-9-]+)\/(\S+)$/.exec(speech.model);
       if (!match) throw new GatewayError('Choose a valid speech model.');
+      if (isRealtimeOnlySpeechModel(speech.model)) throw new GatewayError('This speech model requires Direct WebSocket. Switch routes or choose an HTTP speech model.');
       if (!speech.text.trim()) throw new GatewayError('Enter text to generate speech.');
       const body = speechRequestBody(endpoint, speech, match[1]);
       const accept = endpoint === '/api/speech' ? 'application/json' : endpoint === '/api/speech/stream' || speech.streamFormat === 'sse'
@@ -435,10 +436,12 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
       if (!provider) throw new GatewayError('This speech model does not support Direct WebSocket. Choose a Gateway route or a compatible model.');
       if (!root) throw new GatewayError('No gateway is configured.');
       const path = speech.model.split('/').map(encodeURIComponent).join('/');
-      return streamRealtimeSpeech(speech, async credentialSignal => {
-        const response = await request(new URL(`api/realtime/token/${path}`, root).href, { kind: 'realtime', provider }, {
+      return streamRealtimeSpeech(speech, async (credentialSignal, session) => {
+        const endpoint = session ? 'v1/realtime/client_secrets' : `api/realtime/token/${path}`;
+        const response = await request(new URL(endpoint, root).href, { kind: 'realtime', provider }, {
           method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json' },
-          body: '{}', cache: 'no-store', signal: credentialSignal,
+          body: session ? JSON.stringify({ session, expires_after: { anchor: 'created_at', seconds: 60 } }) : '{}',
+          cache: 'no-store', signal: credentialSignal,
         });
         try { return await response.json(); } catch {
           credentialSignal.throwIfAborted();

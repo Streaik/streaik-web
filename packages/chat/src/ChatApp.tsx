@@ -1,5 +1,5 @@
 import { useChat } from '@ai-sdk/react';
-import { GatewayError, gatewayChatEndpoints, isVoiceCatalogModel, nativeChatEndpoints, voiceProtocolForModel, pickChatCatalogModels } from '@streaik/gateway';
+import { GatewayError, gatewayChatEndpoints, isSpeechCatalogModel, isVoiceCatalogModel, nativeChatEndpoints, voiceProtocolForModel, pickChatCatalogModels } from '@streaik/gateway';
 import type { AgentBackend, ChatRoute, DirectChat, GatewayChatEndpoint, HostedAgentSelection, HostedMcpTool } from '@streaik/gateway';
 import type { CatalogModel, ChatMessage, ChatReasoning, ChatToolChoice, DecisionChoiceResult, Gateway } from '@streaik/gateway';
 import { Button, ThemeRoot, useColorScheme } from '@streaik/themes';
@@ -1140,7 +1140,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   const mediaRouter = (view === 'images' || view === 'speech') && mediaModels ? modelDecisionRouter(agents, mediaModels.catalog, decisions.selected) : undefined;
   const mediaStatus = !hasGateway ? t('No gateway is configured.') : !connection.ready ? connection.emptyMessage
     : !mediaModels ? t('Loading models…') : mediaModels.error;
-  const speechModels = mediaModels?.catalog.filter(({ type }) => type === 'speech') ?? [];
+  const speechModels = mediaModels?.catalog.filter(isSpeechCatalogModel) ?? [];
   const selectedSpeech = view === 'speech' ? resolveModelSelection(speechModels, speechSelection, !!mediaRouter, speechModelIds).selected : [];
   const inferredSpeechRoute = resolveSpeechRoute(speech.selected, selectedSpeech[0]);
   // A mixed Decisions selection has no effective default until a model wins.

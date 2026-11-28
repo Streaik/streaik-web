@@ -42,7 +42,7 @@ const definitions = [
     { id: 'openai/gpt-6.2-sol' }],
     instructions: 'Chat',
     transcription: {
-      id: "openai/gpt-live-transcribe"
+      id: "openai/gpt-transcribe"
     },
     speech: {
       model: {

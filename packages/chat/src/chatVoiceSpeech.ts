@@ -1,4 +1,4 @@
-import { GatewayError, supportsRealtimeSpeech } from '@streaik/gateway';
+import { GatewayError, isRealtimeOnlySpeechModel, supportsRealtimeSpeech } from '@streaik/gateway';
 import type { Gateway } from '@streaik/gateway';
 import type { ChatVoiceSpeech } from './chatVoiceModels';
 import { pcmSpeechPlayback, progressiveSpeech } from './speechPlayback';
@@ -20,27 +20,32 @@ export function createChatVoiceOutput(gateway: Gateway, target: ChatVoiceSpeech,
     playing = controller;
     const { signal } = controller;
     const { model, options, rate } = target;
+    const realtimeOnly = isRealtimeOnlySpeechModel(model.id);
     const preferences = readSpeechPreferences(scope);
     const overrides = Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined));
-    const request = { ...speechOptionsForModel('/api/speech/stream', model.id, preferences), ...overrides, model: model.id, text };
-    if (supportsRealtimeSpeech(model) && context && typeof WebSocket !== 'undefined' && (!rate || rate === 24000 || model.provider === 'deepgram')) {
+    const request = { ...speechOptionsForModel(realtimeOnly ? 'websocket' : '/api/speech/stream', model.id, preferences), ...overrides, model: model.id, text };
+    let clip: Blob | undefined;
+    if (supportsRealtimeSpeech(model) && typeof WebSocket !== 'undefined' && (realtimeOnly || context && (!rate || rate === 24000 || model.provider === 'deepgram'))) {
       let started = false;
-      const pcm = pcmSpeechPlayback(() => { started = true; }, context);
-      if (pcm) {
-        signal.addEventListener('abort', pcm.close, { once: true });
+      const pcm = context && pcmSpeechPlayback(() => { started = true; }, context);
+      if (pcm || realtimeOnly) {
+        if (pcm) signal.addEventListener('abort', pcm.close, { once: true });
         try {
           const direct = { ...request };
           if (/^(?:audio\/)?(?:x-)?wav$/i.test(direct.outputFormat ?? '')) direct.outputFormat = 'wav';
           if (rate && model.provider === 'deepgram') direct.providerOptions = { deepgram: { ...direct.providerOptions?.deepgram, sample_rate: rate } };
-          await gateway.generateRealtimeSpeech(direct, signal, pcm.append);
-          if (await pcm.finish()) return;
+          if (realtimeOnly) direct.outputSampleRate = rate;
+          const result = await gateway.generateRealtimeSpeech(direct, signal, pcm?.append);
+          if (await pcm?.finish()) return;
+          if (realtimeOnly) clip = result.audio;
         } catch (error) {
           signal.throwIfAborted();
-          if (started) throw error; // Never replay text that has already been heard.
-        } finally { signal.removeEventListener('abort', pcm.close); pcm.close(); }
+          if (started || realtimeOnly) throw error; // Never replay heard text or retry a WebSocket-only model over HTTP.
+        } finally { if (pcm) { signal.removeEventListener('abort', pcm.close); pcm.close(); } }
       }
     }
     signal.throwIfAborted();
+    if (!clip && realtimeOnly) throw new GatewayError('This speech model requires Direct WebSocket.');
     const audio = new Audio();
     let progressive: ReturnType<typeof progressiveSpeech>;
     let pcm: ReturnType<typeof pcmSpeechPlayback>;
@@ -52,7 +57,7 @@ export function createChatVoiceOutput(gateway: Gateway, target: ChatVoiceSpeech,
     audio.addEventListener('playing', markPlayed, { once: true });
     signal.addEventListener('abort', abort, { once: true });
     try {
-      const { audio: clip } = await gateway.generateSpeech('/api/speech/stream', { ...request, outputSampleRate: rate }, signal, (bytes, type, pcmRate) => {
+      clip ??= (await gateway.generateSpeech('/api/speech/stream', { ...request, outputSampleRate: rate }, signal, (bytes, type, pcmRate) => {
         if (!attempted) {
           attempted = true;
           if (pcmRate && context) pcm = pcmSpeechPlayback(markPlayed, context);
@@ -60,7 +65,7 @@ export function createChatVoiceOutput(gateway: Gateway, target: ChatVoiceSpeech,
         }
         if (pcm && pcmRate) pcm.append(bytes, pcmRate);
         progressive?.append(bytes);
-      });
+      })).audio;
       if (await pcm?.finish()) return;
       if (progressive) { progressive.finish(); await finished; if (started) return; }
       signal.throwIfAborted();

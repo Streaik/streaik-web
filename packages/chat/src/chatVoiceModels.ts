@@ -1,3 +1,4 @@
+import { isSpeechCatalogModel, isRealtimeOnlySpeechModel } from '@streaik/gateway';
 import type { CatalogModel, LiveTranscriptionOptions, SpeechOptions } from '@streaik/gateway';
 import { agentModels, isModel, isObject } from './agentDefinition.ts';
 import type { AgentDefinition, AgentModel } from './agentDefinition.ts';
@@ -34,8 +35,11 @@ export type ChatVoiceSpeech = { model: CatalogModel; options: SpeechOptions; rat
 export function chatVoiceSpeech(catalog: readonly CatalogModel[], agent: AgentDefinition | undefined, fallback?: AgentDefinition): ChatVoiceSpeech | undefined {
   const speech = object(agent?.speech);
   const configured = speech.model;
-  const model = isModel(configured) && (configured.type == null || configured.type === 'speech') ?
-    catalog.find(item => item.id === configured.id && item.type === 'speech') : undefined;
+  const find = ({ id, type }: AgentModel) => {
+    if (type != null && type !== 'speech' && !(type === 'audio' && isRealtimeOnlySpeechModel(id))) return;
+    return catalog.find(item => item.id === id && isSpeechCatalogModel(item));
+  };
+  const model = isModel(configured) ? find(configured) : undefined;
   if (model) {
     const format = object(speech.outputFormat);
     const speed = typeof speech.speed === 'number' && Number.isFinite(speech.speed) && speech.speed > 0 ? speech.speed : undefined;
@@ -43,9 +47,9 @@ export function chatVoiceSpeech(catalog: readonly CatalogModel[], agent: AgentDe
     return { model, rate, options: { voice: text(speech.voice), instructions: text(speech.instructions), language: text(speech.language),
       outputFormat: text(format.type), speed } };
   }
+  if (isModel(configured) && isRealtimeOnlySpeechModel(configured.id)) return;
   for (const entry of agentModels(fallback)) {
-    if (entry.type != null && entry.type !== 'speech') continue;
-    const available = catalog.find(item => item.id === entry.id && item.type === 'speech');
+    const available = find(entry);
     if (available) return { model: available, options: {} };
   }
 }

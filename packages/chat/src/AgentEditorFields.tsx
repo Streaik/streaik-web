@@ -1,5 +1,6 @@
 import { Button, Select, Textarea } from '@streaik/themes';
 import type { SelectOption } from '@streaik/themes';
+import { isSpeechCatalogModel } from '@streaik/gateway';
 import type { CatalogModel } from '@streaik/gateway';
 import { useId, useRef, useState } from 'react';
 import type { ComponentPropsWithoutRef, ReactNode } from 'react';
@@ -179,7 +180,7 @@ function AudioModelField({ label, models, saved, initial, change }: {
 export function AgentRealtimeFields({ draft, initial, patch, catalog, catalogStatus }: ModelFields) {
   const { t } = useAppTranslation();
   const transcription = catalog.filter(({ type, tags }) => type === 'transcription' && tags.includes('realtime'));
-  const speech = catalog.filter(({ type, tags }) => type === 'speech' || (type === 'audio' && tags.includes('realtime-speech')));
+  const speech = catalog.filter(isSpeechCatalogModel);
   const change = (update: Partial<AgentDraft['speech']>) => patch({ speech: { ...draft.speech, ...update } });
   return <>
     <CatalogStatus status={catalogStatus} />
