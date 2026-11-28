@@ -27,6 +27,9 @@ for (const theme of themes) {
     await page.getByRole('button', { name: 'Account menu', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
     const settings = page.getByRole('dialog', { name: 'Settings', exact: true });
+    await settings.getByRole('tab', { name: 'Theme', exact: true }).click();
+    const themeName = { html: 'HTML', fluent: 'Fluent', shadcn: 'shadcn' }[theme];
+    await expect(settings.getByRole('group', { name: `${themeName} settings`, exact: true })).toBeVisible({ timeout: 15_000 });
     await settings.getByRole('tab', { name: 'Model Context', exact: true }).click();
     const disabled = settings.getByRole('tabpanel', { name: 'Client', exact: true }).getByRole(role, { name: 'URL', exact: true });
     await expectThemedSwitch(disabled, theme);

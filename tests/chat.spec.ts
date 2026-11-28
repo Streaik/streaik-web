@@ -2115,8 +2115,8 @@ test('chat charts preview with the plugin off and follow the active theme', asyn
     await page.getByRole('button', { name: 'Chat settings', exact: true }).click();
     await settings.getByRole('tab', { name: 'Tools', exact: true }).click();
   };
-  const plugin = settings.getByRole('switch', { name: 'Charts', exact: true });
-  await openTools(); await expect(plugin).not.toBeChecked();
+  await openTools();
+  await expect(settings.getByRole('switch', { name: 'Charts', exact: true })).not.toBeChecked();
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   const send = async (text: string) => { await composer.fill(text); await composer.press('Enter'); };
@@ -2143,7 +2143,8 @@ test('chat charts preview with the plugin off and follow the active theme', asyn
     if (theme === 'fluent') expect(htmlChartRequests).toBe(0);
   }
 
-  await openTools(); await plugin.check();
+  const htmlPlugin = settings.getByRole('checkbox', { name: 'Charts', exact: true });
+  await openTools(); await htmlPlugin.check();
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
   await send('Get the chart format');
   const review = page.getByRole('dialog', { name: 'Approve tool execution', exact: true });
@@ -2154,7 +2155,7 @@ test('chat charts preview with the plugin off and follow the active theme', asyn
     output: { structuredContent: { example: expect.stringContaining('```chart') } },
   });
 
-  await openTools(); await plugin.uncheck();
+  await openTools(); await htmlPlugin.uncheck();
   await settings.getByRole('button', { name: 'Close', exact: true }).click();
   await page.reload();
   for (const { type } of charts) await expect(figure(type).locator('canvas')).toBeVisible();
@@ -2328,8 +2329,8 @@ test('MCP Tool output preferences filter approved requests and replay without ch
   await expect(fallbackViewer).toHaveCSS('--w-rjv-color', '#79c0ff');
 
   const settings = await showSettings(page, 'Chat');
-  await settings.getByRole('switch', { name: 'Images', exact: true }).check();
-  await settings.getByRole('switch', { name: 'Text', exact: true }).uncheck();
+  await settings.getByRole('checkbox', { name: 'Images', exact: true }).check();
+  await settings.getByRole('checkbox', { name: 'Text', exact: true }).uncheck();
   await closeSettings(page);
   await composer.fill('Replay after changing preferences'); await composer.press('Enter');
   await expect(page.getByText('MCP fixture reply 3', { exact: true })).toBeVisible();
