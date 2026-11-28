@@ -3784,6 +3784,7 @@ test('Speech persists explicit Gateway and WebSocket overrides and never retries
   await expect(page.getByRole('menuitemradio', { name: '/api/speech', exact: true })).toHaveAttribute('aria-checked', 'true');
   await page.keyboard.press('Escape');
   await page.getByRole('heading', { name: 'Speech', exact: true }).click();
+  await showSettings(page); await addKey(page, 'Deepgram', 'test-deepgram-key'); await closeSettings(page);
   const composer = page.getByRole('form', { name: 'Speech composer' });
   const submit = async () => {
     await composer.getByRole('textbox', { name: 'Speech text' }).fill('Test route override');
@@ -3796,6 +3797,7 @@ test('Speech persists explicit Gateway and WebSocket overrides and never retries
   await openRoute(page, 'Direct');
   await page.getByRole('menuitemradio', { name: 'WebSocket', exact: true }).click();
   await page.reload();
+  await showSettings(page); await addKey(page); await addKey(page, 'Deepgram', 'test-deepgram-key'); await closeSettings(page);
   await submit();
   await expect(page.getByRole('alert')).toHaveText('The speech WebSocket closed before completion.');
   expect([http, tokens]).toEqual([1, 1]);
@@ -3810,6 +3812,7 @@ test('Speech persists explicit Gateway and WebSocket overrides and never retries
 
   await modelPicker(page).click();
   await page.getByRole('option', { name: 'gpt-4o-mini-tts', exact: true }).click();
+  await page.getByRole('option', { name: 'Realtime Speech Fixture', exact: true }).click();
   await page.keyboard.press('Escape');
   await submit();
   await expect(page.getByRole('alert')).toContainText('This speech model does not support Direct WebSocket.');
