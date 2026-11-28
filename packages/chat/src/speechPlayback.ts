@@ -70,10 +70,11 @@ export function pcmSpeechPlayback(onStart?: () => void) {
   let context: AudioContext;
   try { context = new AudioContext(); } catch { return; }
   const sources = new Set<AudioBufferSourceNode>();
-  let end = 0, carry: number | undefined, played = false, closed = false, drained: (() => void) | undefined;
+  let end = 0, carry: number | undefined, played = false, closed = false, interrupted = false, drained: (() => void) | undefined;
   const close = () => {
     if (closed) return;
     closed = true;
+    context.onstatechange = null;
     for (const source of sources) {
       source.onended = null;
       try { source.stop(); } catch { /* Already ended. */ }
@@ -83,12 +84,14 @@ export function pcmSpeechPlayback(onStart?: () => void) {
     void context.close().catch(() => {});
     drained?.();
   };
-  void context.resume().catch(close);
-  context.onstatechange = () => { if (played && context.state !== 'running') close(); };
+  const interrupt = () => { interrupted = played; close(); };
+  void context.resume().catch(interrupt);
+  context.onstatechange = () => { if (played && context.state !== 'running') interrupt(); };
 
   return {
     append(bytes: Uint8Array, rate: number) {
-      if (closed || context.state !== 'running' || !bytes.length) return;
+      if (closed || !bytes.length) return;
+      if (context.state !== 'running') { interrupt(); return; }
       try {
         if (carry !== undefined) {
           const joined = new Uint8Array(bytes.length + 1);
@@ -99,7 +102,7 @@ export function pcmSpeechPlayback(onStart?: () => void) {
         carry = bytes.length % 2 ? bytes[bytes.length - 1] : undefined;
         const samples = Math.floor(bytes.length / 2);
         if (!samples) return;
-        if (end - context.currentTime + samples / rate > 90) { close(); return; }
+        if (end - context.currentTime + samples / rate > 90) { interrupt(); return; }
         const buffer = context.createBuffer(1, samples, rate);
         const pcm = buffer.getChannelData(0), view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
         for (let i = 0; i < samples; i++) pcm[i] = view.getInt16(i * 2, true) / 32768;
@@ -116,11 +119,12 @@ export function pcmSpeechPlayback(onStart?: () => void) {
         end = start + buffer.duration;
         source.start(start);
         if (!played) { played = true; onStart?.(); }
-      } catch { close(); }
+      } catch { interrupt(); }
     },
     async finish() {
       if (sources.size && context.state === 'running') await new Promise<void>(resolve => { drained = resolve; });
       close();
+      if (interrupted) throw new Error('Speech playback was interrupted.');
       return played;
     },
     close,

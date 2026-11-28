@@ -5,7 +5,7 @@ import type { SpeechRequest, SpeechResponse } from './speech.ts';
 import { StreamingWave } from './streamingWave.ts';
 
 const cartesiaVersion = '2026-08-14';
-const cartesiaModel = /^cartesia\/tts\/(sonic-3\.6)\/([\w.-]+)$/;
+const cartesiaModel = /^cartesia\/tts\/(sonic-3\.6)\/([\w-]+)$/;
 const tokenPart = /^[!#$%&'*+.^_`|~\w-]+$/;
 const frameLimit = 2 * 1024 * 1024;
 const audioLimit = 25 * 1024 * 1024;

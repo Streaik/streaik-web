@@ -55,11 +55,12 @@ export function useMessageSpeech(gateway: Gateway, model: CatalogModel | undefin
       try {
         ({ audio: clip } = await synthesizeSpeech(gateway, route, model, text, readSpeechPreferences(scope), run.controller.signal,
           { pcm: live?.append }));
-        if (await live?.finish()) { finish(); return; }
       } catch (cause) {
         finish(cause instanceof GatewayError ? cause.message : 'Could not generate speech.');
         return;
       }
+      try { if (await live?.finish()) { finish(); return; } }
+      catch { finish('Could not play this message.'); return; }
       if (current.current !== run) return;
       if (!clip.type.startsWith('audio/')) { finish('Could not play this message.'); return; }
       const audio = new Audio();

@@ -3117,7 +3117,7 @@ test('Images uses explicit routes and persists compatible records only for the c
   await expect(page.getByText('The image was resized.', { exact: true })).toBeVisible();
   const orchard = gallery.getByRole('button', { name: 'Open image preview' }).first();
   await expect(orchard).toContainText(modelId);
-  await expect(orchard).toContainText('$0.00');
+  await expect(orchard.getByTitle('Gateway cost', { exact: true })).toHaveText('0.00');
   await orchard.press('Enter');
   const imagePreview = page.getByRole('dialog', { name: 'Image preview' });
   const previewTab = imagePreview.getByRole('tab', { name: 'Preview', exact: true });
@@ -3137,7 +3137,7 @@ test('Images uses explicit routes and persists compatible records only for the c
   await top.getByRole('button', { name: 'Send', exact: true }).click();
   await expect(generated).toHaveCount(2);
   const harbor = gallery.getByRole('button', { name: 'Open image preview' }).first();
-  await expect(harbor).not.toContainText('$');
+  await expect(harbor.getByTitle('Gateway cost', { exact: true })).toHaveCount(0);
   await harbor.click();
   await expect(previewTab).toHaveAttribute('aria-selected', 'true');
   await headersTab.click();
@@ -3183,6 +3183,7 @@ test('Images uses explicit routes and persists compatible records only for the c
   await imagesPage.click();
   await expect(gallery).toBeVisible();
   await expect(generated).toHaveCount(3);
+  await top.getByRole('textbox', { name: 'Image prompt' }).fill('Do not generate while locked');
   await expect(top.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
   await openRoute(page);
   await expect(page.getByRole('menuitemradio', { name: '/v1/images/edits', exact: true })).toHaveAttribute('aria-checked', 'true');
@@ -5704,7 +5705,7 @@ test('BYOK searches the alphabetized bundled catalog without a gateway request',
   expect(modelKeys.at(-1)?.['x-spacexai-key']).toBeUndefined();
 });
 
-test('the BYOK vault protects keys but leaves saved content visible when locked', async ({ page }) => {
+test('the BYOK vault protects keys but leaves saved content visible when locked', async ({ page, baseURL }) => {
   await mockModels(page);
   let replies = 0;
   await page.route('**/gateway/api/chat', async route => {
@@ -5712,7 +5713,7 @@ test('the BYOK vault protects keys but leaves saved content visible when locked'
     const reply = ++replies;
     await route.fulfill({ headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' }, body: sse(`Vault reply ${reply}`, reply) });
   });
-  const endpoint = new URL('/vault-mcp-fixture', test.info().project.use.baseURL).href;
+  const endpoint = new URL('/vault-mcp-fixture', baseURL).href;
   await page.route(endpoint, route => route.abort());
   await page.goto('/'); await showSettings(page); await addKey(page);
   const storage = () => page.evaluate(() => JSON.stringify(localStorage));
@@ -5762,12 +5763,15 @@ test('the BYOK vault protects keys but leaves saved content visible when locked'
   const server = page.getByRole('heading', { name: 'Vault fixture', exact: true });
   await expect(server).toBeVisible();
 
-  await page.goto(conversation);
-  const keys = await showSettings(page, 'API keys');
+  // Return through client-side history so the vault is still unlocked before clicking Lock.
+  await page.goBack();
+  await page.goBack();
+  await expect(page).toHaveURL(conversation);
+  await showSettings(page, 'API keys');
   const requests: string[] = [];
   const trackRequests = (request: { url(): string }) => {
     const url = request.url();
-    if (url.includes('/gateway/') || url === endpoint) requests.push(url);
+    if (new URL(url).pathname.startsWith('/gateway/') || url === endpoint) requests.push(url);
   };
   page.on('request', trackRequests);
   await vault.getByRole('button', { name: 'Lock vault' }).click();
@@ -5778,6 +5782,7 @@ test('the BYOK vault protects keys but leaves saved content visible when locked'
   await expect(savedReply).toBeVisible();
   await expect(page.getByText(/Unlock your provider keys/)).toBeVisible();
   await expect(modelPicker(page)).toBeDisabled();
+  await composer.fill('Do not send while locked');
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
 
   await skillsPage.click();
@@ -5790,7 +5795,7 @@ test('the BYOK vault protects keys but leaves saved content visible when locked'
   await expect(page.getByRole('button', { name: 'Configure Vault fixture', exact: true })).toBeDisabled();
 
   await page.goto(conversation);
-  await showSettings(page, 'API keys');
+  const keys = (await showSettings(page, 'API keys')).getByRole('tabpanel', { name: 'API keys', exact: true });
   await expect(keys.getByRole('heading', { name: 'API keys', exact: true })).toBeVisible();
   await expect(keys.getByText('Locked', { exact: true })).toBeVisible();
   await expect(keys.getByRole('button', { name: 'Add API key', exact: true })).toHaveCount(0);

@@ -25,7 +25,7 @@ The chat client supports:
 - **Files** with attachments, document content, PDF extraction and rich file handling
 - **Conversation history** with local persistence, configurable chat preferences, and browser-only full-text search across titles and user and assistant messages
 - **Streaming UI** with interactive apps, cards and structured response rendering
-- **Speech** with generation, streaming playback and realtime transcription
+- **Speech** with text-to-speech generation, streaming playback, downloadable clips and assistant-message Read aloud
 - **Transcriptions** with configurable file splitting, overlap handling and merged results. **Real-time** streams microphone audio to supported OpenAI, Gladia, Google Gemini Transcribe Live, Deepgram Nova-2/Nova-3, and AssemblyAI streaming models and displays text only. A compatible live model assigned to the Transcription agent can also stream composer dictation. **Dictate** on the Transcriptions page records a short clip and uploads it when you stop.
 - **Images** with generation and provider-specific options
 - **Videos** with prompt-only generation and inline playback. Pending jobs and results are saved locally for the current gateway/profile. Reopen Videos with the same credentials to resume polling; gateway job references and provider-hosted video links can expire.
@@ -39,6 +39,10 @@ The chat client supports:
 
 Documentation: https://ai.streaik.net/scalar  
 App: https://chat.streaik.com
+
+## Realtime speech
+
+In Speech, **Route → Direct → WebSocket** connects the browser to the speech provider with a short-lived credential from the Gateway. It is the default for supported realtime speech models: Mistral Voxtral Mini TTS 3.0, Deepgram Aura-2 Asteria, and Cartesia Sonic 3.6 voices. The assistant’s **Read aloud** action uses the model assigned to the Speech agent and the same route preference. An explicit route choice is saved for the current profile and takes precedence over the model default. Direct WebSocket produces WAV clips; if a model, setting or connection is unsupported, the app reports an error without retrying on a Gateway speech route.
 
 ## Local mode
 

@@ -138,7 +138,9 @@ export default function SpeechView({ gateway, scope, routeOverride, toolbar, mod
       if (scope) try { await saveSpeech(scope, item); } catch {
         if (!signal.aborted) setError('Could not save the generated speech.');
       }
-      await live?.finish();
+      try { await live?.finish(); } catch {
+        if (!signal.aborted) setError('Speech playback was interrupted. Play the saved clip to hear it in full.');
+      }
     } catch (cause) {
       playback.current?.close();
       live?.close();
