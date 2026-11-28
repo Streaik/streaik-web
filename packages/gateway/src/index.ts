@@ -7,11 +7,12 @@ import { hostedActivityHeader } from './hostedActivity.ts';
 import { apiChatHostedSkillProviders, apiChatHostedSkills, hostedSkillProviders } from './hostedSkills.ts';
 import type { HostedSkill } from './hostedSkills.ts';
 export type { HostedSkill, HostedSkillReference, HostedInlineSkill } from './hostedSkills.ts';
-import { apiChatHostedMcp } from './hostedMcp.ts';
+import { apiChatHostedMcp, apiChatHostedSearchProviders, hostedSearchProviders } from './hostedMcp.ts';
 import type { HostedMcpTool } from './hostedMcp.ts';
 export type { HostedMcpTool } from './hostedMcp.ts';
 import { anthropicChatProtocolHeaders } from './nativeToolOptions.ts';
 import { decisionChoiceBody, gatewayDecisionEndpoints, readDecisionChoice } from './decisionChoice.ts';
+import { decisionSearchBody, readDecisionSearch } from './decisionSearch.ts';
 import type { DecisionChoice, DecisionChoiceResult, GatewayDecisionEndpoint } from './decisionChoice.ts';
 import { imageRequestBody, isImageEndpoint, readImageResponse } from './images.ts';
 import type { GatewayImageEndpoint, ImageRequest, ImageResponse } from './images.ts';
@@ -301,7 +302,7 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
   const videosUrl = root && new URL('api/videos', root).href;
 
   async function request(destination: string | undefined, auth: CredentialRequest, init: RequestInit = {}, protocolHeaders?: HeadersInit,
-    skillProviders: readonly string[] = []) {
+    skillProviders: readonly string[] = [], searchProviders: readonly string[] = []) {
     if (!destination) throw new GatewayError('No gateway is configured. Choose Route → Direct to chat with a provider.');
     init.signal?.throwIfAborted();
     const selected = new Headers(await credentials(auth));
@@ -311,6 +312,13 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
       if (selected.has(name)) continue;
       init.signal?.throwIfAborted();
       const key = new Headers(await credentials({ kind: 'skill', provider })).get(name);
+      if (key !== null) selected.set(name, key);
+    }
+    for (const provider of searchProviders) {
+      const name = `X-${provider}-Key`;
+      if (selected.has(name) || auth.kind === 'chat' && auth.provider === provider) continue;
+      init.signal?.throwIfAborted();
+      const key = new Headers(await credentials({ kind: 'decision', provider })).get(name);
       if (key !== null) selected.set(name, key);
     }
     if (protocolHeaders) new Headers(protocolHeaders).forEach((value, name) => {
@@ -367,6 +375,7 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
 
   return {
     historyScope: chatUrl ?? 'direct',
+    hasEndpoint: !!root,
     listModelCatalog,
     async listSkills(options?: SkillPageOptions, signal?: AbortSignal): Promise<SkillPage<RemoteSkill>> {
       return (await skillRequest(skillListPath('v1/skills', options), { kind: 'models' }, { signal })).json();
@@ -551,11 +560,24 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
       return readLiveTranscriptionCredential(model, payload, language);
     },
     decideChoiceResult,
+    async decideSearch(endpoint: GatewayDecisionEndpoint, model: string, input: string, predicates: readonly string[], signal: AbortSignal) {
+      const provider = /^([a-z0-9-]+)\/.+$/u.exec(model)?.[1];
+      if (!provider || !gatewayDecisionEndpoints.includes(endpoint) || !predicates.length || predicates.length > 32)
+        throw new GatewayError('Invalid Decisions search request.');
+      const response = await request(root && new URL(endpoint.slice(1), root).href, { kind: 'decision', provider }, {
+        method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify(decisionSearchBody(endpoint, model, input, predicates)), signal,
+      });
+      const scores = readDecisionSearch(endpoint, await response.json(), predicates.length);
+      signal.throwIfAborted();
+      if (!scores) throw new GatewayError('Invalid Decisions search response.');
+      return scores;
+    },
     async decideChoice(endpoint: GatewayDecisionEndpoint, choice: DecisionChoice, signal?: AbortSignal) {
       return (await decideChoiceResult(endpoint, choice, signal)).choice;
     },
     chatTransport(endpoint: GatewayChatEndpoint = '/api/chat') {
-      if (endpoint !== '/api/chat') return nativeChatTransport(endpoint, (model, skills) => {
+      if (endpoint !== '/api/chat') return nativeChatTransport(endpoint, (model, skills, hostedMcp) => {
         const provider = apiChatProvider(model);
         if (!provider) throw new GatewayError('Choose a model supported by this gateway route.');
         if (!root) throw new GatewayError('No gateway is configured. Choose Route → Direct to chat with a provider.');
@@ -566,7 +588,7 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
           const protocol = provider === 'anthropic' ? anthropicChatProtocolHeaders(headers) : new Headers();
           if (beta) protocol.set('OpenAI-Beta', beta);
           if (endpoint === '/v1/responses' && headers.get(hostedActivityHeader) === '1') protocol.set(hostedActivityHeader, '1');
-          return expectEventStream(await request(url, { kind: 'chat', provider }, init, protocol, hostedSkillProviders(skills)));
+          return expectEventStream(await request(url, { kind: 'chat', provider }, init, protocol, hostedSkillProviders(skills), hostedSearchProviders(hostedMcp)));
         } };
       });
       return new GatewayChatTransport({
@@ -598,7 +620,7 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
           const beta = headers.get('openai-beta');
           return expectEventStream(await request(chatUrl, { kind: 'chat', provider }, init,
             provider === 'anthropic' ? anthropicChatProtocolHeaders(headers) : beta ? { 'OpenAI-Beta': beta } : undefined,
-            apiChatHostedSkillProviders(tools)));
+            apiChatHostedSkillProviders(tools), apiChatHostedSearchProviders(tools)));
         },
       });
     },

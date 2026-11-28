@@ -10,6 +10,7 @@ export type RequestContext = {
   user?: { preferredLanguage: string; darkMode: boolean };
   skills?: ReturnType<typeof skillSystemBlock>;
   mcp?: ReturnType<typeof mcpResourceCatalog>;
+  resourceSearchInstructions?: string;
 };
 
 export function buildRequestContext(appName: string, preferredLanguage: string, darkMode: boolean,
@@ -21,6 +22,7 @@ export function buildRequestContext(appName: string, preferredLanguage: string, 
 
 export function requestContextText(context: RequestContext) {
   return [...(context.skills ? [JSON.stringify(context.skills)] : []), ...(context.mcp ? [JSON.stringify(context.mcp)] : []),
+    ...(context.resourceSearchInstructions ? [context.resourceSearchInstructions] : []),
     ...(context.system ? [JSON.stringify(context.system)] : []), ...(context.user ? [JSON.stringify(context.user)] : []),
     ...(context.chatInstructions ? [context.chatInstructions] : [])];
 }

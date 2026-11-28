@@ -48,18 +48,19 @@ function nativeAttachmentMessages(messages: ChatMessage[], endpoint: NativeChatE
   }) });
 }
 
-export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (model: string, skills: readonly HostedSkill[]) => NativeTarget): ChatTransport<ChatMessage> {
+export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (model: string, skills: readonly HostedSkill[], hostedMcp: readonly HostedMcpTool[]) => NativeTarget): ChatTransport<ChatMessage> {
   return {
     async sendMessages({ messages, body, headers, abortSignal }) {
       const { model, tools: definitions, toolChoice, instructions: gatewayInstructions, mcpInstructions, providerMetadata, hostedSkills, hostedMcp } = asRecord(body) ?? {};
       if (typeof model !== 'string') throw new GatewayError('Choose a model for this route.');
       const skills = Array.isArray(hostedSkills) ? hostedSkills as HostedSkill[] : [];
-      const target = resolve(model, skills);
+      const hosted = endpoint === '/v1/responses' && Array.isArray(hostedMcp) ? hostedMcp as HostedMcpTool[] : [];
+      const target = resolve(model, skills, hosted);
       const rawMcp = endpoint === '/v1/responses' && !target.requestBody;
       const mcpReplay = rawMcp ? responsesMcpReplay(messages, target.url, model, !!target.gateway) : undefined;
       const previous = messages.at(-1);
       const mcpOutput = rawMcp ? responsesMcpOutput(target.url, model, previous?.role === 'assistant' ? previous : undefined) : undefined;
-      const mcp = target.gateway && endpoint === '/v1/responses' && Array.isArray(hostedMcp) ? hostedMcp as HostedMcpTool[] : [];
+      const mcp = target.gateway ? hosted : [];
       const hostedActivity = target.gateway && endpoint === '/v1/responses' && (mcp.length || skills.length)
         ? hostedActivityRelay() : undefined;
       const openAIResponses = !target.requestBody && endpoint === '/v1/responses' && model.startsWith('openai/');

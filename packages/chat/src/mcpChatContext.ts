@@ -15,7 +15,7 @@ export function forUser(resource: Resource) {
   return !resource.annotations || resource.annotations.audience?.includes('user') === true;
 }
 
-function catalogItem(item: Resource) {
+export function catalogItem(item: Resource) {
   return {
     ...('uri' in item ? { uri: item.uri } : { uriTemplate: item.uriTemplate }),
     name: item.name.slice(0, 160), title: item.title?.slice(0, 160), description: item.description?.slice(0, 512),
@@ -44,6 +44,11 @@ export const readResourceTool: ToolDefinition = {
     uri: { type: 'string', description: 'Absolute resource URI including its scheme.' },
   }, required: ['serverId', 'uri'], additionalProperties: false },
 };
+
+export const deferredReadResourceTool: ToolDefinition = { ...readResourceTool,
+  description: 'Read a resource returned by resource search. Use its serverId and exact URI (expand template parameters first).',
+  inputSchema: { ...readResourceTool.inputSchema, properties: { ...readResourceTool.inputSchema.properties,
+    serverId: { type: 'string', description: 'Connected server ID from the search result, not a URL.' } } } };
 
 export function resolveResourceRead(servers: readonly ConnectedMcpServer[], input: unknown) {
   if (!input || typeof input !== 'object' || Array.isArray(input) || !('serverId' in input) || !('uri' in input) || !validMcpResourceUri(input.uri)) return;

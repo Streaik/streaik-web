@@ -54,12 +54,15 @@ import type { ProviderChatSettings } from './providerChat/settings';
 import { filterToolOutputContent } from './toolOutputContent';
 import { buildRequestContext, requestContextText, withRequestContext } from './chatContext';
 import type { RequestContext } from './chatContext';
-import { activeChatTools, filterLocalToolReplay, localPlugins, localToolSearchPluginId, runLocalTool, toolPartName } from './localPlugins';
+import { activeChatTools, clientResourceSearchName, filterLocalToolReplay, localPlugins, localResourceSearchPluginId, localToolSearchPluginId, runLocalTool, toolPartName } from './localPlugins';
 import type { ChatTool } from './localPlugins';
 import { agentMcpAllows, agentMcpServers, agentSkillsTool } from './agentTools';
 import { apiChatTools, chatRequestTools, chatToolCapabilities, configureChatTools } from './chatToolRequest';
 import type { ChatRequestTool } from './chatToolRequest';
 import { isClientToolSearch, searchClientTools, searchLocalToolCatalog } from './clientToolSearch';
+import { searchClientResources } from './clientResourceSearch';
+import { searchModels } from './searchSelection';
+import type { SearchAgent } from './searchSelection';
 import { continueToolPolicy, toolComplete, toolPolicyForTurn } from './chatToolPolicy';
 import type { ChatToolPolicy, ToolProgress } from './chatToolPolicy';
 import { resolveSkillTool } from './skillTools';
@@ -83,7 +86,7 @@ import { callMcpTool, McpDescriptorAuthUnsupported, mcpFailure, readMcpResource 
 import type { McpOptions } from './mcp';
 import { McpElicitationProvider, useMcpElicitation } from './McpElicitation';
 import { echoInputModel, isEchoInputCall, providerElicitationForm } from './providerElicitation';
-import { mcpResourceCatalog, readResourceTool, resolveResourceRead } from './mcpChatContext';
+import { deferredReadResourceTool, mcpResourceCatalog, readResourceTool, resolveResourceRead } from './mcpChatContext';
 import { McpServerEditor, McpServersView, ModelContextDialog } from './McpServersView';
 import type { McpEditorTarget } from './McpServersView';
 import { useMcpSelection, useMcpServers } from './useMcpServers';
@@ -93,8 +96,8 @@ export { isMcpRuntime } from './mcp';
 import { agentModelDecisionInstructions, chatDecisionInput, chatModelDecision, modelDecisionRouter, selectModelRoleId, useDecisionRoute } from './modelDecisions';
 import type { DecisionAgentContext, ModelDecision } from './modelDecisions';
 import { decisionActivity, withDecisionActivity, withoutDecisionActivity } from './decisionActivity';
-import { conversationNameRoleId, runTextAppAgent, toolSearchRoleId, welcomeRoleId } from './textAppAgents';
-import type { TextAppRequest } from './textAppAgents';
+import { conversationNameRoleId, resourceSearchRoleId, runTextAppAgent, toolSearchRoleId, welcomeRoleId } from './textAppAgents';
+import type { SearchRole, TextAppRequest } from './textAppAgents';
 import { WelcomeHeading } from './WelcomeHeading';
 import { useAppTranslation } from './i18n';
 import './chat.css';
@@ -457,7 +460,8 @@ type Turn = { model: string; route: ChatRoute; tools: ChatTool[]; context?: Requ
   loadHostedSkills?: ReturnType<typeof hostedChatSkills>;
   hostedMcp: HostedMcpTool[];
   nativeApprovalSubmitting?: boolean;
-  providerSettings?: ProviderChatSettings; reasoning?: ChatReasoning; toolSearchAgent?: TextAppRequest;
+  providerSettings?: ProviderChatSettings; reasoning?: ChatReasoning; toolSearchAgent?: SearchAgent; resourceSearchAgent?: SearchAgent;
+  resourceServers: ReadonlyMap<string, string>;
   toolPolicy: ChatToolPolicy; toolChoice?: ChatToolChoice; toolProgress: ToolProgress; resolved: Set<string> };
 const isApiChat = (route: ChatRoute | undefined) => !route || (route.mode === 'gateway' && route.endpoint === '/api/chat');
 const isApiChatTurn = (turn: Turn) => turn.hosted ? turn.hosted.endpoint === '/api/chat' : isApiChat(turn.route);
@@ -590,10 +594,11 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         const previous = request.trigger === 'submit-message' && last?.role === 'assistant' ? last : undefined;
         const usedIds = new Set(request.messages.map(message => message.id));
         request = { ...request, messages: withoutDecisionActivity(request.messages) };
-        const { route, decision, context, providerSettings: initialSettings, clientToolSearch, hosted, loadHostedSkills, ...body } = (request.body ?? {}) as {
+        const { route, decision, context, resourceServerIds, providerSettings: initialSettings, clientToolSearch, hosted, loadHostedSkills, ...body } = (request.body ?? {}) as {
           model?: string; route?: ChatRoute; decision?: TurnDecision; context?: RequestContext; tools?: ChatRequestTool[];
           providerSettings?: ProviderChatSettings; hosted?: HostedTurn; reasoning?: ChatReasoning; toolChoice?: ChatToolChoice;
           clientToolSearch?: boolean; loadHostedSkills?: Turn['loadHostedSkills']; hostedMcp?: HostedMcpTool[];
+          resourceServerIds?: string[];
         };
         const endpoint = hosted?.endpoint ?? route?.endpoint;
         const apiRoute = hosted ? endpoint === '/api/chat' : isApiChat(route);
@@ -670,7 +675,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           }
         };
         const enabledSkillIds = new Set(context?.skills?.skills.map(({ skill_id }) => skill_id));
-        const resourceServers = new Set(context?.mcp?.mcpResourceCatalog.servers.map(({ serverId }) => serverId));
+        const resourceServers = new Set(resourceServerIds);
         const hostedReviewScope = JSON.stringify([body.model, body.hostedMcp ?? []]);
         const legacyReviewScope = body.hostedMcp?.length ? hostedReviewScope : undefined;
         const history = request.messages.map(message => ({
@@ -833,19 +838,25 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
     if (restoringSkills && !skillsBusy) loadSkills(skillCursor);
   }, [restoringSkills, skillsBusy, loadSkills, skillCursor]);
   const hasSkills = chatSkills.archives.length > 0 || chatSkills.local.some(({ enabled }) => enabled);
-  const mcpCatalog = useHostedMcp ? undefined : mcpResourceCatalog(connectedMcp);
+  const resourceServers = useHostedMcp ? [] : connectedMcp.filter(({ discovery }) => discovery.hasResources);
+  const deferredResources = resourceServers.length > 0 && preferences.plugins.includes(localResourceSearchPluginId);
+  const mcpCatalog = deferredResources ? undefined : mcpResourceCatalog(resourceServers);
+  const resourceSearchInstructions = deferredResources ?
+    `Use ${clientResourceSearchName} to find resources and templates, and read_resource to fetch selected content. Connected MCP servers (metadata only): ${JSON.stringify(resourceServers.map(({ record }) => ({ serverId: record.id, title: record.title })))}` : undefined;
   const mcpTools = (useHostedMcp ? [] : connectedMcp).flatMap(({ record, discovery }) => {
     const declaration = declaredMcp.find(entry => entry.endpoint === record.endpoint);
     return discovery.tools.filter(tool => (!declaration || agentMcpAllows(declaration.server, tool.remoteName)) && browserMcpAllows(tool, preferences.modelContext));
   }).filter((tool, index, all) => all.findIndex(other => other.name === tool.name) === index);
   const enabledTools = hostedRoute ? hostedRoute.endpoint === '/api/chat'
     ? activeChatTools({ mode: 'gateway', endpoint: '/api/chat' }, preferences.plugins, hasHistory, []).filter(tool => tool.source === 'local') : []
-    : activeChatTools(runRoute, preferences.plugins, hasHistory, mcpTools, hasSkills, mcpCatalog ? readResourceTool : undefined);
+    : activeChatTools(runRoute, preferences.plugins, hasHistory, mcpTools, hasSkills,
+      deferredResources ? deferredReadResourceTool : mcpCatalog ? readResourceTool : undefined);
   const configuredTools = configureChatTools(enabledTools, preferences.toolRequestConfig, preferences.useToolNamespaces, chatAgent, hostedToolSearch);
   const baseContext = useMemo(() => gatewayRoute || hasSkills ? buildRequestContext(appName, language, darkMode, chatSkills.local, chatSkills.archives) : undefined,
     [gatewayRoute, hasSkills, appName, language, darkMode, chatSkills]);
   const chatInstructions = hostedRoute ? undefined : chatAgent?.instructions;
-  const context = mcpCatalog || chatInstructions ? { ...baseContext, ...(mcpCatalog && { mcp: mcpCatalog }),
+  const context = mcpCatalog || resourceSearchInstructions || chatInstructions ? { ...baseContext, ...(mcpCatalog && { mcp: mcpCatalog }),
+    ...(resourceSearchInstructions && { resourceSearchInstructions }),
     ...(chatInstructions && { chatInstructions }) } : baseContext;
   const badges: ComposerBadge[] = [
     ...(hostedRoute ? [] : mcpSelection.connected).filter(({ record }) => !agentMcp.connected.some(entry => entry.record === record))
@@ -884,6 +895,7 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
 
   function requestBody(turn: Turn) {
     return { model: turn.model, route: turn.route, context: turn.context, providerSettings: turn.providerSettings, hosted: turn.hosted,
+      resourceServerIds: [...turn.resourceServers.keys()],
       loadHostedSkills: turn.loadHostedSkills, ...(turn.hostedMcp.length > 0 && { hostedMcp: turn.hostedMcp }),
       tools: turn.requestTools, toolChoice: turn.toolChoice, clientToolSearch: !!turn.toolSearchAgent, ...(turn.reasoning && { reasoning: turn.reasoning }) };
   }
@@ -987,12 +999,18 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
         output = await runLocalTool(tool, part.input, { catalog: turn.catalog, history: tool.plugin.requiresHistory ? readHistory?.() ?? [] : [],
             searchConversationText: tool.plugin.requiresHistory ? searchConversationText : undefined,
             searchTools: goal => searchLocalToolCatalog(turn.toolSearchAgent, goal, turn.requestTools,
-              turn.model.startsWith('anthropic/') && (isApiChat(turn.route) || turn.route.endpoint === '/v1/messages'), controller.signal) });
+              turn.model.startsWith('anthropic/') && (isApiChat(turn.route) || turn.route.endpoint === '/v1/messages'), controller.signal),
+            searchResources: (serverId, query) => {
+              const server = connectedMcp.find(({ record, discovery }) => record.id === serverId && discovery.hasResources &&
+                turn.resourceServers.get(record.id) === record.endpoint && mcpServers.connection(record));
+              if (!server) throw new Error('Choose a connected MCP resource server.');
+              return searchClientResources(turn.resourceSearchAgent, server, query, controller.signal);
+            } });
       } else if (tool.source === 'skill') {
         output = await resolveSkillTool(tool.definition.name, part.input, turn.skills, turn.skillArchives, controller.signal);
       } else if (tool.source === 'mcp-resource') {
         const target = resolveResourceRead(connectedMcp, part.input);
-        const enabled = target && turn.context?.mcp?.mcpResourceCatalog.servers.some(server => server.serverId === target.record.id);
+        const enabled = target && turn.resourceServers.get(target.record.id) === target.record.endpoint;
         const server = enabled ? mcpServers.connection(target.record) : undefined;
         if (!target || !server) output = 'Choose a connected MCP server and an absolute resource URI.';
         else try {
@@ -1059,16 +1077,29 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
   function createTurn(model: string): Turn {
     const seen = new Set(latestMessages.current.flatMap(message => message.parts.flatMap(part => 'toolCallId' in part ? [part.toolCallId] : [])));
     const toolPolicy = toolPolicyForTurn(preferences.toolPolicy, new Set(enabledTools.map(tool => tool.definition.name)));
-    const searchAgent = assignedAgent(agents, toolSearchRoleId);
-    const searchModel = configuredAgentModels(searchAgent).find(({ id, type }) => type !== 'decision' && compatibleById.has(id));
-    const toolSearchAgent = !hostedRoute && searchModel && searchAgent && appAgentTransport
-      ? { model: searchModel.id, instructions: searchAgent.instructions, transport: appAgentTransport, context: appAgentContext,
-        provider: chatProviderRequest(undefined, searchModel.id) } : undefined;
+    function searchAgentFor(role: SearchRole): SearchAgent | undefined {
+      const agent = assignedAgent(agents, role);
+      if (!agent || hostedRoute) return;
+      const { decision, language } = searchModels(configuredAgentModels(agent), catalog, id => compatibleById.has(id));
+      if (gateway.hasEndpoint && decision && decisions.selected !== 'off')
+        return { decision: { model: decision.id, instructions: agent.instructions, endpoint: decisions.selected, gateway } };
+      if (language && appAgentTransport)
+        return { model: language.id, instructions: agent.instructions, transport: appAgentTransport, context: appAgentContext,
+          provider: chatProviderRequest(undefined, language.id) };
+    }
+    const toolSearchAgent = searchAgentFor(toolSearchRoleId);
+    const hostedSearchModel = (role: SearchRole) => {
+      const { decision, language } = searchModels(configuredAgentModels(assignedAgent(agents, role)), catalog, id => compatibleById.has(id));
+      return (decision ?? language)?.id;
+    };
     return { model, route: runRoute, tools: enabledTools, context, catalog: runCatalog, skills: chatSkills.local,
       loadHostedSkills: useHostedSkills ? hostedChatSkills(localSkills.skills, chatSkills.preferenceSkills) : undefined,
-      hostedMcp,
+      hostedMcp: hostedMcp.map(tool => tool.type === 'mcp' || tool.model ? tool :
+        { ...tool, model: hostedSearchModel(tool.type === 'tool_search' ? toolSearchRoleId : resourceSearchRoleId) }),
       toolPolicy, toolChoice: hostedRoute ? undefined : toolPolicy.toolChoice, toolProgress: { seen, completed: 0 }, resolved: new Set(),
       requestTools: chatRequestTools(configuredTools), toolSearchAgent,
+      resourceSearchAgent: deferredResources ? searchAgentFor(resourceSearchRoleId) : undefined,
+      resourceServers: new Map(resourceServers.map(({ record }) => [record.id, record.endpoint])),
       hosted: hostedRoute && hostedSelection ? { endpoint: hostedRoute.endpoint, selection: hostedSelection } : undefined,
       providerSettings: !hostedRoute ? turnProviderSettings : undefined,
       reasoning: !hostedRoute && isApiChat(runRoute) && preferences.reasoning !== 'none' ? preferences.reasoning : undefined,

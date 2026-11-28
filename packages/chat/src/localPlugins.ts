@@ -13,7 +13,7 @@ type Property = { type: 'string' | 'integer' | 'number'; description: string; en
 export type ToolDefinition = Pick<McpTool, 'name' | 'description' | 'inputSchema'>;
 type LocalResult = { content: { type: 'text'; text: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean };
 type PluginContext = { catalog: readonly CatalogModel[]; history: readonly Conversation[]; searchConversationText?: SearchConversationText;
-  searchTools?: (goal: unknown) => Promise<ToolDefinition[]> };
+  searchTools?: (goal: unknown) => Promise<ToolDefinition[]>; searchResources?: (serverId: unknown, query: unknown) => Promise<Record<string, unknown>> };
 type LocalToolSpec = {
   definition: ToolDefinition;
   run: (input: Record<string, unknown>, context: PluginContext) => Record<string, unknown> | Promise<Record<string, unknown>>;
@@ -128,6 +128,8 @@ const historyTools = [
 ];
 
 export const localToolSearchPluginId = 'local-tool-search';
+export const localResourceSearchPluginId = 'local-resource-search';
+export const clientResourceSearchName = 'client_resource_search';
 
 export const localPlugins = [
   { id: 'local-artificial-intelligence', label: 'Artificial Intelligence', requiresHistory: false, tools: aiTools },
@@ -141,6 +143,14 @@ export const localPlugins = [
       { goal: string('The task the requested tools should help with.') }, ['goal'], async ({ goal }, { searchTools }) => {
         if (!searchTools) throw new Error('The tool catalog is unavailable.');
         return { selectedTools: await searchTools(goal) };
+      }),
+  ] },
+  { id: localResourceSearchPluginId, label: 'Resource search', requiresHistory: false, tools: [
+    define(clientResourceSearchName, 'Find MCP resources and resource templates on a connected server. Does not read content.',
+      { serverId: string('Connected MCP server ID, not a URL.'), query: string('What resources should help with.') },
+      ['serverId', 'query'], async ({ serverId, query }, { searchResources }) => {
+        if (!searchResources) throw new Error('The resource catalog is unavailable.');
+        return searchResources(serverId, query);
       }),
   ] },
 ] as const;
@@ -166,7 +176,7 @@ export function activeChatTools(route: ChatRoute, enabled: readonly LocalPluginI
     for (const definition of skillTools) tools.push({ source: 'skill', definition });
   }
   for (const plugin of localPlugins) {
-    if (enabled.includes(plugin.id) && (!plugin.requiresHistory || historyAvailable)) {
+    if (enabled.includes(plugin.id) && (!plugin.requiresHistory || historyAvailable) && (plugin.id !== localResourceSearchPluginId || resourceTool)) {
       for (const spec of plugin.tools) tools.push({ source: 'local', plugin, spec, definition: spec.definition });
     }
   }
@@ -243,8 +253,9 @@ export function filterLocalToolReplay(messages: ChatMessage[], definitions: read
       const skillId = skillCall && part.input && typeof part.input === 'object' && 'skill_id' in part.input ? part.input.skill_id : undefined;
       const sharesSkill = skillCall && part.state === 'output-available' &&
         !(part.output && typeof part.output === 'object' && 'isError' in part.output && part.output.isError === true);
-      const sourceId = name === readResourceTool.name && part.input && typeof part.input === 'object' && 'serverId' in part.input ? part.input.serverId : undefined;
-      const disconnectedResource = name === readResourceTool.name && typeof sourceId === 'string' && !enabledMcpResourceServers?.has(sourceId);
+      const isResource = name === readResourceTool.name || name === clientResourceSearchName;
+      const sourceId = isResource && part.input && typeof part.input === 'object' && 'serverId' in part.input ? part.input.serverId : undefined;
+      const disconnectedResource = isResource && typeof sourceId === 'string' && !enabledMcpResourceServers?.has(sourceId);
       if ((sharesSkill && (typeof skillId !== 'string' || !enabledSkillIds?.has(skillId))) || disconnectedResource || unapproved || (!complete && !part.providerExecuted) || part.state === 'approval-requested' ||
         (part.providerExecuted && part.approval) || (registeredNames.has(name) && !allowed.has(name))) {
         changed = true;
