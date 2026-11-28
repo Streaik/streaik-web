@@ -2,6 +2,7 @@ import type { ChatRoute, HostedMcpTool } from '@streaik/gateway';
 import { agentMcpPolicy } from './agentMcpClient.ts';
 import type { McpTool } from './mcp.ts';
 import { isObject, maxMcpServers, mcpEndpoint } from './mcpConfiguration.ts';
+import type { McpServerRecord } from './mcpConfiguration.ts';
 import { toolOptions } from './toolConfiguration.ts';
 import type { ToolCaller } from './toolConfiguration.ts';
 
@@ -74,15 +75,23 @@ export function hostedMcpDefers(options: ChatMcpServerOptions | undefined, hoste
   return !localToolSearch && (options?.deferLoading ?? hostedToolSearch);
 }
 
-export function chatHostedMcp(settings: ChatModelContext | undefined, servers: readonly { record: { title: string; endpoint: string } }[],
+// Registry names can contain dots and slashes; upstream labels cannot.
+function providerMcpLabel(name: string) {
+  const label = name.replace(/[^A-Za-z0-9_-]+/g, '_');
+  return /^[A-Za-z]/.test(label) ? label : `mcp_${label}`;
+}
+
+export function chatHostedMcp(settings: ChatModelContext | undefined,
+  servers: readonly { record: Pick<McpServerRecord, 'id' | 'title' | 'endpoint' | 'registryName'> }[],
   localToolSearch = false): HostedMcpTool[] {
   if ((settings?.execution !== 'hosted' && settings?.execution !== 'provider') || !servers.length) return [];
   const hosted = settings.execution === 'hosted';
   const hostedToolSearch = hosted && settings.toolSearch === true && !localToolSearch;
   const labels = new Set<string>();
-  const tools: HostedMcpTool[] = servers.map(({ record: { title, endpoint } }) => {
-    let label = title;
-    for (let index = 2; labels.has(label.toLowerCase()); index++) label = `${title} (${index})`;
+  const tools: HostedMcpTool[] = servers.map(({ record: { id, title, endpoint, registryName } }) => {
+    const base = hosted ? title : providerMcpLabel(registryName ?? id);
+    let label = base;
+    for (let index = 2; labels.has(label.toLowerCase()); index++) label = hosted ? `${base} (${index})` : `${base}_${index}`;
     labels.add(label.toLowerCase());
     const options = settings.servers?.[endpoint];
     return { type: 'mcp', server_label: label, server_url: endpoint,

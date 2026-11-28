@@ -12,6 +12,7 @@ export type McpHeaderField = McpInput & { id: string; label: string; value: stri
 export type McpServerRecord = {
   id: string;
   title: string;
+  registryName?: string;
   endpoint: string;
   source: 'manual' | 'registry';
   declarations: McpRemoteHeader[];
@@ -147,6 +148,8 @@ export function parseMcpServer(value: unknown): McpServerRecord | undefined {
   const endpoint = mcpEndpoint(value.endpoint);
   const declarations = mcpDeclarations(value.declarations);
   if (!endpoint || !declarations || (value.source === 'manual' && declarations.length)) return;
+  const registryName = value.source === 'registry' ? stringField(value.registryName, 240) : undefined;
   return { id: value.id, title: value.title, endpoint, source: value.source, auth: value.auth, declarations, extraNames: value.extraNames,
+    ...(registryName?.trim() && { registryName }),
     needsSession: value.needsSession === true };
 }

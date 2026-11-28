@@ -733,9 +733,9 @@ function ChatSession({ appName, gateway, connection, conversation, history, sear
           } catch (error) {
             request.abortSignal?.throwIfAborted();
             if (error instanceof McpDescriptorAuthUnsupported)
-              throw new GatewayError(`MCP server “${label}” requires a browser authentication challenge. Use Client execution or configure server credentials.`);
+              throw new GatewayError(`MCP server “${record.title}” requires a browser authentication challenge. Use Client execution or configure server credentials.`);
           }
-          throw new GatewayError(`Credentials for MCP server “${label}” are unavailable. Reconnect the server and start a new turn.`);
+          throw new GatewayError(`Credentials for MCP server “${record.title}” are unavailable. Reconnect the server and start a new turn.`);
         }) } : {};
         request.abortSignal?.throwIfAborted();
         if (isApiChat(route)) {

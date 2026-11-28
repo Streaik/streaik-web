@@ -95,7 +95,7 @@ export function McpServerEditor({ target, options, store, close }: { target: Mcp
       else if (!appAuth?.ready) throw new Error('App credentials are unavailable. Choose manual headers or update your app credentials.');
       const needsSession = auth === 'manual' && (savedFields.size > 0 || extra.length > 0);
       store.save({ id: record?.id ?? crypto.randomUUID().slice(0, 12), title: title.trim() || new URL(endpoint).host,
-        endpoint, source: record?.source ?? 'manual', auth, declarations,
+        endpoint, source: record?.source ?? 'manual', registryName: record?.registryName, auth, declarations,
         extraNames: auth === 'manual' ? extra.map(row => row.name) : [], needsSession },
       needsSession ? { fields: savedFields, rows: extra } : undefined);
       closeDialog();
@@ -293,7 +293,7 @@ function McpRegistry({ management, picker, options, inDialog, active, registry }
     setError('');
     const slug = item.name.split('/').at(-1)?.toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 22);
     const id = slug && !store.records.some(record => record.id === slug) ? slug : crypto.randomUUID().slice(0, 12);
-    const record: McpServerRecord = { ...remote, id, title: item.title, source: 'registry', auth: 'manual', extraNames: [] };
+    const record: McpServerRecord = { ...remote, id, title: item.title, registryName: item.name, source: 'registry', auth: 'manual', extraNames: [] };
     if (mcpAppAuth(options, record)?.ready) record.auth = 'app';
     else if (mcpHeaderFields(record.declarations, new Map()).some(field => !field.fixed)) { onEdit({ record, installing: true }); return; }
     try {
