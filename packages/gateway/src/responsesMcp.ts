@@ -1,6 +1,7 @@
 import type { ChatMessage } from './index.ts';
 import { GatewayError } from './index.ts';
 import { asRecord } from './directMetrics.ts';
+import { openAIResponseAgent } from './openAIResponsesHistory.ts';
 
 const approvalKey = 'streaik_mcp_approvals';
 const historyKey = 'streaik_mcp_history';
@@ -62,7 +63,8 @@ export function responsesMcpReplay(messages: ChatMessage[], url: string, model: 
       const output: unknown[] = [];
       let users = 0;
       for (const item of input) {
-        if (asRecord(item)?.role === 'user') {
+        const entry = asRecord(item);
+        if (entry?.role === 'user' && openAIResponseAgent(entry) === '/root') {
           output.push(...history.filter(record => record.beforeUser === users).map(record => record.item));
           users++;
         }

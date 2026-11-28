@@ -14,6 +14,7 @@ The chat client supports:
 - **Model discovery** with catalogs, favorites, filters and configurable default preferences
 - **Provider settings** with model-specific options and native metadata passthrough
 - **Agents and workflows** on direct APIs or through connected agent runtimes with multi-agent orchestration
+- **OpenAI Responses multi-agent activity** on direct and gateway Responses, and API Chat when backed by native OpenAI Responses. The existing activity pager shows provider-executed actions and agent-attributed searches; only root text appears in the main transcript. Ordered native history travels in provider metadata for inline replay on compatible follow-ups with provider storage disabled. Encrypted payloads remain opaque; other routes use the ordinary transcript.
 - **Native realtime voice chat** with bidirectional audio, provider-specific controls and streaming playback
 - **Decisions** with intelligent multi-model and agent routing based on user input and configurable decision models
 - **Agent Plugins** combining Skills, MCP servers and supporting resources

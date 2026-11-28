@@ -13,6 +13,7 @@ import { withResponsesHostedMcp } from './hostedMcp.ts';
 import type { HostedMcpTool } from './hostedMcp.ts';
 import { responsesMcpOutput, responsesMcpReplay } from './responsesMcp.ts';
 import { hostedActivityHeader, hostedActivityRelay, withoutHostedActivity } from './hostedActivity.ts';
+import { isOpenAIMultiAgent, openAIResponsesCapture, prepareOpenAIResponsesHistory } from './openAIResponsesHistory.ts';
 
 type NativeTarget = {
   url: string;
@@ -72,6 +73,9 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
         (part.type === 'dynamic-tool' && part.toolName === 'tool_search' || part.type === 'tool-tool_search') &&
         typeof part.callProviderMetadata?.openai?.itemId === 'string')));
       const beta = openAIResponses ? new Headers(headers).get('openai-beta') : null;
+      const multiAgent = openAIResponses && isOpenAIMultiAgent(providerMetadata);
+      const agentOutput = multiAgent ? openAIResponsesCapture(model) : undefined;
+      const nativeHistory = prepareOpenAIResponsesHistory(mcpReplay?.messages ?? messages, model, multiAgent);
       const definitionsList = Array.isArray(definitions) ? definitions : [];
       const anthropicSearch = anthropic && endpoint === '/v1/messages' &&
         definitionsList.some(definition => asRecord(definition)?.name === clientToolSearchName);
@@ -96,8 +100,9 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
         if (anthropic && endpoint === '/v1/messages') body = mergeAnthropicMessagesOptions(body, anthropicOptions, toolChoice);
         if (target.gateway) body = withNativeHostedSkills(body, endpoint, skills, toolChoice);
         body = withResponsesHostedMcp(body, mcp, toolChoice);
+        body = nativeHistory.body(body);
         if (mcpReplay) body = mcpReplay.body(body);
-        if (!beta && !anthropic && !hostedActivity) return target.fetch(input, body === init.body ? init : { ...init, body });
+        if (!beta && !anthropic && !hostedActivity && !agentOutput) return target.fetch(input, body === init.body ? init : { ...init, body });
         const outgoing = new Headers(init.headers);
         if (beta) outgoing.set('OpenAI-Beta', beta);
         if (hostedActivity) outgoing.set(hostedActivityHeader, '1');
@@ -107,7 +112,10 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
           anthropicChatProtocolHeaders(new Headers(headers), deferred.size > 0).forEach((value, name) => outgoing.set(name, value));
         }
         const response = target.fetch(input, { ...init, body, headers: outgoing });
-        return hostedActivity ? response.then(hostedActivity.tap) : response;
+        return response.then(value => {
+          const observed = hostedActivity ? hostedActivity.tap(value) : value;
+          return agentOutput ? agentOutput.tap(observed) : observed;
+        });
       };
       const sdk = { baseURL, apiKey: 'supplied-by-scoped-fetch', fetch: fetcher };
       const openai = endpoint !== '/v1/messages' ? (await import('@ai-sdk/openai')).createOpenAI(sdk) : undefined;
@@ -130,7 +138,7 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
       let gateway: ChatMessageMetadata['gateway'];
       let diagnostic: string | undefined;
       const result = streamText({
-        model: adapter, messages: await convertToModelMessages(nativeAttachmentMessages(withoutHostedActivity(mcpReplay?.messages ?? messages), endpoint), { tools, ignoreIncompleteToolCalls: true }),
+        model: adapter, messages: await convertToModelMessages(nativeAttachmentMessages(withoutHostedActivity(nativeHistory.messages), endpoint), { tools, ignoreIncompleteToolCalls: true }),
         instructions, tools, toolChoice: Object.keys(tools).length || nativeTools.length || target.gateway && skills.length || mcp.length
           ? chatToolChoice(toolChoice) : undefined,
         ...(typeof anthropicLimit === 'number' && { maxOutputTokens: anthropicLimit }),
@@ -172,7 +180,8 @@ export function nativeChatTransport(endpoint: NativeChatEndpoint, resolve: (mode
             ...(metrics && { providerMetadata: { gateway: metrics } }) };
         },
       });
-      return hostedActivity ? hostedActivity.merge(stream, messages) : stream;
+      const merged = hostedActivity ? hostedActivity.merge(stream, messages) : stream;
+      return agentOutput ? agentOutput.merge(merged) : merged;
     },
     async reconnectToStream() { return null; },
   };

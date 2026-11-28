@@ -2,6 +2,7 @@ import { DefaultChatTransport } from 'ai';
 import type { UIMessage } from 'ai';
 import { readGatewayError, sanitizeChatErrors } from './errorDetails.ts';
 import { nativeChatTransport } from './nativeChat.ts';
+import { apiChatResponsesHistory } from './openAIResponsesHistory.ts';
 import { hostedActivityHeader } from './hostedActivity.ts';
 import { apiChatHostedSkillProviders, apiChatHostedSkills, hostedSkillProviders } from './hostedSkills.ts';
 import type { HostedSkill } from './hostedSkills.ts';
@@ -572,8 +573,9 @@ export function createGateway(baseUrl: URL | undefined, credentials: Credentials
           const skills = Array.isArray(body?.hostedSkills) ? body.hostedSkills as HostedSkill[] : [];
           const tools = [...(Array.isArray(body?.tools) ? body.tools : []), ...hostedMcp.map(apiChatHostedMcp),
             ...(skills.length ? [apiChatHostedSkills(skills)] : [])];
+          const history = apiChatResponsesHistory(messages, body?.model, body?.providerMetadata);
           return { body: {
-            model: body?.model, messages, ...(hostedMcp.length && { id }), ...(tools.length ? { tools } : {}),
+            model: body?.model, messages: history, ...(hostedMcp.length && { id }), ...(tools.length ? { tools } : {}),
             ...(body?.providerMetadata && { providerMetadata: body.providerMetadata }),
             reasoning: chatReasoning(body?.reasoning),
             toolChoice: chatToolChoice(body?.toolChoice),

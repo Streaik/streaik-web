@@ -58,6 +58,83 @@ async function send(transport, model, extras = {}) {
   return Array.fromAsync(await transport.sendMessages({ chatId: 'conversation', messages, body: { model }, trigger: 'submit-message', ...extras }));
 }
 
+for (const useDirect of [true, false]) test(`${useDirect ? 'Direct' : 'Gateway'} OpenAI keeps agent activity separate and replays it across routes`, async () => {
+  const model = 'openai/gpt-6-luna';
+  const rootAgent = { agent_name: '/root' }, child = { agent_name: '/root/research' };
+  const outputText = text => ({ type: 'output_text', text, annotations: [], logprobs: [] });
+  const spawn = { id: 'mac_1', type: 'multi_agent_call', agent: rootAgent, action: 'spawn_agent', call_id: 'spawn', arguments: '{"task_name":"research","message":"opaque-task"}' };
+  const reason = { id: 'rs_1', type: 'reasoning', agent: child, encrypted_content: 'opaque-reasoning', summary: [] };
+  const result = { id: 'maco_1', type: 'multi_agent_call_output', agent: rootAgent, action: 'spawn_agent', call_id: 'spawn', output: [outputText('{"task_name":"/root/research"}')] };
+  const message = { id: 'amsg_1', type: 'agent_message', author: '/root', recipient: '/root/research', agent: child,
+    content: [{ type: 'encrypted_content', encrypted_content: 'opaque-message' }] };
+  const search = { id: 'ws_1', type: 'web_search_call', status: 'completed', agent: child,
+    action: { type: 'search', query: 'botanical gardens', queries: ['botanical gardens', 'seed bank'] } };
+  const answer = (id, agent, text) => ({ id, type: 'message', status: 'completed', agent, phase: 'final_answer', role: 'assistant', content: [outputText(text)] });
+  const sub = answer('msg_child', child, 'child answer');
+  const primary = answer('msg_root', rootAgent, 'root answer');
+  const fn = { id: 'fc_1', type: 'function_call', status: 'completed', agent: child, call_id: 'call_read', name: 'lookup', arguments: '{"value": 1}' };
+  const items = [reason, spawn, message, result, search, sub, fn, primary];
+  const envelope = { id: 'resp_agents', created_at: 1, model: 'gpt-6-luna', usage: { input_tokens: 7, output_tokens: 4, total_tokens: 11 } };
+  const added = (index, item) => ({ type: 'response.output_item.added', output_index: index, item });
+  const done = (index, item) => ({ type: 'response.output_item.done', output_index: index, item });
+  const delta = (index, item, text) => ({ type: 'response.output_text.delta', output_index: index, content_index: 0, item_id: item.id, delta: text });
+  const frames = [
+    { type: 'response.created', response: envelope }, added(1, { ...spawn, arguments: '' }), done(1, spawn),
+    added(4, { ...search, status: 'in_progress' }), added(5, { ...sub, content: [], status: 'in_progress' }),
+    added(7, { ...primary, content: [], status: 'in_progress' }), delta(5, sub, 'child '), delta(7, primary, 'root '),
+    delta(5, sub, 'answer'), delta(7, primary, 'answer'), done(7, primary), done(5, sub),
+    { type: 'response.completed', response: { ...envelope, status: 'completed', output: items } },
+  ];
+  const bodies = [];
+  const fetcher = async (url, init) => {
+    bodies.push(JSON.parse(init.body));
+    assert.equal(new Headers(init.headers).get('openai-beta'), 'responses_multi_agent=v1');
+    if (String(url).endsWith('/api/chat')) return sse([{ type: 'start' }, { type: 'finish', finishReason: 'stop' }, '[DONE]']);
+    return sse(frames);
+  };
+  const gateway = createGateway(root, () => ({}), fetcher);
+  const direct = createDirectChat(providers, id => keys[id], fetcher);
+  const body = { model, tools: [{ name: 'lookup', inputSchema: { type: 'object' } }], providerMetadata: { openai: { multi_agent: { enabled: true } } } };
+  const headers = { 'OpenAI-Beta': 'responses_multi_agent=v1' };
+  const first = await (useDirect ? direct : gateway).chatTransport(responses).sendMessages({ chatId: 'conversation', messages: [messages[0]], body, headers, trigger: 'submit-message' });
+  const reply = (await Array.fromAsync(readUIMessageStream({ stream: first, terminateOnError: true }))).at(-1);
+  const saved = JSON.parse(JSON.stringify(reply));
+  assert.ok(saved.parts.every(part => !part.type.startsWith('data-')));
+  const hosted = saved.parts.filter(part => part.providerExecuted);
+  assert.deepEqual(hosted.map(part => [part.toolName, part.toolCallId, part.state]), [
+    ['spawn_agent', 'spawn', 'output-available'], ['web_search', 'ws_1', 'output-available'],
+  ]);
+  assert.deepEqual(hosted[0].input, { agent: '/root', task_name: 'research' });
+  assert.deepEqual(hosted[0].output, { task_name: '/root/research', status: 'completed' });
+  assert.equal(hosted[1].input.agent, '/root/research');
+  const replayParts = hosted.filter(part => part.resultProviderMetadata?.openai?.responsesReplay);
+  assert.equal(replayParts.length, 1, 'keep one copy of the ordered wire history');
+  const [trace] = replayParts;
+  assert.deepEqual(trace.resultProviderMetadata.openai.responsesReplay, { model, items });
+  assert.doesNotMatch(JSON.stringify(hosted.map(part => [part.input, part.output])), /opaque|child answer/);
+  assert.equal(saved.parts.filter(part => part.type === 'text').map(part => part.text).join(''), 'root answer');
+  const clientTool = saved.parts.find(part => part.toolCallId === 'call_read');
+  assert.ok(clientTool, 'terminal-only client call should be actionable');
+  assert.equal(saved.parts.filter(part => part.toolCallId && !part.providerExecuted).length, 1, 'hosted actions are not browser tool invocations');
+  Object.assign(clientTool, { state: 'output-available', output: { checked: true } });
+  const history = [messages[0], saved, messages[2]];
+  await send((useDirect ? gateway : direct).chatTransport(responses), model, { messages: history, body, headers });
+  const replay = bodies[1];
+  assert.equal(replay.store, false);
+  assert.equal(replay.previous_response_id, undefined);
+  assert.deepEqual(replay.input.slice(1, items.length + 1), items);
+  assert.deepEqual(replay.input.filter(item => item.call_id === 'call_read').map(item => item.type), ['function_call', 'function_call_output']);
+  assert.doesNotMatch(JSON.stringify(replay), /streaik-native-history:/);
+  await send(gateway.chatTransport('/api/chat'), model, { messages: history, body, headers });
+  assert.deepEqual(bodies[2].messages[1].parts.find(part => part.toolCallId === trace.toolCallId), trace);
+
+  const oldHistory = [messages[0], { ...saved, parts: [
+    { type: 'text', text: 'ordinary saved answer' }, { type: 'data-experimental-activity', data: { items } },
+  ] }, messages[2]];
+  await send(gateway.chatTransport('/api/chat'), model, { messages: oldHistory, body, headers });
+  assert.deepEqual(bodies[3].messages[1].parts, [{ type: 'text', text: 'ordinary saved answer' }]);
+});
+
 test('Gateway Responses streams hosted call cards and excludes them from the next stateless request', async () => {
   const model = 'mistral/mistral-large-latest';
   const requests = [];
