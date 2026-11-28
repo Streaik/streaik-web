@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { defaultImagePreferences, imageOptionsForModel, readImagePreferences, writeImagePreferences } from '../packages/chat/src/imagePreferences.ts';
 import { createGateway, imageBatchSizes, imageSource } from '../packages/gateway/src/index.ts';
 
 const root = new URL('https://gateway.example/prefix/');
@@ -86,9 +87,9 @@ test('malformed or non-inline image responses are not accepted for saving', asyn
 
 test('image settings use the Vercel and native property names, including masks and typed multipart data', async () => {
   const svg = { model: 'svg-model', reasoning: { effort: 'medium' } };
-  const generationOptions = { quality: 'high', background: 'transparent', output_format: 'svg', svg, frame_count: 3 };
-  const editOptions = { ...generationOptions, input_fidelity: 'high' };
-  const common = { model, prompt, n: 2, size: '1024x1024' };
+  const generationOptions = { quality: 'high', output_format: 'svg', svg };
+  const editOptions = { output_format: 'webp', output_compression: 0, input_fidelity: 'high', safety_identifier: 'hashed-user' };
+  const common = { model, prompt, n: 1, size: '1024x1024' };
   const settings = { ...common, aspectRatio: '1:1', seed: -12 };
   const mask = { ...attachment, file: new File(['mask'], 'mask.png', { type: attachment.mediaType }) };
   const reference = { image_url: 'data:image/png;base64,bWFzaw==' };
@@ -100,10 +101,10 @@ test('image settings use the Vercel and native property names, including masks a
       assert.equal(request.body.get('mask').name, 'mask.png');
       assert.equal(request.body.get('seed'), '-12');
       assert.equal(request.body.get('aspect_ratio'), '1:1');
-      assert.equal(request.body.get('frame_count'), '3');
+      assert.equal(request.body.get('output_compression'), '0');
       assert.equal(request.body.get('input_fidelity'), 'high');
-      assert.deepEqual(JSON.parse(request.body.get('svg')), svg);
-      assert.equal(request.body.get('n'), '2');
+      assert.equal(request.body.get('safety_identifier'), 'hashed-user');
+      assert.equal(request.body.get('n'), '1');
     } else {
       const body = JSON.parse(request.body);
       if (destination.endsWith('api/images')) {
@@ -113,7 +114,7 @@ test('image settings use the Vercel and native property names, including masks a
       }
       if (destination.endsWith('/edits')) {
         assert.deepEqual(body, { ...common, aspect_ratio: '1:1', seed: -12, ...editOptions,
-          images: [{ image_url: url }], mask: reference, markup: reference });
+          images: [{ image_url: url }], markup: reference });
       } else {
         assert.deepEqual(body, { ...common, ...generationOptions, aspect_ratio: '1:1', seed: -12 });
       }
@@ -122,7 +123,7 @@ test('image settings use the Vercel and native property names, including masks a
   });
   await gateway.generateImages('/api/images', { ...settings, providerOptions: { openai: editOptions }, inputs: [{ url }], mask, markup: mask });
   await gateway.generateImages('/v1/images/generations', { ...settings, body: generationOptions, inputs: [] });
-  await gateway.generateImages('/v1/images/edits', { ...settings, body: editOptions, inputs: [{ url }], mask, markup: mask });
+  await gateway.generateImages('/v1/images/edits', { ...settings, body: editOptions, inputs: [{ url }], markup: mask });
   await gateway.generateImages('/v1/images/edits', { ...settings, body: editOptions, inputs: [attachment], mask });
   assert.deepEqual(paths, ['/api/images', '/v1/images/generations', '/v1/images/edits', '/v1/images/edits']);
 });
@@ -147,6 +148,75 @@ test('Vercel preserves provider JSON and native edits fall back to JSON for type
     { model, prompt, n: 1, providerOptions },
     { model, prompt, n: 1, images: [image], mask: image, ...extra },
   ]);
+});
+
+test('v1 General settings merge with only the selected provider, while Vercel keeps its own envelope', async () => {
+  const selected = { id: 'imagerouter/vendor/image', provider: 'imagerouter' };
+  const native = { n: 2, size: '1536x864' };
+  const options = { quality: 'low', seed: 0, hints: { keep: false, extra: null } };
+  const settings = { ...defaultImagePreferences, size: '512x512', aspectRatio: '16:9', seed: 22, native,
+    byProvider: {
+      openai: { quality: 'high', background: 'opaque', output_format: 'gif', frame_count: 3, frame_duration_ms: 200, input_fidelity: 'high', safety_identifier: 'previously-saved' },
+      imagerouter: { ...options, background: undefined, model: 'not-the-model', providerOptions: { ignored: true } },
+      openrouter: { complexity: 'high' },
+    },
+  };
+  const requests = [];
+  const gateway = createGateway(root, () => ({}), async (destination, request) => {
+    requests.push(JSON.parse(request.body));
+    return destination.endsWith('/api/images')
+      ? Response.json({ images: ['AQIDBA=='], warnings: [], response: { modelId: selected.id, timestamp: '2026-01-01T00:00:00Z' } })
+      : Response.json({ data: [{ b64_json: 'AQIDBA==' }] });
+  });
+  for (const [endpoint, inputs] of [['/api/images', []], ['/v1/images/generations', []], ['/v1/images/edits', [attachment]]]) {
+    const edit = endpoint === '/v1/images/edits';
+    await gateway.generateImages(endpoint, { ...imageOptionsForModel(endpoint, selected, settings, edit), model: selected.id, prompt, inputs,
+      n: endpoint === '/api/images' ? settings.n : native.n });
+  }
+  const base = { model: selected.id, prompt };
+  const expected = { ...base, ...native, ...options, background: 'opaque', output_format: 'gif', frame_count: 3, frame_duration_ms: 200 };
+  assert.deepEqual(requests, [
+    { ...base, n: 1, size: '512x512', aspectRatio: '16:9', seed: 22, providerOptions: { imagerouter: {
+      ...options, model: 'not-the-model', providerOptions: { ignored: true },
+    } } },
+    expected,
+    { ...expected, input_fidelity: 'high', images: [{ image_url: 'data:image/png;base64,AQIDBA==' }] },
+  ]);
+});
+
+test('saved image profiles migrate legacy settings and keep v1 sizing and count independent of Vercel', (t) => {
+  const storage = new Map([['streaik.images.settings.v1:old', JSON.stringify({
+    n: 3, size: '1024x1024', maxImagesPerCall: 2, byProvider: { openai: { quality: 'hd', moderation: 'auto' } },
+  })]]);
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  t.after(() => { if (original) Object.defineProperty(globalThis, 'localStorage', original); else delete globalThis.localStorage; });
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value),
+  } });
+  const migrated = readImagePreferences('old');
+  assert.deepEqual(migrated.native, { n: 3, size: '1024x1024' });
+  assert.equal(migrated.dallE3Quality, 'hd');
+  assert.equal(migrated.byProvider.openai.quality, undefined);
+  assert.equal(migrated.byProvider.openai.moderation, 'auto');
+  writeImagePreferences('old', { ...migrated, native: { n: 4 }, mask: attachment, markup: attachment });
+  const restored = readImagePreferences('old');
+  assert.deepEqual(restored.native, { n: 4, size: undefined });
+  assert.equal(restored.size, '1024x1024');
+  assert.equal(restored.n, 3);
+  assert.equal(restored.maxImagesPerCall, 2);
+  assert.equal(restored.mask, undefined);
+  assert.equal(restored.markup, undefined);
+  assert.deepEqual(readImagePreferences('different-profile'), defaultImagePreferences);
+});
+
+test('native image requests reject out-of-range counts, multi-image SVG, or incompatible masks', async () => {
+  const gateway = createGateway(root, () => assert.fail('Unexpected credential request'), () => assert.fail('Unexpected fetch'));
+  const generation = { model, prompt, inputs: [] };
+  const edit = { ...generation, inputs: [attachment], mask: attachment };
+  await assert.rejects(gateway.generateImages('/v1/images/generations', { ...generation, n: 11 }), /between 1 and 10/);
+  await assert.rejects(gateway.generateImages('/v1/images/generations', { ...generation, n: 2, body: { output_format: 'svg' } }), /SVG output requires one image/);
+  await assert.rejects(gateway.generateImages('/v1/images/edits', { ...edit, markup: attachment }), /either a mask or a markup image/);
+  await assert.rejects(gateway.generateImages('/v1/images/edits', { ...edit, body: { output_format: 'gif' } }), /GIF output does not support masks/);
 });
 
 test('image batches respect the total, configured maximum, and model limits', () => {

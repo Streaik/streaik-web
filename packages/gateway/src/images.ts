@@ -17,6 +17,7 @@ export type ImageRequest = ImageOptions & {
 };
 
 export const maxImageCount = 20;
+export const maxNativeImageCount = 10;
 
 export function imageBatchSizes(model: string, n: number, maxPerCall: number) {
   if (![n, maxPerCall].every(value => Number.isInteger(value) && value >= 1 && value <= maxImageCount)) {
@@ -102,7 +103,9 @@ export async function imageRequestBody(endpoint: GatewayImageEndpoint, request: 
   if (endpoint === '/v1/images/generations' && inputs.length) throw new GatewayError('Remove attachments or choose an image edit route.');
   if (endpoint === '/v1/images/edits' && !inputs.length) throw new GatewayError('Add a reference image to edit.');
   if (mask && !inputs.length) throw new GatewayError('A mask requires a reference image.');
-  if (!Number.isInteger(n) || n < 1 || n > maxImageCount) throw new GatewayError('Use an image count between 1 and 20.');
+  const limit = endpoint === '/api/images' ? maxImageCount : maxNativeImageCount;
+  if (!Number.isInteger(n) || n < 1 || n > limit) throw new GatewayError(endpoint === '/api/images'
+    ? 'Use an image count between 1 and 20.' : 'Use an image count between 1 and 10.');
   if (size && !/^(?:auto|[1-9]\d{0,4}x[1-9]\d{0,4})$/.test(size) || aspectRatio && !/^[1-9]\d{0,3}:[1-9]\d{0,3}$/.test(aspectRatio) ||
     seed !== undefined && (!Number.isInteger(seed) || seed < -2147483648 || seed > 2147483647)) throw new GatewayError('Check the image size, aspect ratio, or seed.');
   if ([...inputs, ...(mask ? [mask] : []), ...(markup ? [markup] : [])].some(input => 'file' in input && (!/^image\/[\w.+-]+$/.test(input.mediaType) || !input.file.size))) {
@@ -121,9 +124,12 @@ export async function imageRequestBody(endpoint: GatewayImageEndpoint, request: 
     };
   } else {
     const extra = Object.fromEntries(Object.entries(request.body ?? {}).filter(([key]) => !reservedImageFields.has(key.toLowerCase())));
+    if (extra.output_format === 'svg' && n !== 1) throw new GatewayError('SVG output requires one image.');
     const options = { ...extra, model, prompt, n, size,
       ...(aspectRatio !== undefined && { aspect_ratio: aspectRatio }), ...(seed !== undefined && { seed }) };
     if (endpoint === '/v1/images/edits') {
+      if (mask && (markup || extra.markup)) throw new GatewayError('Choose either a mask or a markup image, not both.');
+      if (mask && extra.output_format === 'gif') throw new GatewayError('GIF output does not support masks.');
       if (!markup && inputs.every(input => 'file' in input)) {
         const fields = Object.entries(options).flatMap(([key, value]) => value === undefined ? [] : [[key, imageFormValue(key, value)] as const]);
         if (fields.every((field): field is readonly [string, string] => field[1] !== undefined)) {

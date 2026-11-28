@@ -1,4 +1,4 @@
-import { maxImageCount } from '@streaik/gateway';
+import { maxImageCount, maxNativeImageCount } from '@streaik/gateway';
 import type { ChatModel, GatewayImageEndpoint, ImageFileInput, ImageJsonObject } from '@streaik/gateway';
 import { Button } from '@streaik/themes';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
@@ -7,7 +7,7 @@ import { attachmentByteLimit, fileMediaType } from './chatAttachments';
 import { ChatIcon } from './ChatIcon';
 import { DialogTabs } from './DialogTabs';
 import { providerName } from './aiCatalog';
-import { defaultImagePreferences, isDallE, supportsImageAspectRatio, supportsImageSeed } from './imagePreferences';
+import { defaultImagePreferences, isDallE, openAIInputFidelities } from './imagePreferences';
 import type { ImagePreferences } from './imagePreferences';
 import { canEditImage, imageMaskIssue } from './imageRoute';
 import { useAppTranslation } from './i18n';
@@ -57,10 +57,22 @@ function ChoiceField({ label, value, choices, onChange }: {
   label: string; value?: string; choices: string[]; onChange: (value?: string) => void;
 }) {
   const { t } = useAppTranslation();
-  return <label><span>{t(label)}</span><select value={value ?? ''} onChange={event => onChange(event.currentTarget.value || undefined)}>
+  return <label><span>{t(label)}</span><select value={value && choices.includes(value) ? value : ''} onChange={event => onChange(event.currentTarget.value || undefined)}>
     <option value="">{t('Default')}</option>
     {choices.map(choice => <option key={choice} value={choice}>{t(choice)}</option>)}
   </select></label>;
+}
+
+function ImageSizeField({ value, onChange, native }: { value?: string; onChange: (size?: string) => void; native?: boolean }) {
+  const { t } = useAppTranslation();
+  const id = useId();
+  const sizes = native ? ['auto', '1024x1024', '1536x1024', '1024x1536', '256x256', '512x512', '1792x1024', '1024x1792']
+    : ['auto', '512x512', '1024x1024', '1536x1024', '1024x1536', '2048x2048'];
+  return <>
+    <label><span>{t('Image size')}</span><input placeholder={t('Default')} list={id} value={value ?? ''}
+      pattern="auto|[1-9][0-9]{0,4}x[1-9][0-9]{0,4}" onChange={event => onChange(event.currentTarget.value || undefined)} /></label>
+    <datalist id={id}>{sizes.map(size => <option key={size} value={size} />)}</datalist>
+  </>;
 }
 
 type ProviderFormProps = {
@@ -94,12 +106,21 @@ function OpenAIImageFields(props: ProviderFormProps) {
   const { t } = useAppTranslation();
   const { models, route, options, setOption, value, setGeneral } = props;
   const { choice, number } = imageOptionFields(props);
-  const modern = models.some(({ id }) => !isDallE(id));
-  const canEdit = models.some(({ id }) => !isDallE(id) && canEditImage(route, id));
+  const native = route !== '/api/images';
+  const modern = !models.length || models.some(({ id }) => !isDallE(id));
+  const editing = native ? route === '/v1/images/edits' : models.some(({ id }) => !isDallE(id) && canEditImage(route, id));
+  const fidelities = !models.length ? ['low', 'high'] : [...new Set(models.flatMap(({ id }) => openAIInputFidelities(id)))];
   const dallE3 = route !== '/v1/images/edits' && models.some(({ id }) => id === 'openai/dall-e-3');
   const svg = objectOption(options.svg);
   const reasoning = objectOption(svg?.reasoning);
+  function setSvg(next: ImageJsonObject) {
+    setOption('svg', Object.values(next).some(field => field !== undefined) ? next : undefined);
+  }
   return <>
+    {native && <section className="chat-tool-card"><h3>{t('Image size')}</h3><div className="image-settings-fields">
+      <ImageSizeField native value={value.native.size} onChange={size => setGeneral('native', { ...value.native, size })} />
+      <NumberField label="Number of images" value={value.native.n} onChange={n => setGeneral('native', { ...value.native, n })} min={1} max={maxNativeImageCount} required />
+    </div></section>}
     {modern && <>
       <section className="chat-tool-card">
         <h3>{t('Output')}</h3>
@@ -110,27 +131,28 @@ function OpenAIImageFields(props: ProviderFormProps) {
           {choice('moderation', 'Moderation', ['auto', 'low'])}
           {choice('complexity', 'Complexity', ['low', 'medium', 'high'])}
           {(options.output_format === 'jpeg' || options.output_format === 'webp') && number('output_compression', 'Output compression', 0, 100)}
-          {canEdit && choice('input_fidelity', 'Input fidelity', ['low', 'high'])}
+          {editing && fidelities.length > 0 && choice('input_fidelity', 'Input fidelity', fidelities)}
         </div>
-        {canEdit && <ImageFileField label={t('Markup image')} value={value.markup} onChange={markup => setGeneral('markup', markup)} />}
       </section>
-      <section className="chat-tool-card"><h3>GIF</h3><div className="image-settings-fields">
-        {number('frame_count', 'Frame count', 1, 2147483647)}
-        {number('frame_duration_ms', 'Frame duration (ms)', 1, 2147483647)}
-      </div></section>
-      <section className="chat-tool-card"><h3>SVG</h3>
-        <label className="image-svg-switch"><input type="checkbox" role="switch" checked={!!svg}
-          onChange={event => setOption('svg', event.currentTarget.checked ? {} : undefined)} />{t('SVG options')}</label>
-        {svg && <div className="image-settings-fields">
-          <label><span>{t('SVG model')}</span><input value={stringOption(svg.model) ?? ''}
-            onChange={event => setOption('svg', { ...svg, model: event.currentTarget.value || undefined })} /></label>
+      {options.output_format === 'gif' && <section className="chat-tool-card"><h3>GIF</h3><div className="image-settings-fields">
+        {number('frame_count', 'Frame count', 2, 16)}
+        {number('frame_duration_ms', 'Frame duration (ms)', 20, 2147483647)}
+      </div></section>}
+      {options.output_format === 'svg' && <section className="chat-tool-card"><h3>SVG</h3>
+        <div className="image-settings-fields">
+          <label><span>{t('SVG model')}</span><input value={stringOption(svg?.model) ?? ''} required={route === '/v1/images/generations' && !!reasoning}
+            onChange={event => setSvg({ ...svg, model: event.currentTarget.value || undefined })} /></label>
           <ChoiceField label="Reasoning effort" value={stringOption(reasoning?.effort)} choices={['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']}
             onChange={effort => {
               const next = { ...reasoning, effort };
-              setOption('svg', { ...svg, reasoning: Object.values(next).some(field => field !== undefined) ? next : undefined });
+              setSvg({ ...svg, reasoning: Object.values(next).some(field => field !== undefined) ? next : undefined });
             }} />
-        </div>}
-      </section>
+        </div>
+      </section>}
+      {editing && <section className="chat-tool-card" aria-label={t('Markup')}>
+        <h3>{t('Markup')}</h3>
+        <ImageFileField label={t('Markup image')} value={value.markup} onChange={markup => setGeneral('markup', markup)} />
+      </section>}
     </>}
     {dallE3 && <section className="chat-tool-card"><h3>DALL·E 3</h3><div className="image-settings-fields">
       <ChoiceField label="Quality" value={value.dallE3Quality} choices={['standard', 'hd']} onChange={quality => setGeneral('dallE3Quality', quality)} />
@@ -139,11 +161,10 @@ function OpenAIImageFields(props: ProviderFormProps) {
   </>;
 }
 
-const providerForms: Partial<Record<string, { Form: ComponentType<ProviderFormProps>; nativeGeneral?: boolean;
-  applies?: (route: GatewayImageEndpoint, model: ChatModel) => boolean }>> = {
-  openai: { Form: OpenAIImageFields, nativeGeneral: true, applies: (route, { id }) => id !== 'openai/dall-e-2' && (route !== '/v1/images/edits' || canEditImage(route, id)) },
-  imagerouter: { Form: RouterImageFields },
-  openrouter: { Form: RouterImageFields },
+const providerForms: Record<string, ComponentType<ProviderFormProps>> = {
+  openai: OpenAIImageFields,
+  imagerouter: RouterImageFields,
+  openrouter: RouterImageFields,
 };
 
 export function ImageSettingsDialog({ initial, onSave, onClose, models, route, references }: {
@@ -157,19 +178,19 @@ export function ImageSettingsDialog({ initial, onSave, onClose, models, route, r
   const [selectedTab, setTab] = useState('general');
   const [value, setValue] = useState(initial);
   const vercel = route === '/api/images';
-  const sections = Object.entries(providerForms).flatMap(([provider, config]) => {
-    if (!config) return [];
-    const selected = models.filter(model => model.provider === provider && (!config.applies || config.applies(route, model)));
-    return selected.length ? [{ provider, ...config, models: selected }] : [];
+  const providerTabs = Object.entries(providerForms).flatMap(([provider, Form]) => {
+    if (!vercel && provider === 'openai') return [];
+    const selected = models.filter(model => model.provider === provider);
+    return selected.length ? [{ provider, Form, models: selected }] : [];
   });
-  const providerTabs = sections.filter(({ nativeGeneral }) => vercel || !nativeGeneral);
   const tab = providerTabs.some(({ provider }) => provider === selectedTab) ? selectedTab : 'general';
   const allowMask = route !== '/v1/images/generations';
   const maskIssue = value.mask && imageMaskIssue(route, models, references);
-  const showAspectRatio = vercel || models.some(({ provider }) => supportsImageAspectRatio(provider));
-  const showSeed = vercel || models.some(({ provider }) => supportsImageSeed(provider));
   const setGeneral = <K extends keyof ImagePreferences>(key: K, next: ImagePreferences[K]) => setValue(current => ({ ...current, [key]: next }));
-  const renderProvider = ({ provider, Form, models }: typeof sections[number]) => <Form key={provider} models={models} route={route}
+  const maskField = (allowMask || value.mask) && <ImageFileField label={t('Edit mask')} value={value.mask}
+    onChange={mask => setGeneral('mask', mask)} removeOnly={!allowMask} />;
+  const maskNotice = maskIssue && <p className="chat-attachment-notice" role="status">{t(maskIssue)}</p>;
+  const renderProvider = ({ provider, Form, models }: { provider: string; Form: ComponentType<ProviderFormProps>; models: readonly ChatModel[] }) => <Form key={provider} models={models} route={route}
     value={value} setGeneral={setGeneral} options={value.byProvider[provider] ?? {}}
     setOption={(key, next) => setValue(current => ({ ...current,
       byProvider: { ...current.byProvider, [provider]: { ...current.byProvider[provider], [key]: next } },
@@ -184,17 +205,13 @@ export function ImageSettingsDialog({ initial, onSave, onClose, models, route, r
         ['general', t('General')], ...providerTabs.map(({ provider }) => [provider, providerName(provider)] as const),
       ]} value={tab} onChange={setTab} />
       <div id={`${id}-general-panel`} role="tabpanel" aria-labelledby={`${id}-general-tab`} hidden={tab !== 'general'} onInvalid={() => setTab('general')}>
-        <section className="chat-tool-card">
-          <h3>{t(showAspectRatio ? 'Size and aspect ratio' : 'Image size')}</h3>
+        {vercel ? <><section className="chat-tool-card">
+          <h3>{t('Size and aspect ratio')}</h3>
           <div className="image-settings-fields">
-            <label><span>{t('Image size')}</span><input placeholder={t('Default')} list={`${id}-sizes`} value={value.size ?? ''}
-              pattern="auto|[1-9][0-9]{0,4}x[1-9][0-9]{0,4}" onChange={event => setGeneral('size', event.currentTarget.value || undefined)} /></label>
-            <datalist id={`${id}-sizes`}>{['auto', '512x512', '1024x1024', '1536x1024', '1024x1536', '2048x2048'].map(size => <option key={size} value={size} />)}</datalist>
-            {showAspectRatio && <>
-              <label><span>{t('Aspect ratio')}</span><input placeholder={t('Default')} list={`${id}-ratios`} value={value.aspectRatio ?? ''}
-                pattern="[1-9][0-9]{0,3}:[1-9][0-9]{0,3}" onChange={event => setGeneral('aspectRatio', event.currentTarget.value || undefined)} /></label>
-              <datalist id={`${id}-ratios`}>{['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'].map(ratio => <option key={ratio} value={ratio} />)}</datalist>
-            </>}
+            <ImageSizeField value={value.size} onChange={size => setGeneral('size', size)} />
+            <label><span>{t('Aspect ratio')}</span><input placeholder={t('Default')} list={`${id}-ratios`} value={value.aspectRatio ?? ''}
+              pattern="[1-9][0-9]{0,3}:[1-9][0-9]{0,3}" onChange={event => setGeneral('aspectRatio', event.currentTarget.value || undefined)} /></label>
+            <datalist id={`${id}-ratios`}>{['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'].map(ratio => <option key={ratio} value={ratio} />)}</datalist>
           </div>
         </section>
         <section className="chat-tool-card">
@@ -202,14 +219,19 @@ export function ImageSettingsDialog({ initial, onSave, onClose, models, route, r
           <div className="image-settings-fields">
             <NumberField label="Number of images" value={value.n} onChange={n => setGeneral('n', n)} min={1} max={maxImageCount} required />
             <NumberField label="Max images per call" value={value.maxImagesPerCall} onChange={count => setGeneral('maxImagesPerCall', count)} min={1} max={maxImageCount} />
-            {showSeed && <NumberField label="Seed" value={value.seed} onChange={seed => setGeneral('seed', seed)} min={-2147483648} max={2147483647} />}
           </div>
         </section>
-        {(allowMask || value.mask) && <section className="chat-tool-card">
-          <ImageFileField label={t('Edit mask')} value={value.mask} onChange={mask => setGeneral('mask', mask)} removeOnly={!allowMask} />
-          {maskIssue && <p className="chat-attachment-notice" role="status">{t(maskIssue)}</p>}
-        </section>}
-        {!vercel && sections.filter(({ nativeGeneral }) => nativeGeneral).map(renderProvider)}
+        <section className="chat-tool-card" aria-label={t('Other')}>
+          <h3>{t('Other')}</h3>
+          <div className="image-settings-fields">
+            <NumberField label="Seed" value={value.seed} onChange={seed => setGeneral('seed', seed)} min={-2147483648} max={2147483647} />
+            {maskField}
+          </div>
+          {maskNotice}
+        </section></> : <>
+          {renderProvider({ provider: 'openai', Form: OpenAIImageFields, models })}
+          {maskField && <section className="chat-tool-card">{maskField}{maskNotice}</section>}
+        </>}
       </div>
       {providerTabs.map(section => <div key={section.provider} id={`${id}-${section.provider}-panel`} role="tabpanel"
         aria-labelledby={`${id}-${section.provider}-tab`} hidden={tab !== section.provider} onInvalid={() => setTab(section.provider)}>

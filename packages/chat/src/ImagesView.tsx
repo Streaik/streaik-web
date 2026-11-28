@@ -51,6 +51,9 @@ export default function ImagesView({ gateway, scope, route, toolbar, catalog, lo
   const models = catalog?.filter(({ type }) => type === 'image') ?? [];
   const { selected } = resolveModelSelection(models, selectedIds, !!router, defaultAgentModelIds(agent));
   const references = draft.attachments.length;
+  const vercel = route === '/api/images';
+  const general = vercel ? settings : settings.native;
+  const count = general.n ?? 1;
   const edit = route === '/v1/images/edits' || references > 0 || !!settings.mask;
   const eligible = edit ? selected.filter(({ id }) => canEditImage(route, id)) : selected;
   const candidates = settings.mask ? eligible.filter(model => canMaskImage(route, model)) : eligible;
@@ -90,7 +93,7 @@ export default function ImagesView({ gateway, scope, route, toolbar, catalog, lo
         const { endpoint, ...agent } = decision;
         // Route on the prompt and request shape, not reference URLs or file contents.
         const input = JSON.stringify({ prompt, operation: edit ? 'edit' : 'generate', route, references, mask: !!settings.mask,
-          size: settings.size, aspectRatio: settings.aspectRatio, count: settings.n ?? 1 });
+          size: general.size, aspectRatio: vercel ? settings.aspectRatio : undefined, count });
         const choices = candidates.map(({ id, name, provider, description, tags }) => ({ value: id,
           description: JSON.stringify({ name, provider, description, tags, supportsEditing: canEditImage(route, id) }) }));
         const winner = await gateway.decideChoice(endpoint, { ...agent, input, choices }, controller.signal);
@@ -100,8 +103,7 @@ export default function ImagesView({ gateway, scope, route, toolbar, catalog, lo
         model = chosen;
         setPhase('generating');
       }
-      const count = settings.n ?? 1;
-      const batches = imageBatchSizes(model.id, count, settings.maxImagesPerCall ?? maxImageCount);
+      const batches = vercel ? imageBatchSizes(model.id, count, settings.maxImagesPerCall ?? maxImageCount) : [count];
       const request = { ...imageOptionsForModel(route, model, settings, edit), model: model.id, prompt, inputs: draft.attachments, mask: settings.mask };
       setPendingImages(count);
       // Process sequentially so providers with a one-image limit don't receive a burst of requests.

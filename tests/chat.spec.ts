@@ -3269,7 +3269,7 @@ const imagen = 'google/imagen-4';
 const gptImage1 = 'openai/gpt-image-1';
 const gptImage2 = 'openai/gpt-image-2';
 
-test('Images hides the Google settings tab and ignores saved Google formats on both image routes', async ({ page }) => {
+test('Images gives a Google model OpenAI General settings on v1, without restoring the obsolete Google format', async ({ page }) => {
   const gemini = 'google/gemini-2.5-flash-image';
   const requests: unknown[] = [];
   await page.addInitScript(() => {
@@ -3298,18 +3298,123 @@ test('Images hides the Google settings tab and ignores saved Google formats on b
     await page.getByRole('menuitemradio', { name: endpoint, exact: true }).click();
     await composer.getByRole('button', { name: 'Image settings' }).click();
     const settings = page.getByRole('dialog', { name: 'Image settings' });
-    await expect(settings.getByLabel('Aspect ratio')).toHaveValue('16:9');
     await expect(settings.getByRole('tab', { name: 'Google Gemini', exact: true })).toHaveCount(0);
-    await expect(settings.getByLabel('Output format')).toHaveCount(0);
-    await settings.getByRole('button', { name: 'Cancel', exact: true }).click();
+    if (index === 0) {
+      await expect(settings.getByLabel('Aspect ratio')).toHaveValue('16:9');
+      await expect(settings.getByLabel('Output format')).toHaveCount(0);
+    } else {
+      await expect(settings.getByLabel('Aspect ratio')).toHaveCount(0);
+      await expect(settings.getByLabel('Output format')).toHaveValue('');
+      await settings.getByLabel('Quality').selectOption('high');
+    }
+    await settings.getByRole('button', { name: 'Save image settings', exact: true }).click();
     await composer.getByRole('textbox', { name: 'Image prompt' }).fill('Draw a tree');
     await composer.getByRole('button', { name: 'Send', exact: true }).click();
     await expect(page.getByRole('img', { name: 'Generated image' })).toHaveCount(index + 1);
   }
   expect(requests).toEqual([
     { model: gemini, prompt: 'Draw a tree', n: 1, aspectRatio: '16:9' },
-    { model: gemini, prompt: 'Draw a tree', n: 1, aspect_ratio: '16:9' },
+    { model: gemini, prompt: 'Draw a tree', n: 1, quality: 'high' },
   ]);
+});
+
+test('Images merges the v1 General form and OpenRouter tab as a flat body for generation and edits', async ({ page }) => {
+  const routerModel = 'openrouter/vendor/image';
+  const requests: unknown[] = [];
+  await page.route('**/gateway/v1/models', route => route.fulfill({ json: { data: [
+    { id: routerModel, name: 'OpenRouter test model', type: 'image' }, { id: gptImage2, name: 'GPT Image 2', type: 'image' },
+  ] } }));
+  await page.route('**/gateway/v1/skills?*', route => route.fulfill({ json: { data: [], has_more: false } }));
+  await page.route(/\/gateway\/v1\/images\/(generations|edits)$/, route => {
+    const body = route.request().postDataJSON();
+    requests.push(body);
+    return route.fulfill({ json: { data: Array(body.n).fill({ b64_json: imagePng }) } });
+  });
+  await page.goto('/');
+  await showSettings(page); await addKey(page); await addKey(page, 'OpenRouter', 'test-open-router-key'); await closeSettings(page);
+  await page.getByRole('button', { name: 'Images', exact: true }).click();
+  await openRoute(page, 'Decisions');
+  await page.getByRole('menuitemradio', { name: 'Off', exact: true }).click();
+  await chooseModel(page, 'OpenRouter test model');
+  const selectRoute = async (endpoint: string) => {
+    await openRoute(page);
+    await page.getByRole('menuitemradio', { name: endpoint, exact: true }).click();
+  };
+  const composer = page.getByRole('form', { name: 'Image composer' });
+  const settingsButton = composer.getByRole('button', { name: 'Image settings' });
+  const settings = page.getByRole('dialog', { name: 'Image settings' });
+  const general = settings.getByRole('tabpanel', { name: 'General', exact: true });
+  const router = settings.getByRole('tabpanel', { name: 'OpenRouter', exact: true });
+  const save = settings.getByRole('button', { name: 'Save image settings', exact: true });
+
+  await selectRoute('/v1/images/generations');
+  await settingsButton.click();
+  await expect(settings.getByRole('tab', { name: 'General', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(general.getByLabel('Max images per call')).toHaveCount(0);
+  await expect(general.getByLabel('Seed')).toHaveCount(0);
+  await expect(general.getByLabel('Markup image')).toHaveCount(0);
+  await expect(general.getByRole('heading', { name: 'Safety', exact: true })).toHaveCount(0);
+  await general.getByLabel('Image size').fill('1536x864');
+  await general.getByLabel('Number of images').fill('2');
+  await general.getByLabel('Quality').selectOption('high');
+  await general.getByLabel('Output format').selectOption('webp');
+  await general.getByLabel('Output compression').fill('0');
+  await settings.getByRole('tab', { name: 'OpenRouter', exact: true }).click();
+  await router.getByLabel('Quality').selectOption('low');
+  await save.click();
+
+  await chooseModel(page, 'GPT Image 2');
+  await settingsButton.click();
+  await expect(settings.getByRole('tab')).toHaveCount(1);
+  await expect(general.getByLabel('Quality')).toHaveValue('high');
+  await settings.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await chooseModel(page, 'OpenRouter test model');
+
+  const send = async (prompt: string, count: number) => {
+    await composer.getByRole('textbox', { name: 'Image prompt' }).fill(prompt);
+    await composer.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(page.getByRole('img', { name: 'Generated image' })).toHaveCount(count);
+  };
+  await send('Draw a tree', 2);
+
+  await selectRoute('/v1/images/edits');
+  await settingsButton.click();
+  await expect(general.getByLabel('Image size')).toHaveValue('1536x864');
+  await expect(general.getByLabel('Edit mask')).toBeVisible();
+  await expect(general.getByRole('region', { name: 'Markup', exact: true }).getByLabel('Markup image')).toBeVisible();
+  await general.getByLabel('Input fidelity').selectOption('high');
+  await save.click();
+  await composer.getByRole('button', { name: 'Add attachments' }).click();
+  await composer.getByRole('menuitem', { name: 'Link', exact: true }).click();
+  const link = page.getByRole('dialog', { name: 'Link', exact: true });
+  const reference = 'https://example.org/reference.png';
+  await link.getByLabel('URL', { exact: true }).fill(reference);
+  await link.getByRole('button', { name: 'Add', exact: true }).click();
+  await send('Make it brighter', 4);
+
+  const merged = { model: routerModel, n: 2, size: '1536x864', quality: 'low', output_format: 'webp', output_compression: 0 };
+  expect(requests).toEqual([
+    { ...merged, prompt: 'Draw a tree' },
+    { ...merged, prompt: 'Make it brighter', input_fidelity: 'high', images: [{ image_url: reference }] },
+  ]);
+
+  await selectRoute('/api/images');
+  await settingsButton.click();
+  await expect(general.getByLabel('Image size')).toHaveValue('');
+  await expect(general.getByLabel('Number of images')).toHaveValue('1');
+  await expect(general.getByLabel('Max images per call')).toBeVisible();
+  const other = general.getByRole('region', { name: 'Other', exact: true });
+  await expect(other.getByLabel('Seed')).toBeVisible();
+  await expect(other.getByLabel('Edit mask')).toBeVisible();
+  await expect(general.getByLabel('Output format')).toHaveCount(0);
+  await expect(settings.getByRole('tab', { name: 'OpenRouter', exact: true })).toBeVisible();
+  await settings.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await chooseModel(page, 'GPT Image 2');
+  await settingsButton.click();
+  await settings.getByRole('tab', { name: 'OpenAI', exact: true }).click();
+  const openai = settings.getByRole('tabpanel', { name: 'OpenAI', exact: true });
+  await expect(openai.getByRole('region', { name: 'Markup', exact: true }).getByLabel('Markup image')).toBeVisible();
+  await expect(openai.getByRole('heading', { name: 'Safety', exact: true })).toHaveCount(0);
 });
 
 async function prepareImageDecisions(page: Page, useDirectChat = false) {
@@ -3406,7 +3511,9 @@ test('Images routes checked models through the shared agent and generates with t
   await openRoute(page);
   await page.getByRole('menuitemradio', { name: '/v1/images/generations', exact: true }).click();
   await composer.getByRole('button', { name: 'Image settings' }).click();
-  await expect(imageSettings.getByRole('tabpanel', { name: 'General', exact: true }).getByLabel('Quality')).toHaveValue('high');
+  const general = imageSettings.getByRole('tabpanel', { name: 'General', exact: true });
+  await expect(general.getByLabel('Quality')).toHaveValue('high');
+  await general.getByLabel('Number of images').fill('5');
   await expect(imageSettings.getByRole('tab', { name: 'OpenAI', exact: true })).toHaveCount(0);
   await expect(imageSettings.getByLabel('Edit mask')).toHaveCount(0);
   await expect(imageSettings.getByRole('tab', { name: 'Google Gemini', exact: true })).toHaveCount(0);
@@ -3414,7 +3521,7 @@ test('Images routes checked models through the shared agent and generates with t
   await expect(imageSettings.getByRole('tabpanel', { name: 'ImageRouter', exact: true }).getByLabel('Quality')).toHaveValue('low');
   await imageSettings.getByRole('tab', { name: 'OpenRouter', exact: true }).click();
   await expect(imageSettings.getByRole('tabpanel', { name: 'OpenRouter', exact: true }).getByLabel('Quality')).toHaveValue('medium');
-  await imageSettings.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await imageSettings.getByRole('button', { name: 'Save image settings', exact: true }).click();
   await toggleRouters();
   await send('A blue bird', 5);
   await openRoute(page, 'Decisions');

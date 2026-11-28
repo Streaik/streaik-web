@@ -29,7 +29,7 @@ export { createAgentBackend } from './agentBackend.ts';
 export type { AgentBackend, AgentBackendCredentials, HostedAgent, HostedAgentSelection } from './agentBackend.ts';
 export { gatewayDecisionEndpoints } from './decisionChoice.ts';
 export type { DecisionChoice, DecisionChoiceResult, GatewayDecisionEndpoint } from './decisionChoice.ts';
-export { gatewayImageEndpoints, imageBatchSizes, imageSource, isImageEndpoint, maxImageCount } from './images.ts';
+export { gatewayImageEndpoints, imageBatchSizes, imageSource, isImageEndpoint, maxImageCount, maxNativeImageCount } from './images.ts';
 export type { GatewayImageEndpoint, ImageFileInput, ImageInput, ImageJsonObject, ImageOptions, ImageProviderOptions, ImageRequest, ImageResponse } from './images.ts';
 export type { VideoAsset, VideoRequest, VideoStatus } from './videos.ts';
 export { gatewaySpeechEndpoints, isSpeechEndpoint, speechFormats } from './speech.ts';
