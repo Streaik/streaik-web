@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { exportSkillZip } from '../packages/chat/src/skillBundles';
 import { faviconEndpoint, iconResponse } from './icon-fixtures';
 import { selectKeyProvider } from './provider-key-picker';
@@ -131,6 +132,52 @@ test('agent mode prefers hosted API Chat and offers four hosted routes', async (
   await expect(page.getByRole('button', { name: 'Model', exact: true })).toBeVisible();
   await chatMode(page, 'Agent').click();
   await expect(agentPicker(page)).toHaveText('ChatAgent');
+});
+
+test('the default OpenAIAgent discovers Luna Decisions on Gateway API Chat', async ({ page }) => {
+  const name = 'OpenAIAgent';
+  const sol = 'openai/gpt-6.1-sol';
+  const terra = 'openai/gpt-6.1-terra';
+  const configured = [sol, terra, 'openai/gpt-5.6-luna', 'openai/chat-latest', model];
+  // The current Gateway chat picker excludes OpenAI's chat-latest alias.
+  const choices = configured.filter(id => id !== 'openai/chat-latest');
+  // The web checkout can run independently. A combined checkout can also exercise the shipped definition verbatim.
+  const definitionPath = process.env.STREAIK_OPENAI_AGENT_DEFINITION;
+  const agent = definitionPath ? JSON.parse(readFileSync(definitionPath, 'utf8')) : {
+    name, description: 'Has access to all OpenAI capabilities.', instructions: 'You are OpenAIAgent.',
+    models: configured.map(id => ({ id })),
+  };
+  await page.route('**/test-agents/v1/models', route => route.fulfill({ json: { data: [{ id: name, name }] } }));
+  await page.route(`**/test-agents/v1/models/${name}`, route => route.fulfill({ json: { id: name, agent } }));
+  await page.route('**/test-agents/api/chat', route => route.abort());
+  const sequence: string[] = [];
+  await page.route('**/gateway/api/decisions', route => {
+    sequence.push('decisions');
+    const body = route.request().postDataJSON();
+    expect(body.model).toBe(model);
+    expect(Object.keys(body.questions.chat_model.criteria)).toEqual(choices);
+    expect(JSON.parse(body.state).conversation.at(-1).text).toBe('bro');
+    return route.fulfill({ json: { answers: { chat_model: { type: 'choice', choice: terra } } } });
+  });
+  await page.route('**/gateway/api/chat', route => {
+    const body = route.request().postDataJSON();
+    if (!body.messages.some(({ role, parts }: { role: string; parts: { text?: string }[] }) =>
+      role === 'user' && parts.some(part => part.text === 'bro'))) return route.fulfill(stream('Welcome'));
+    sequence.push('chat');
+    expect(body.model).toBe(terra);
+    expect(body.agent).toBeUndefined();
+    return route.fulfill(stream('OpenAI routed reply'));
+  });
+  await start(page, [...configured.map(id => ({ id, type: 'language' })), { id: model, type: 'decision' }]);
+  await agentPicker(page).click();
+  await page.getByRole('option', { name, exact: true }).click();
+  await routeGroup(page, 'Gateway');
+  await page.getByRole('menuitemradio', { name: '/api/chat', exact: true }).click();
+  await routeGroup(page, 'Decisions');
+  await page.getByRole('menuitemradio', { name: '/api/decisions', exact: true }).click();
+  await send(page, 'bro');
+  await expect(page.getByText('OpenAI routed reply', { exact: true })).toBeVisible();
+  expect(sequence).toEqual(['decisions', 'chat']);
 });
 
 test('agent mode falls back to browser-run Gateway when the configured agent backend is offline', async ({ page }) => {
