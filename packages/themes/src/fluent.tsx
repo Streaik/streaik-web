@@ -9,6 +9,7 @@ import {
 } from '@fluentui/react-icons';
 import { FluentProvider } from '@fluentui/react-provider';
 import { Select } from '@fluentui/react-select';
+import { Switch } from '@fluentui/react-switch';
 import { Textarea } from '@fluentui/react-textarea';
 import { teamsDarkTheme, teamsLightTheme, webDarkTheme, webLightTheme } from '@fluentui/react-theme';
 import { Tooltip } from '@fluentui/react-tooltip';
@@ -139,6 +140,9 @@ export const fluent: ThemeAdapter = {
   },
   Button: ({ scheme, preferences, variant, ...props }) => <Frame env={{ scheme, preferences }}>
     <Button {...props} appearance={variant === 'subtle' ? 'subtle' : variant ?? 'secondary'} />
+  </Frame>,
+  Switch: ({ scheme, preferences, onCheckedChange, ...props }) => <Frame env={{ scheme, preferences }}>
+    <Switch {...props} onChange={(_event, data) => onCheckedChange?.(data.checked)} />
   </Frame>,
   Select: FluentSelect,
   Textarea: ({ scheme, preferences, className, ...props }) => <Frame env={{ scheme, preferences }} block>

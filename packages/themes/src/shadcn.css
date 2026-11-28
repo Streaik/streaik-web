@@ -64,3 +64,20 @@
   --warning: #92570d;
 }
 [data-scheme=dark] .shadcn-json-viewer { --success: #86efac; --accent: #93c5fd; --warning: #fcd34d; }
+.shadcn-switch {
+  display: inline-flex; align-items: center; inline-size: 2rem; block-size: 1.125rem; padding: 0 .125rem;
+  border: 1px solid var(--muted); border-radius: 999px; background: var(--soft); cursor: pointer;
+}
+.shadcn-switch-thumb {
+  display: block; flex: none; inline-size: .75rem; block-size: .75rem;
+  border-radius: 50%; background: var(--muted); pointer-events: none;
+}
+.shadcn-switch[data-state=checked] { justify-content: flex-end; background: var(--action); border-color: var(--action); }
+.shadcn-switch[data-state=checked] .shadcn-switch-thumb { background: var(--on-action); }
+.shadcn-switch:disabled { opacity: .55; cursor: not-allowed; }
+@media (forced-colors: active) {
+  .shadcn-switch { forced-color-adjust: none; background: ButtonFace; border-color: ButtonText; }
+  .shadcn-switch-thumb { background: ButtonText; }
+  .shadcn-switch[data-state=checked] { background: Highlight; border-color: Highlight; }
+  .shadcn-switch[data-state=checked] .shadcn-switch-thumb { background: HighlightText; }
+}

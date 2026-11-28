@@ -6,6 +6,20 @@ export type ThemeEnv = { scheme: Exclude<ColorMode, 'system'>; preferences: Pref
 export type JsonViewerProps = { value: object; label?: string };
 export type ChartRendererProps = { spec: ChartSpec } & ThemeEnv;
 export type ButtonProps = ComponentPropsWithRef<'button'> & { variant?: 'primary' | 'subtle' };
+export type SwitchProps = {
+  label: string;
+  checked: boolean;
+  onCheckedChange?: (checked: boolean) => void;
+  disabled?: boolean;
+  hideLabel?: boolean;
+  className?: string;
+  title?: string;
+  'aria-describedby'?: string;
+};
+type SwitchControlProps = Pick<SwitchProps, 'checked' | 'disabled' | 'onCheckedChange' | 'aria-describedby'> & {
+  id: string;
+  'aria-label'?: string;
+};
 export type TooltipProps = { content?: string; children: ReactElement<{ title?: string }>; visualOnly?: boolean; side?: 'top' | 'right' | 'bottom' | 'left' };
 export type TabItem<T extends string = string> = { value: T; id: string; panelId: string; label: string; icon?: ReactElement };
 // Callers own the panels so switching themes doesn't remount forms or other panel content.
@@ -45,6 +59,7 @@ export type ThemeAdapter = {
   JsonViewer?: ComponentType<JsonViewerProps & ThemeEnv>;
   Chart: ComponentType<ChartRendererProps>;
   Button: ComponentType<ButtonProps & ThemeEnv>;
+  Switch: ComponentType<SwitchControlProps & ThemeEnv>;
   Tooltip: ComponentType<TooltipProps & ThemeEnv>;
   TabList: ComponentType<TabListProps & ThemeEnv>;
   Select: ComponentType<SelectProps & ThemeEnv>;

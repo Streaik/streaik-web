@@ -28,6 +28,8 @@ export const html: ThemeAdapter = {
   icons: lucideIcons,
   style: ({ preferences }) => ({ '--streaik-chat-text-size': preferences.textSize === 'larger' ? '1.25rem' : preferences.textSize === 'large' ? '1.125rem' : '1rem' } as CSSProperties),
   Button: ({ scheme: _scheme, preferences: _preferences, variant, ...props }) => <button {...props} data-html-variant={variant} />,
+  Switch: ({ scheme: _scheme, preferences: _preferences, onCheckedChange, ...props }) =>
+    <input {...props} type="checkbox" onChange={event => onCheckedChange?.(event.currentTarget.checked)} />,
   Select: ({ label, id, className, value, options, onValueChange, disabled, placeholder }) => <select id={id} aria-label={label} className={className}
     value={value} disabled={disabled} onChange={(event) => onValueChange(event.currentTarget.value)}>
     {value === '' && <option value="" disabled>{placeholder}</option>}

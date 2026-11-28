@@ -1,4 +1,5 @@
 import * as RadixSelect from '@radix-ui/react-select';
+import * as RadixSwitch from '@radix-ui/react-switch';
 import * as RadixTabs from '@radix-ui/react-tabs';
 import * as RadixTooltip from '@radix-ui/react-tooltip';
 import { Check, ChevronDown, ChevronUp } from 'lucide-react';
@@ -89,6 +90,9 @@ export const shadcn: ThemeAdapter = {
     } as CSSProperties;
   },
   Button: ({ scheme: _scheme, preferences: _preferences, variant, className, ...props }) => <button {...props} className={`${className} shadcn-button`} data-variant={variant} />,
+  Switch: ({ scheme: _scheme, preferences: _preferences, ...props }) => <RadixSwitch.Root {...props} className="shadcn-switch">
+    <RadixSwitch.Thumb className="shadcn-switch-thumb" />
+  </RadixSwitch.Root>,
   Select,
   Textarea: ({ scheme: _scheme, preferences: _preferences, className, ...props }) => <textarea {...props} className={`${className} shadcn-textarea`} />,
   Settings: ({ preferences, onChange, translate }) => <>

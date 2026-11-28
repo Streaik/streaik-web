@@ -18,6 +18,9 @@
 .streaik-theme :is(.ui-button, .ui-select, .ui-textarea, .ui-input) { min-width: 0; }
 .streaik-theme .ui-button { padding: .35rem .65rem; min-height: 2.25rem; cursor: pointer; }
 .streaik-theme .ui-button:disabled { opacity: .55; cursor: default; }
+.ui-switch { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+.ui-switch > :first-child { flex: none; margin: 0; }
+.ui-switch > label { min-width: 0; overflow-wrap: anywhere; }
 .streaik-theme select.ui-select { max-width: 100%; min-height: 2.25rem; padding-inline: .55rem 1.4rem; }
 .streaik-theme textarea.ui-textarea { display: block; width: 100%; min-height: 4rem; max-height: 35dvh; padding: .6rem; resize: vertical; }
 .streaik-theme .ui-input { width: 100%; min-height: 2rem; padding-inline: .55rem; font: inherit; }
